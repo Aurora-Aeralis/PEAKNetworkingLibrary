@@ -277,7 +277,22 @@ namespace NetworkingLibrary.Services
         public void JoinLobby(ulong lobbySteamId64) => SteamMatchmaking.JoinLobby(new CSteamID(lobbySteamId64));
         /// <summary>
         /// </summary>
-        public void LeaveLobby() => OnLobbyLeftInternal();
+        public void LeaveLobby()
+        {
+            if (Lobby != CSteamID.Nil)
+            {
+                try
+                {
+                    SteamMatchmaking.LeaveLobby(Lobby);
+                }
+                catch (Exception ex)
+                {
+                    Net.Logger.LogError($"LeaveLobby failed for lobby {Lobby}: {ex}");
+                }
+            }
+
+            OnLobbyLeftInternal();
+        }
         /// <summary>
         /// </summary>
         public void InviteToLobby(ulong steamId64) => SteamMatchmaking.InviteUserToLobby(Lobby, new CSteamID(steamId64));
@@ -341,10 +356,19 @@ namespace NetworkingLibrary.Services
 
         internal void OnLobbyLeftInternal()
         {
-            RefreshPlayerList();
+            players = Array.Empty<CSteamID>();
             lastLobbyData.Clear();
             lastPlayerData.Clear();
+            Lobby = CSteamID.Nil;
             InLobby = false;
+
+            lock (unackedLock) unacked.Clear();
+            lock (lastSeenSequence) lastSeenSequence.Clear();
+            lock (rateLimiters) rateLimiters.Clear();
+            lock (fragmentLock) fragmentBuffers.Clear();
+            handshakeStates.Clear();
+            perPeerSymmetricKey.Clear();
+
             LobbyLeft?.Invoke();
         }
 

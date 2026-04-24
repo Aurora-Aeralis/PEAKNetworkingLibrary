@@ -186,13 +186,14 @@ namespace NetworkingLibrary.Services
         public IDisposable RegisterNetworkType(Type type, uint modId, int mask = 0)
         {
             Net.Logger.LogWarning("This feature is currently not setup in the offline system");
-            return new Token(() => DeregisterNetworkObject(null!, modId, mask));
+            return new Token(() => { });
         }
 
         /// <summary>
         /// </summary>
         public void DeregisterNetworkObject(object instance, uint modId, int mask = 0)
         {
+            if (instance == null) throw new ArgumentNullException(nameof(instance));
             if (!rpcs.TryGetValue(modId, out var methods)) return;
             foreach (var method in instance.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
             {

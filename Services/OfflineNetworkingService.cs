@@ -73,7 +73,8 @@ namespace NetworkingLibrary.Services
 
         public ulong[] GetLobbyMemberSteamIds()
         {
-            return Array.Empty<ulong>();
+            if (!InLobby) return Array.Empty<ulong>();
+            return perPlayerData.Keys.OrderBy(steamId => steamId).ToArray();
         }
 
         /// <summary>
@@ -123,6 +124,7 @@ namespace NetworkingLibrary.Services
         {
             InLobby = true;
             HostSteamId64 = LocalSteamId;
+            perPlayerData.Clear();
             perPlayerData[LocalSteamId] = new Dictionary<string, string>();
             LobbyCreated?.Invoke();
             LobbyEntered?.Invoke();
@@ -135,9 +137,11 @@ namespace NetworkingLibrary.Services
         {
             InLobby = true;
             HostSteamId64 = lobbySteamId64;
-            if (!perPlayerData.ContainsKey(LocalSteamId)) perPlayerData[LocalSteamId] = new Dictionary<string, string>();
+            perPlayerData.Clear();
+            perPlayerData[LocalSteamId] = new Dictionary<string, string>();
             LobbyEntered?.Invoke();
             PlayerEntered?.Invoke(LocalSteamId);
+            offlineIsHost = false;
         }
 
         /// <summary>
@@ -145,6 +149,7 @@ namespace NetworkingLibrary.Services
         public void LeaveLobby()
         {
             InLobby = false;
+            perPlayerData.Clear();
             LobbyLeft?.Invoke();
             offlineIsHost = false;
         }
@@ -153,6 +158,8 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void InviteToLobby(ulong steamId64)
         {
+            if (!InLobby) return;
+            if (!perPlayerData.ContainsKey(steamId64)) perPlayerData[steamId64] = new Dictionary<string, string>();
             PlayerEntered?.Invoke(steamId64);
         }
 

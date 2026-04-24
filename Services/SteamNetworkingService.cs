@@ -186,6 +186,7 @@ namespace NetworkingLibrary.Services
         const byte HMAC_FLAG = 0x4;
         const byte SIGN_FLAG = 0x8;
         const byte ACK_FLAG = 0x10;
+        const int FRAME_HEADER_SIZE = 25; // flags[1] + msgId[8] + seq[8] + total[4] + index[4]
 
         RSACryptoServiceProvider? LocalRsa;
 
@@ -752,6 +753,7 @@ namespace NetworkingLibrary.Services
             if (compress) flags |= COMPRESSED_FLAG;
             if (globalHmac != null) flags |= HMAC_FLAG;
             if (modSigners.ContainsKey(modId)) flags |= SIGN_FLAG;
+            if (reliable == ReliableType.Reliable) flags |= ACK_FLAG;
 
             ulong seq;
             lock (outgoingSequencePerMod)
@@ -764,6 +766,9 @@ namespace NetworkingLibrary.Services
             ulong msgId = NextMessageId();
 
             using var ms = new MemoryStream();
+            // Frame layout:
+            // [flags:1][msgId:8][seq:8][total:4][index:4][payload...][optional signature len:2 + signature...][optional global mac:32]
+            // Canonical MAC scope is every byte from flags through payload/signature (everything except the trailing MAC that is being appended).
             ms.WriteByte(flags);
             ms.Write(BitConverter.GetBytes(msgId), 0, 8);
             ms.Write(BitConverter.GetBytes(seq), 0, 8);
@@ -793,8 +798,6 @@ namespace NetworkingLibrary.Services
                 headerAndPayload = ms3.ToArray();
             }
 
-            if (reliable == ReliableType.Reliable) headerAndPayload[0] = (byte)(headerAndPayload[0] | ACK_FLAG);
-
             return headerAndPayload;
         }
 
@@ -802,13 +805,8 @@ namespace NetworkingLibrary.Services
         {
             if (perPeerSymmetricKey.TryGetValue(target.m_SteamID, out var sym))
             {
-                using var h = new HMACSHA256(sym);
-                var mac = h.ComputeHash(framed);
-                using var ms = new MemoryStream();
-                ms.Write(framed, 0, framed.Length);
-                ms.Write(mac, 0, mac.Length);
-                framed = ms.ToArray();
                 framed[0] = (byte)(framed[0] | HMAC_FLAG);
+                framed = AppendFrameMac(framed, sym);
             }
 
             bool requestAck = (framed[0] & ACK_FLAG) != 0;
@@ -998,19 +996,28 @@ namespace NetworkingLibrary.Services
         void ProcessIncomingFrame(byte[] frame, CSteamID sender)
         {
             //Net.Logger.LogInfo($"ProcessIncomingFrame: from={sender} bytes={frame.Length}");
+            // Expected frame layout mirrors BuildFramedBytesWithMeta.
+            // MAC verification always runs against canonical scope [flags..payload/signature], before any payload mutation/stripping.
+
+            if (frame.Length < FRAME_HEADER_SIZE) return;
+            int flags = frame[0];
+            bool compressed = (flags & COMPRESSED_FLAG) != 0;
+            bool hasHmac = (flags & HMAC_FLAG) != 0;
+            bool hasSign = (flags & SIGN_FLAG) != 0;
+            bool requiresAck = (flags & ACK_FLAG) != 0;
+
+            if (hasHmac && !TryVerifyAndStripFrameMacs(frame, sender.m_SteamID, out frame))
+            {
+                return;
+            }
 
             using var msHeader = new MemoryStream(frame);
-            int flags = msHeader.ReadByte();
+            flags = msHeader.ReadByte();
             if (flags < 0)
             {
                 //Net.Logger.LogWarning("ProcessIncomingFrame: flags read < 0");
                 return;
             }
-
-            bool compressed = (flags & COMPRESSED_FLAG) != 0;
-            bool hasHmac = (flags & HMAC_FLAG) != 0;
-            bool hasSign = (flags & SIGN_FLAG) != 0;
-            bool requiresAck = (flags & ACK_FLAG) != 0;
 
             try
             {
@@ -1084,48 +1091,6 @@ namespace NetworkingLibrary.Services
 
                 byte[] payloadWithOptionalMacAndSig = assembledPayload;
                 byte[] payloadToProcess = payloadWithOptionalMacAndSig;
-
-                if (hasHmac)
-                {
-                    if (payloadWithOptionalMacAndSig.Length < 32)
-                    {
-                        //Net.Logger.LogWarning("ProcessIncomingFrame: Invalid HMAC payload (too short)");
-                        return;
-                    }
-
-                    int dataLen = payloadWithOptionalMacAndSig.Length - 32;
-                    var dataOnlyForMacCheck = new byte[dataLen];
-                    Array.Copy(payloadWithOptionalMacAndSig, 0, dataOnlyForMacCheck, 0, dataLen);
-                    var receivedMac = new byte[32];
-                    Array.Copy(payloadWithOptionalMacAndSig, dataLen, receivedMac, 0, 32);
-
-                    if (perPeerSymmetricKey.TryGetValue(sender.m_SteamID, out var peerSym))
-                    {
-                        using var h = new HMACSHA256(peerSym);
-                        var computed = h.ComputeHash(dataOnlyForMacCheck);
-                        if (!computed.SequenceEqual(receivedMac))
-                        {
-                            //Net.Logger.LogWarning("ProcessIncomingFrame: Per-peer HMAC mismatch; dropping");
-                            return;
-                        }
-                        payloadToProcess = dataOnlyForMacCheck;
-                    }
-                    else if (globalHmac != null)
-                    {
-                        var computed = globalHmac!.ComputeHash(dataOnlyForMacCheck);
-                        if (!computed.SequenceEqual(receivedMac))
-                        {
-                            //Net.Logger.LogWarning("ProcessIncomingFrame: Global HMAC mismatch; dropping");
-                            return;
-                        }
-                        payloadToProcess = dataOnlyForMacCheck;
-                    }
-                    else
-                    {
-                        //Net.Logger.LogWarning("ProcessIncomingFrame: HMAC flag present but no key available; dropping");
-                        return;
-                    }
-                }
 
                 if (hasSign)
                 {
@@ -1253,6 +1218,57 @@ namespace NetworkingLibrary.Services
                 Net.Logger.LogError($"ProcessIncomingFrame top-level exception: {ex}");
             }
         }
+
+        byte[] AppendFrameMac(byte[] frameWithoutTrailingMac, byte[] key)
+        {
+            using var h = new HMACSHA256(key);
+            var mac = h.ComputeHash(frameWithoutTrailingMac);
+            using var ms = new MemoryStream(frameWithoutTrailingMac.Length + mac.Length);
+            ms.Write(frameWithoutTrailingMac, 0, frameWithoutTrailingMac.Length);
+            ms.Write(mac, 0, mac.Length);
+            return ms.ToArray();
+        }
+
+        bool VerifyAndStripSingleFrameMac(byte[] framedWithMac, byte[] key, out byte[] strippedFrame)
+        {
+            strippedFrame = Array.Empty<byte>();
+            if (framedWithMac.Length < FRAME_HEADER_SIZE + 32) return false;
+            int dataLen = framedWithMac.Length - 32;
+            var frameScope = new byte[dataLen];
+            Buffer.BlockCopy(framedWithMac, 0, frameScope, 0, dataLen);
+            using var h = new HMACSHA256(key);
+            var computed = h.ComputeHash(frameScope);
+            for (int i = 0; i < 32; i++)
+            {
+                if (computed[i] != framedWithMac[dataLen + i]) return false;
+            }
+            strippedFrame = frameScope;
+            return true;
+        }
+
+        bool TryVerifyAndStripFrameMacs(byte[] frameWithMacs, ulong senderSteamId, out byte[] verifiedFrame)
+        {
+            verifiedFrame = Array.Empty<byte>();
+
+            bool hasPeer = perPeerSymmetricKey.TryGetValue(senderSteamId, out var peerSym);
+            bool hasGlobal = globalSharedSecret != null;
+            if (!hasPeer && !hasGlobal) return false;
+
+            var current = frameWithMacs;
+            if (hasPeer)
+            {
+                if (!VerifyAndStripSingleFrameMac(current, peerSym!, out current)) return false;
+            }
+
+            if (hasGlobal)
+            {
+                if (!VerifyAndStripSingleFrameMac(current, globalSharedSecret!, out current)) return false;
+            }
+
+            verifiedFrame = current;
+            return true;
+        }
+
         private static ulong ReadU64(Stream s) { var b = new byte[8]; s.Read(b, 0, 8); return BitConverter.ToUInt64(b, 0); }
         private static int ReadI32(Stream s) { var b = new byte[4]; s.Read(b, 0, 4); return BitConverter.ToInt32(b, 0); }
 

@@ -1188,7 +1188,7 @@ namespace NetworkingLibrary.Services
                 {
                     //Net.Logger.LogInfo($"ProcessIncomingFrame: internal message {message.MethodName}");
                     HandleInternalMessage(message, sender, msgId, seq, requiresAck);
-                    if (requiresAck)
+                    if (requiresAck && message.MethodName != "NETWORK_INTERNAL_ACK")
                     {
                         //Net.Logger.LogInfo($"ProcessIncomingFrame: sending ACK for msgId={msgId} to {sender}");
                         SendAckToSender(sender, msgId);
@@ -1238,14 +1238,13 @@ namespace NetworkingLibrary.Services
             //Net.Logger.LogInfo($"SendAckToSender: to={sender} ackId={msgId}");
             var ackMsg = new Message(0u, "NETWORK_INTERNAL_ACK", 0);
             ackMsg.WriteULong(msgId);
-            var framed = BuildFramedBytesWithMeta(ackMsg, 0, ReliableType.Reliable);
-            SendBytes(framed, sender, ReliableType.Reliable);
-
-            var key = (sender.m_SteamID, msgId);
-            lock (unackedLock)
+            var framed = BuildFramedBytesWithMeta(ackMsg, 0, ReliableType.UnreliableNoDelay);
+            if ((framed[0] & ACK_FLAG) != 0)
             {
-                if (unacked.ContainsKey(key)) unacked.Remove(key);
+                Net.Logger.LogWarning($"ACK guard: outbound NETWORK_INTERNAL_ACK for msgId={msgId} unexpectedly had ACK_FLAG set; clearing flag.");
+                framed[0] = (byte)(framed[0] & ~ACK_FLAG);
             }
+            SendBytes(framed, sender, ReliableType.UnreliableNoDelay);
         }
 
         void HandleInternalMessage(Message message, CSteamID sender, ulong msgId, ulong seq, bool requiresAck)

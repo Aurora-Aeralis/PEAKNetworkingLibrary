@@ -781,8 +781,8 @@ namespace NetworkingLibrary.Services
         {
             if (perPeerSymmetricKey.TryGetValue(target.m_SteamID, out var sym))
             {
-                framed = AppendFrameMac(framed, sym);
                 framed[0] = (byte)(framed[0] | HMAC_FLAG);
+                framed = AppendFrameMac(framed, sym);
             }
 
             bool requestAck = (framed[0] & ACK_FLAG) != 0;

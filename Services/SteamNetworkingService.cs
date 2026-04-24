@@ -1353,12 +1353,7 @@ namespace NetworkingLibrary.Services
             }
 
             if (!invoked)
-            {
-                Net.Logger.LogWarning($"No handler matched for {message.ModID}:{message.MethodName}");
-            }
-
-            if (!invoked)
-                Net.Logger.LogWarning($"No handler matched for {message.ModID}:{message.MethodName}");
+                Net.Logger.LogWarning($"No handler matched for {message.ModID}:{message.MethodName} mask={message.Mask}");
         }
 
         object CreateRpcInfoInstance(Type infoType, CSteamID sender)

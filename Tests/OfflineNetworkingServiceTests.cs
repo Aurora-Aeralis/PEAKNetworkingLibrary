@@ -1,8 +1,11 @@
 using NetworkingLibrary.Modules;
 using NetworkingLibrary.Services;
 using System;
+using System.Collections.Concurrent;
 using System.Reflection;
 using System.Security.Cryptography;
+using System.Threading;
+using System.Threading.Tasks;
 using Xunit;
 
 namespace NetworkingLibrary.Tests;
@@ -651,5 +654,61 @@ public class OfflineNetworkingServiceTests
 
         var ex = Record.Exception(service.Shutdown);
         Assert.Null(ex);
+    }
+
+    [Fact]
+    public void Concurrent_RegisterDeregister_AndDispatch_DoesNotThrow()
+    {
+        var service = new OfflineNetworkingService();
+        var receiver = new RpcReceiver();
+        var exceptions = new ConcurrentQueue<Exception>();
+
+        service.Initialize();
+        service.CreateLobby();
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        var token = cts.Token;
+        var registrationTask = Task.Run(() =>
+        {
+            var iteration = 0;
+            while (!token.IsCancellationRequested)
+            {
+                IDisposable? registration = null;
+                try
+                {
+                    registration = service.RegisterNetworkObject(receiver, TestModId);
+                    if ((iteration & 1) == 0) service.DeregisterNetworkObject(receiver, TestModId);
+                }
+                catch (Exception ex)
+                {
+                    exceptions.Enqueue(ex);
+                }
+                finally
+                {
+                    registration?.Dispose();
+                    iteration++;
+                }
+            }
+        }, token);
+
+        var dispatchTask = Task.Run(() =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    service.RPC(TestModId, "OnPing", ReliableType.Reliable, 42);
+                }
+                catch (Exception ex)
+                {
+                    exceptions.Enqueue(ex);
+                }
+            }
+        }, token);
+
+        Task.WaitAll(registrationTask, dispatchTask);
+
+        if (exceptions.TryPeek(out var ex))
+            Assert.Fail($"Encountered exception during concurrent RPC churn: {ex}");
     }
 }

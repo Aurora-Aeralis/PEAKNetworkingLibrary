@@ -5,6 +5,7 @@ using System;
 using System.Collections;
 using System.Reflection;
 using System.Security.Cryptography;
+using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -52,6 +53,17 @@ public class SteamNetworkingServiceLifecycleTests
         {
             LastValue = -1;
             CallCount = 0;
+        }
+    }
+
+    sealed class ConcurrentRpcReceiver
+    {
+        public int CallCount;
+
+        [CustomRPC]
+        void OnConcurrentPing(int value)
+        {
+            Interlocked.Increment(ref CallCount);
         }
     }
 
@@ -322,6 +334,75 @@ public class SteamNetworkingServiceLifecycleTests
 
         Assert.Equal(new ulong[] { 111UL, 333UL }, ids);
         Assert.DoesNotContain(0UL, ids);
+    }
+
+    [Fact]
+    public async Task DispatchIncoming_AndBuildMessage_HandleConcurrentRpcRegistrationChanges()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new ConcurrentRpcReceiver();
+        using var baseline = service.RegisterNetworkObject(receiver, TestModId, mask: 0);
+
+        var dispatchMethod = typeof(SteamNetworkingService).GetMethod("DispatchIncoming", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var buildMessageMethod = typeof(SteamNetworkingService).GetMethod("BuildMessage", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        Exception? dispatchError = null;
+        Exception? buildError = null;
+        var gate = new ManualResetEventSlim(false);
+        var stop = new CancellationTokenSource();
+
+        var toggleTask = Task.Run(() =>
+        {
+            gate.Wait();
+            while (!stop.IsCancellationRequested)
+            {
+                var token = service.RegisterNetworkObject(new ConcurrentRpcReceiver(), TestModId, mask: 0);
+                token.Dispose();
+            }
+        });
+
+        var dispatchTask = Task.Run(() =>
+        {
+            gate.Wait();
+            try
+            {
+                for (var i = 0; i < 250; i++)
+                {
+                    var message = new Message(TestModId, "OnConcurrentPing", 0);
+                    message.WriteObject(typeof(int), i);
+                    dispatchMethod.Invoke(service, new object[] { message, new CSteamID(123UL) });
+                }
+            }
+            catch (Exception ex)
+            {
+                dispatchError = ex;
+            }
+        });
+
+        var buildTask = Task.Run(() =>
+        {
+            gate.Wait();
+            try
+            {
+                for (var i = 0; i < 250; i++)
+                {
+                    _ = buildMessageMethod.Invoke(service, new object?[] { TestModId, "OnConcurrentPing", 0, new object?[] { i }, null });
+                }
+            }
+            catch (Exception ex)
+            {
+                buildError = ex;
+            }
+        });
+
+        gate.Set();
+        await Task.WhenAll(dispatchTask, buildTask);
+        stop.Cancel();
+        await toggleTask;
+
+        Assert.Null(dispatchError);
+        Assert.Null(buildError);
+        Assert.True(receiver.CallCount > 0);
     }
 
     static void SetInLobby(SteamNetworkingService service, bool value)

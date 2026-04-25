@@ -1,5 +1,7 @@
 using System;
+using System.Collections.ObjectModel;
 using System.Collections.Generic;
+using System.Linq;
 using NetworkingLibrary.Modules;
 using Xunit;
 
@@ -50,6 +52,18 @@ public class MessageNullContractTests
         var read = Roundtrip(write);
         Assert.Null(read.ReadObject(typeof(List<int>)));
         Assert.Equal(new List<int> { 4, 5, 6 }, (List<int>)read.ReadObject(typeof(List<int>)));
+    }
+
+    [Fact]
+    public void Collection_RoundTrips_Null_And_Value()
+    {
+        var write = NewMessage();
+        write.WriteObject(typeof(Collection<int>), null!);
+        write.WriteObject(typeof(Collection<int>), new Collection<int> { 13, 21, 34 });
+
+        var read = Roundtrip(write);
+        Assert.Null(read.ReadObject(typeof(Collection<int>)));
+        Assert.Equal(new[] { 13, 21, 34 }, ((Collection<int>)read.ReadObject(typeof(Collection<int>))).ToArray());
     }
 
     [Fact]

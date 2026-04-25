@@ -304,6 +304,46 @@ namespace NetworkingLibrary.Modules
             return len;
         }
 
+        private static bool IsConcreteConstructible(Type type)
+        {
+            if (type.IsAbstract || type.IsInterface) return false;
+            if (type.IsValueType) return true;
+            return type.GetConstructor(Type.EmptyTypes) != null;
+        }
+
+        private static Type? TryGetGenericListElementType(Type type)
+        {
+            if (type.IsInterface && type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IList<>))
+            {
+                return type.GetGenericArguments()[0];
+            }
+
+            foreach (var i in type.GetInterfaces())
+            {
+                if (i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IList<>))
+                {
+                    return i.GetGenericArguments()[0];
+                }
+            }
+
+            return null;
+        }
+
+        private static bool TryCopyItemsToListTarget(object target, Type elementType, IList source)
+        {
+            if (target is IList targetList)
+            {
+                for (int i = 0; i < source.Count; i++) targetList.Add(source[i]);
+                return true;
+            }
+
+            var addMethod = target.GetType().GetMethod("Add", new[] { elementType });
+            if (addMethod == null) return false;
+
+            for (int i = 0; i < source.Count; i++) addMethod.Invoke(target, new[] { source[i] });
+            return true;
+        }
+
         public byte ReadByte()
         {
             EnsureReadable(1, nameof(ReadByte));
@@ -430,6 +470,24 @@ namespace NetworkingLibrary.Modules
                         list.Add(item);
                     }
                     return list;
+                }
+
+                var elemType = TryGetGenericListElementType(type);
+                bool isListLike = typeof(IList).IsAssignableFrom(type) || type.GetInterface(typeof(IList<>).Name) != null;
+                if (elemType != null && isListLike)
+                {
+                    int len = ReadCollectionLength(type.FullName ?? "List");
+                    var tempListType = typeof(List<>).MakeGenericType(elemType);
+                    var tempList = (IList)Activator.CreateInstance(tempListType)!;
+                    for (int i = 0; i < len; i++)
+                    {
+                        tempList.Add(ReadObject(elemType));
+                    }
+
+                    if (!IsConcreteConstructible(type)) return tempList;
+                    var target = Activator.CreateInstance(type)!;
+                    if (!TryCopyItemsToListTarget(target, elemType, tempList)) return tempList;
+                    return target;
                 }
             }
 

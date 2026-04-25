@@ -266,7 +266,8 @@ namespace NetworkingLibrary.Services
             Lobby = CSteamID.Nil;
             InLobby = false;
             handshakeStates.Clear();
-            perPeerSymmetricKey.Clear();
+            ClearPerPeerSymmetricKeys();
+            ClearGlobalSharedSecret();
             globalHmac?.Dispose();
             globalHmac = null;
             LocalRsa?.Dispose();
@@ -375,9 +376,29 @@ namespace NetworkingLibrary.Services
             lock (rateLimiters) rateLimiters.Clear();
             lock (fragmentLock) fragmentBuffers.Clear();
             handshakeStates.Clear();
-            perPeerSymmetricKey.Clear();
+            ClearPerPeerSymmetricKeys();
+            ClearGlobalSharedSecret();
+            globalHmac?.Dispose();
+            globalHmac = null;
 
             LobbyLeft?.Invoke();
+        }
+
+        void ClearPerPeerSymmetricKeys()
+        {
+            foreach (var key in perPeerSymmetricKey.Values)
+            {
+                if (key == null) continue;
+                CryptographicOperations.ZeroMemory(key);
+            }
+            perPeerSymmetricKey.Clear();
+        }
+
+        void ClearGlobalSharedSecret()
+        {
+            if (globalSharedSecret == null) return;
+            CryptographicOperations.ZeroMemory(globalSharedSecret);
+            globalSharedSecret = null;
         }
 
         void ClearOutboundState()
@@ -1646,7 +1667,8 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void SetSharedSecret(byte[]? secret)
         {
-            if (secret == null) { globalSharedSecret = null; globalHmac?.Dispose(); globalHmac = null; return; }
+            ClearGlobalSharedSecret();
+            if (secret == null) { globalHmac?.Dispose(); globalHmac = null; return; }
             globalSharedSecret = (byte[])secret.Clone();
             globalHmac?.Dispose();
             globalHmac = new HMACSHA256(globalSharedSecret);

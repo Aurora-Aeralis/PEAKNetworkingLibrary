@@ -32,7 +32,7 @@ namespace NetworkingLibrary.Services
                 if (currentTime - mainThreadDispatcherLastErrorLogTime >= ErrorLogCooldownSeconds)
                 {
                     mainThreadDispatcherLastErrorLogTime = currentTime;
-                    Net.Logger?.LogError($"NetworkingPollerDebug Main-thread dispatcher error: {ex}");
+                    Net.Logger?.LogError($"Main-thread dispatcher error: {ex}");
                     mainThreadDispatcherSuppressedFault = false;
                 }
                 else
@@ -44,8 +44,8 @@ namespace NetworkingLibrary.Services
             if (dispatcherSucceeded && mainThreadDispatcherHadFault)
             {
                 Net.Logger?.LogInfo(mainThreadDispatcherSuppressedFault
-                    ? "NetworkingPollerDebug Main-thread dispatcher recovered after repeated failures."
-                    : "NetworkingPollerDebug Main-thread dispatcher recovered.");
+                    ? "Main-thread dispatcher recovered after repeated failures."
+                    : "Main-thread dispatcher recovered.");
                 mainThreadDispatcherHadFault = false;
                 mainThreadDispatcherSuppressedFault = false;
             }
@@ -64,7 +64,7 @@ namespace NetworkingLibrary.Services
                 if (currentTime - pollReceiveLastErrorLogTime >= ErrorLogCooldownSeconds)
                 {
                     pollReceiveLastErrorLogTime = currentTime;
-                    Net.Logger?.LogError($"NetworkingPollerDebug PollReceive error: {ex}");
+                    Net.Logger?.LogError($"PollReceive error: {ex}");
                     pollReceiveSuppressedFault = false;
                 }
                 else
@@ -76,27 +76,16 @@ namespace NetworkingLibrary.Services
             if (pollReceiveSucceeded && pollReceiveHadFault)
             {
                 Net.Logger?.LogInfo(pollReceiveSuppressedFault
-                    ? "NetworkingPollerDebug PollReceive recovered after repeated failures."
-                    : "NetworkingPollerDebug PollReceive recovered.");
+                    ? "PollReceive recovered after repeated failures."
+                    : "PollReceive recovered.");
                 pollReceiveHadFault = false;
                 pollReceiveSuppressedFault = false;
             }
-            /*
-            if (Time.unscaledTime - lastLog > 1f)
-            {
-                lastLog = Time.unscaledTime;
-                Net.Logger.LogInfo("NetworkingPollerDebug: PollReceive tick");
-            }*/
-        }
-        //private float lastLog = 0f;
-        void Awake()
-        {
-            DontDestroyOnLoad(this.gameObject);
         }
 
-        void OnDestroy()
+        void Awake()
         {
-            // nothing
+            DontDestroyOnLoad(gameObject);
         }
     }
 }

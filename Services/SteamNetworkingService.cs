@@ -3,6 +3,7 @@ using NetworkingLibrary.Modules;
 using pworld.Scripts;
 using Steamworks;
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -967,6 +968,27 @@ namespace NetworkingLibrary.Services
             }
         }
 
+        static void WriteU16LE(Stream stream, ushort value)
+        {
+            Span<byte> bytes = stackalloc byte[2];
+            BinaryPrimitives.WriteUInt16LittleEndian(bytes, value);
+            stream.Write(bytes);
+        }
+
+        static void WriteI32LE(Stream stream, int value)
+        {
+            Span<byte> bytes = stackalloc byte[4];
+            BinaryPrimitives.WriteInt32LittleEndian(bytes, value);
+            stream.Write(bytes);
+        }
+
+        static void WriteU64LE(Stream stream, ulong value)
+        {
+            Span<byte> bytes = stackalloc byte[8];
+            BinaryPrimitives.WriteUInt64LittleEndian(bytes, value);
+            stream.Write(bytes);
+        }
+
         byte[] BuildFramedBytesWithMeta(Message msg, uint modId, ReliableType reliable)
         {
             var payload = msg.ToArray();
@@ -1003,10 +1025,10 @@ namespace NetworkingLibrary.Services
                 // [flags:1][msgId:8][seq:8][total:4][index:4][payload...][optional signature len:2 + signature...][optional global mac:32]
                 // Canonical MAC scope is every byte from flags through payload/signature (everything except the trailing MAC that is being appended).
                 ms.WriteByte(flags);
-                ms.Write(BitConverter.GetBytes(msgId), 0, 8);
-                ms.Write(BitConverter.GetBytes(seq), 0, 8);
-                ms.Write(BitConverter.GetBytes(1), 0, 4);
-                ms.Write(BitConverter.GetBytes(0), 0, 4);
+                WriteU64LE(ms, msgId);
+                WriteU64LE(ms, seq);
+                WriteI32LE(ms, 1);
+                WriteI32LE(ms, 0);
                 ms.Write(payload, 0, payload.Length);
 
                 byte[] headerAndPayload = ms.ToArray();
@@ -1017,7 +1039,7 @@ namespace NetworkingLibrary.Services
                     using var ms2 = new MemoryStream();
                     ms2.Write(headerAndPayload, 0, headerAndPayload.Length);
                     var len = (ushort)sig.Length;
-                    ms2.Write(BitConverter.GetBytes(len), 0, 2);
+                    WriteU16LE(ms2, len);
                     ms2.Write(sig, 0, sig.Length);
                     headerAndPayload = ms2.ToArray();
                 }
@@ -1066,7 +1088,7 @@ namespace NetworkingLibrary.Services
 
             if (requestAck)
             {
-                var msgId = BitConverter.ToUInt64(framed, 1);
+                var msgId = BinaryPrimitives.ReadUInt64LittleEndian(framed.AsSpan(1, 8));
                 var key = (target.m_SteamID, msgId);
                 lock (unackedLock)
                 {
@@ -1356,7 +1378,7 @@ namespace NetworkingLibrary.Services
                         return;
                     }
 
-                    uint modId = BitConverter.ToUInt32(payloadToProcess, 1);
+                    uint modId = BinaryPrimitives.ReadUInt32LittleEndian(payloadToProcess.AsSpan(1, 4));
                     if (!modPublicKeys.TryGetValue(modId, out var rsaParams))
                     {
                         //Net.Logger.LogWarning($"ProcessIncomingFrame: No public key registered for mod {modId}; dropping signed msg");
@@ -1377,7 +1399,7 @@ namespace NetworkingLibrary.Services
                         return;
                     }
 
-                    ushort declaredLen = BitConverter.ToUInt16(payloadToProcess, sigSectionStart);
+                    ushort declaredLen = BinaryPrimitives.ReadUInt16LittleEndian(payloadToProcess.AsSpan(sigSectionStart, 2));
                     if (declaredLen != expectedSigLen)
                     {
                         //Net.Logger.LogWarning($"ProcessIncomingFrame: Signature length mismatch (declared={declaredLen}, expected={expectedSigLen}); dropping");
@@ -1558,14 +1580,14 @@ namespace NetworkingLibrary.Services
         {
             var b = new byte[8];
             ReadExact(s, b, b.Length);
-            return BitConverter.ToUInt64(b, 0);
+            return BinaryPrimitives.ReadUInt64LittleEndian(b);
         }
 
         private static int ReadI32(Stream s)
         {
             var b = new byte[4];
             ReadExact(s, b, b.Length);
-            return BitConverter.ToInt32(b, 0);
+            return BinaryPrimitives.ReadInt32LittleEndian(b);
         }
 
 
@@ -2263,7 +2285,7 @@ namespace NetworkingLibrary.Services
 
         enum Priority { High = 0, Normal = 1, Low = 2 }
         class QueuedSend { public byte[] Framed = null!; public CSteamID Target; public ReliableType Reliable; public DateTime Enqueued; }
-        class UnackedMessage { public byte[] Framed = null!; public CSteamID Target; public ReliableType Reliable; public DateTime LastSent; public int Attempts; public ulong msgId => BitConverter.ToUInt64(Framed, 1); }
+        class UnackedMessage { public byte[] Framed = null!; public CSteamID Target; public ReliableType Reliable; public DateTime LastSent; public int Attempts; public ulong msgId => BinaryPrimitives.ReadUInt64LittleEndian(Framed.AsSpan(1, 8)); }
         class MessageHandler { public object Target = null!; public MethodInfo Method = null!; public ParameterInfo[] Parameters = null!; public bool TakesInfo; public int Mask; }
 
         static byte[] HmacSha256RawStatic(byte[] key, byte[] payload) { using var h = new HMACSHA256(key); return h.ComputeHash(payload); }

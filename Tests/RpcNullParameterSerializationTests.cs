@@ -130,6 +130,12 @@ public class RpcNullParameterSerializationTests
         public CSteamID Sender;
     }
 
+    sealed class ParamlessRpcInfoWithSteamIdentityProperties
+    {
+        public ulong SteamId64 { get; set; }
+        public string SteamIdString { get; set; } = string.Empty;
+    }
+
     [Fact]
     public void OfflineBuildMessage_AllowsNull_ForReferenceParameters_FromHandlerSignature()
     {
@@ -313,6 +319,33 @@ public class RpcNullParameterSerializationTests
 
         var info = Assert.IsType<ParamlessRpcInfoWithCSteamIDSender>(obj);
         Assert.Equal(sender, info.Sender);
+    }
+
+    [Fact]
+    public void SteamCreateRpcInfoInstance_ParamlessFallback_AssignsSteamIdentityProperties()
+    {
+        var service = new SteamNetworkingService();
+        var sender = new CSteamID(321UL);
+
+        var obj = SteamCreateRpcInfoInstance.Invoke(service, new object?[] { typeof(ParamlessRpcInfoWithSteamIdentityProperties), sender });
+
+        var info = Assert.IsType<ParamlessRpcInfoWithSteamIdentityProperties>(obj);
+        Assert.Equal(sender.m_SteamID, info.SteamId64);
+        Assert.Equal(sender.ToString(), info.SteamIdString);
+    }
+
+    [Fact]
+    public void OfflineCreateRpcInfoInstance_ParamlessFallback_AssignsSteamIdentityProperties()
+    {
+        var service = new OfflineNetworkingService();
+        var createRpcInfo = typeof(OfflineNetworkingService).GetMethod("CreateRpcInfoInstance", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var senderSteamId = 654UL;
+
+        var obj = createRpcInfo.Invoke(service, new object?[] { typeof(ParamlessRpcInfoWithSteamIdentityProperties), senderSteamId });
+
+        var info = Assert.IsType<ParamlessRpcInfoWithSteamIdentityProperties>(obj);
+        Assert.Equal(senderSteamId, info.SteamId64);
+        Assert.Equal(senderSteamId.ToString(), info.SteamIdString);
     }
 
     [Fact]

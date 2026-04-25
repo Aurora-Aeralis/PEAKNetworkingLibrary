@@ -279,6 +279,9 @@ namespace NetworkingLibrary.Services
             LocalRsa = null;
 
             IsInitialized = false;
+            lock (lastSeenSequence) lastSeenSequence.Clear();
+            lock (rateLimiters) rateLimiters.Clear();
+            lock (outgoingSequencePerMod) outgoingSequencePerMod.Clear();
             lock (fragmentLock) fragmentBuffers.Clear();
             Net.Logger.LogInfo("SteamNetworkingService shutdown");
         }

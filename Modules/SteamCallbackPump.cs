@@ -7,8 +7,6 @@ namespace NetworkingLibrary.Modules
 {
     public class SteamCallbackPump : MonoBehaviour
     {
-        const string PumpObjectName = "SteamCallbackPump";
-
         public static bool CallbackPumpingEnabled { get; private set; }
         internal static Func<bool> IsSteamReady = ProbeSteamReady;
 
@@ -28,7 +26,6 @@ namespace NetworkingLibrary.Modules
             {
                 var pump = pumps[i];
                 if (pump == null || pump.gameObject == null) continue;
-                if (!string.Equals(pump.gameObject.name, PumpObjectName, StringComparison.Ordinal)) continue;
 
                 if (Application.isPlaying) UnityEngine.Object.Destroy(pump.gameObject);
                 else UnityEngine.Object.DestroyImmediate(pump.gameObject);

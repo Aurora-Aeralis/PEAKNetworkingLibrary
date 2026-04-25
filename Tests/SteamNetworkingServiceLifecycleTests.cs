@@ -15,11 +15,13 @@ public class SteamNetworkingServiceLifecycleTests
 
     sealed class RpcReceiver
     {
+        public int LastValue { get; private set; } = -1;
         public int CallCount { get; private set; }
 
         [CustomRPC]
         void OnPing(int value)
         {
+            LastValue = value;
             CallCount++;
         }
     }
@@ -118,6 +120,25 @@ public class SteamNetworkingServiceLifecycleTests
         Assert.Equal(3, receiver.CallCount);
     }
 
+    [Fact]
+    public void Shutdown_PreservesRpcRegistrationsAcrossReinitializeAndLobbyEnter()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new RpcReceiver();
+
+        service.Initialize();
+        service.RegisterNetworkObject(receiver, TestModId);
+        service.Shutdown();
+
+        service.Initialize();
+        InvokeLobbyEnter(service, 9001UL);
+        DispatchPing(service, 42);
+
+        Assert.True(service.InLobby);
+        Assert.Equal(42, receiver.LastValue);
+        Assert.Equal(1, receiver.CallCount);
+    }
+
     static void SetInLobby(SteamNetworkingService service, bool value)
     {
         typeof(SteamNetworkingService).GetField("<InLobby>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(service, value);
@@ -183,6 +204,11 @@ public class SteamNetworkingServiceLifecycleTests
         var method = typeof(SteamNetworkingService).GetMethod(methodName, flags, null, types, null)
             ?? typeof(SteamNetworkingService).GetMethod(methodName, flags)!;
         return method.Invoke(service, args);
+    }
+
+    static void InvokeLobbyEnter(SteamNetworkingService service, ulong lobbyId)
+    {
+        InvokeNonPublic(service, "OnLobbyEnter", new LobbyEnter_t { m_ulSteamIDLobby = lobbyId });
     }
 
     static void DispatchPing(SteamNetworkingService service, int value)

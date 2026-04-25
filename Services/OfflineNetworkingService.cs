@@ -143,6 +143,7 @@ namespace NetworkingLibrary.Services
             offlineIsHost = false;
             HostSteamId64 = LocalSteamId;
             lobbyData.Clear();
+            perPlayerData.Clear();
             rpcs.Clear();
             perPeerSymmetricKey.Clear();
             globalHmac?.Dispose(); globalHmac = null;

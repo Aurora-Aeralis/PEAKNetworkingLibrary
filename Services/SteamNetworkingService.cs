@@ -1753,7 +1753,13 @@ namespace NetworkingLibrary.Services
                         {
                             int expectedCount = h.TakesInfo ? h.Parameters.Length - 1 : h.Parameters.Length;
                             return expectedCount == parameters.Length && h.Mask == mask;
-                        }) ?? handlers[0];
+                        });
+                    }
+
+                    if (chosen == null)
+                    {
+                        Net.Logger.LogError($"No RPC overload matched method '{methodName}' for mask {mask} and parameter list.");
+                        return null;
                     }
 
                     msg = new Message(modId, methodName, mask, BuildOverloadKey(chosen));

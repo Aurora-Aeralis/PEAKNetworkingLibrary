@@ -75,6 +75,14 @@ public class RpcNullParameterSerializationTests
         }
     }
 
+    sealed class MaskedReceiver
+    {
+        public int Calls;
+
+        [CustomRPC]
+        void Shared(string value) => Calls++;
+    }
+
     [Fact]
     public void OfflineBuildMessage_AllowsNull_ForReferenceParameters_FromHandlerSignature()
     {
@@ -168,6 +176,19 @@ public class RpcNullParameterSerializationTests
     }
 
     [Fact]
+    public void OfflineBuildMessage_ReturnsNull_WhenOnlyDifferentMaskHandlersExist()
+    {
+        var service = new OfflineNetworkingService();
+        var receiver = new MaskedReceiver();
+        using var token = service.RegisterNetworkObject(receiver, TestModId, mask: 1);
+
+        var msg = (Message?)OfflineBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 2, new object?[] { "hi" }, null });
+
+        Assert.Null(msg);
+        Assert.Equal(0, receiver.Calls);
+    }
+
+    [Fact]
     public void SteamBuildMessage_AllowsNull_ForReferenceParameters_FromHandlerSignature()
     {
         var service = new SteamNetworkingService();
@@ -191,6 +212,19 @@ public class RpcNullParameterSerializationTests
         var read = new Message(msg!.ToArray());
         Assert.Null(read.ReadObject(typeof(string)));
         Assert.Null(read.ReadObject(typeof(byte[])));
+    }
+
+    [Fact]
+    public void SteamBuildMessage_ReturnsNull_WhenOnlyDifferentMaskHandlersExist()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new MaskedReceiver();
+        using var token = service.RegisterNetworkObject(receiver, TestModId, mask: 1);
+
+        var msg = (Message?)SteamBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 2, new object?[] { "hi" }, null });
+
+        Assert.Null(msg);
+        Assert.Equal(0, receiver.Calls);
     }
 
     [Fact]

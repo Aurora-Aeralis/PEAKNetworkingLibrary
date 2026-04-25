@@ -1467,41 +1467,44 @@ namespace NetworkingLibrary.Services
                 return;
             }
 
-            bool invoked = false;
-            var candidates = handlers.Where(h => h.Mask == message.Mask).ToList();
-            foreach (var handler in candidates)
+            MessageHandler? chosenHandler = null;
+            object[]? chosenParams = null;
+            MessageHandler? fallbackHandler = null;
+            object[]? fallbackParams = null;
+
+            IEnumerable<MessageHandler> dispatchOrder = handlers.Where(h => h.Mask == message.Mask);
+            if (!string.IsNullOrEmpty(message.OverloadKey))
             {
-                var msgCopy = new Message(message.ToArray());
-                try
-                {
-                    var paramInfos = handler.Parameters;
-                    int paramCount = handler.TakesInfo ? paramInfos.Length - 1 : paramInfos.Length;
-                    var callParams = new object[paramInfos.Length];
-
-                    for (int i = 0; i < paramCount; i++)
-                    {
-                        var t = paramInfos[i].ParameterType;
-                        callParams[i] = msgCopy.ReadObject(t);
-                    }
-
-                    if (handler.TakesInfo)
-                    {
-                        var infoType = paramInfos[paramInfos.Length - 1].ParameterType;
-                        callParams[paramInfos.Length - 1] = CreateRpcInfoInstance(infoType, sender);
-                    }
-
-                    handler.Method.Invoke(handler.Target, callParams);
-                    invoked = true;
-                    break;
-                }
-                catch
-                {
-                    continue;
-                }
+                var keyed = dispatchOrder.Where(h => BuildOverloadKey(h) == message.OverloadKey).ToArray();
+                if (keyed.Length > 0) dispatchOrder = keyed.Concat(dispatchOrder.Where(h => BuildOverloadKey(h) != message.OverloadKey));
             }
 
-            if (!invoked)
+            foreach (var handler in dispatchOrder)
+            {
+                if (!TryDeserializeForHandler(message, handler, sender, out var callParams, out int unread))
+                    continue;
+
+                if (unread == 0)
+                {
+                    chosenHandler = handler;
+                    chosenParams = callParams;
+                    break;
+                }
+
+                fallbackHandler ??= handler;
+                fallbackParams ??= callParams;
+            }
+
+            chosenHandler ??= fallbackHandler;
+            chosenParams ??= fallbackParams;
+            if (chosenHandler == null || chosenParams == null)
+            {
                 Net.Logger.LogWarning($"No handler matched for {message.ModID}:{message.MethodName} mask={message.Mask}");
+                return;
+            }
+
+            try { chosenHandler.Method.Invoke(chosenHandler.Target, chosenParams); }
+            catch (Exception ex) { Net.Logger.LogError($"Invoke RPC error: {ex}"); }
         }
 
         object CreateRpcInfoInstance(Type infoType, CSteamID sender)
@@ -1689,33 +1692,46 @@ namespace NetworkingLibrary.Services
             if (!rpcs.TryGetValue(message.ModID, out var methods)) return;
             if (!methods.TryGetValue(message.MethodName, out var handlers)) return;
 
-            foreach (var handler in handlers)
+            MessageHandler? chosenHandler = null;
+            object[]? chosenParams = null;
+            MessageHandler? fallbackHandler = null;
+            object[]? fallbackParams = null;
+
+            IEnumerable<MessageHandler> dispatchOrder = handlers.Where(h => h.Mask == message.Mask);
+            if (!string.IsNullOrEmpty(message.OverloadKey))
             {
-                if (handler.Mask != message.Mask) continue;
-                var paramInfos = handler.Parameters;
-                int paramCount = handler.TakesInfo ? paramInfos.Length - 1 : paramInfos.Length;
-                var callParams = new object[paramInfos.Length];
+                var keyed = dispatchOrder.Where(h => BuildOverloadKey(h) == message.OverloadKey).ToArray();
+                if (keyed.Length > 0) dispatchOrder = keyed.Concat(dispatchOrder.Where(h => BuildOverloadKey(h) != message.OverloadKey));
+            }
 
-                for (int i = 0; i < paramCount; i++)
-                    callParams[i] = message.ReadObject(paramInfos[i].ParameterType);
+            foreach (var handler in dispatchOrder)
+            {
+                if (!TryDeserializeForHandler(message, handler, localSender, out var callParams, out int unread))
+                    continue;
 
-                if (handler.TakesInfo)
+                if (unread == 0)
                 {
-                    var infoType = paramInfos[paramInfos.Length - 1].ParameterType;
-                    callParams[paramInfos.Length - 1] = CreateRpcInfoInstance(infoType, localSender);
+                    chosenHandler = handler;
+                    chosenParams = callParams;
+                    break;
                 }
 
-                try { handler.Method.Invoke(handler.Target, callParams); }
-                catch (Exception ex) { Net.Logger.LogError($"Local invoke error: {ex}"); }
+                fallbackHandler ??= handler;
+                fallbackParams ??= callParams;
             }
+
+            chosenHandler ??= fallbackHandler;
+            chosenParams ??= fallbackParams;
+            if (chosenHandler == null || chosenParams == null) return;
+
+            try { chosenHandler.Method.Invoke(chosenHandler.Target, chosenParams); }
+            catch (Exception ex) { Net.Logger.LogError($"Local invoke error: {ex}"); }
         }
 
         Message? BuildMessage(uint modId, string methodName, int mask, object?[] parameters, Type[]? parameterTypes)
         {
             try
             {
-                var msg = new Message(modId, methodName, mask);
-
                 if (rpcs.TryGetValue(modId, out var methods) && methods.TryGetValue(methodName, out var handlers) && handlers.Count > 0)
                 {
                     MessageHandler chosen = null!;
@@ -1750,6 +1766,7 @@ namespace NetworkingLibrary.Services
                         }) ?? handlers[0];
                     }
 
+                    var msg = new Message(modId, methodName, mask, BuildOverloadKey(chosen));
                     var expectedParams = chosen.Parameters;
                     int expectedCountFinal = chosen.TakesInfo ? expectedParams.Length - 1 : expectedParams.Length;
                     for (int i = 0; i < expectedCountFinal; i++)
@@ -1767,9 +1784,16 @@ namespace NetworkingLibrary.Services
                             throw new Exception($"Parameter {i} type mismatch: expected {t}, got {p.GetType()}");
                         msg.WriteObject(t, p);
                     }
+                    if (msg.Length() > Message.MaxLogicalSize)
+                    {
+                        Net.Logger.LogError("Message exceeds maximum allowed overall size.");
+                        return null;
+                    }
+                    return msg;
                 }
                 else
                 {
+                    var msg = new Message(modId, methodName, mask);
                     if (parameterTypes != null)
                     {
                         if (parameterTypes.Length != parameters.Length)
@@ -1798,21 +1822,56 @@ namespace NetworkingLibrary.Services
                             msg.WriteObject(p.GetType(), p);
                         }
                     }
+                    if (msg.Length() > Message.MaxLogicalSize)
+                    {
+                        Net.Logger.LogError("Message exceeds maximum allowed overall size.");
+                        return null;
+                    }
+                    return msg;
                 }
-
-                if (msg.Length() > Message.MaxLogicalSize)
-                {
-                    Net.Logger.LogError("Message exceeds maximum allowed overall size.");
-                    return null;
-                }
-
-                return msg;
             }
             catch (Exception ex)
             {
                 Net.Logger.LogError($"BuildMessage failed: {ex}");
                 return null;
             }
+        }
+
+        bool TryDeserializeForHandler(Message source, MessageHandler handler, CSteamID sender, out object[] callParams, out int unread)
+        {
+            callParams = null!;
+            unread = int.MaxValue;
+            try
+            {
+                var msgCopy = new Message(source.ToArray());
+                var paramInfos = handler.Parameters;
+                int paramCount = handler.TakesInfo ? paramInfos.Length - 1 : paramInfos.Length;
+                callParams = new object[paramInfos.Length];
+
+                for (int i = 0; i < paramCount; i++)
+                    callParams[i] = msgCopy.ReadObject(paramInfos[i].ParameterType);
+
+                if (handler.TakesInfo)
+                {
+                    var infoType = paramInfos[paramInfos.Length - 1].ParameterType;
+                    callParams[paramInfos.Length - 1] = CreateRpcInfoInstance(infoType, sender);
+                }
+
+                unread = msgCopy.UnreadLength();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        static string BuildOverloadKey(MessageHandler handler)
+        {
+            var parameterInfos = handler.Parameters;
+            int parameterCount = handler.TakesInfo ? parameterInfos.Length - 1 : parameterInfos.Length;
+            if (parameterCount <= 0) return string.Empty;
+            return string.Join("|", parameterInfos.Take(parameterCount).Select(p => p.ParameterType.AssemblyQualifiedName ?? p.ParameterType.FullName ?? p.ParameterType.Name));
         }
 
         SlidingWindowRateLimiter GetOrCreateRateLimiter(ulong steam64)

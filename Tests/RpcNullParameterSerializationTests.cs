@@ -225,6 +225,36 @@ public class RpcNullParameterSerializationTests
     }
 
     [Fact]
+    public void SteamBuildMessage_UsesOverloadIdentity_ForWireCompatibleOverloads()
+    {
+        var service = new SteamNetworkingService();
+        using var token = service.RegisterNetworkObject(new ByteBoolDispatchReceiver(), TestModId);
+
+        var msg = (Message?)SteamBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { true }, null });
+
+        Assert.NotNull(msg);
+        Assert.False(string.IsNullOrEmpty(msg!.OverloadKey));
+    }
+
+    [Fact]
+    public void SteamRPCTarget_SelfTarget_UsesOverloadIdentity_ForWireCompatibleOverloads()
+    {
+        var service = new SteamNetworkingService();
+        SetInLobby(service, true);
+        var receiver = new ByteBoolDispatchReceiver();
+        using var token = service.RegisterNetworkObject(receiver, TestModId);
+
+        service.RPCTarget(TestModId, "Shared", SteamUser.GetSteamID(), ReliableType.Reliable, true);
+
+        Assert.Equal("bool", receiver.LastOverload);
+        Assert.True(receiver.LastBoolValue);
+        Assert.Null(receiver.LastByteValue);
+        AssertQueueCount(service, "normalQueue", 0);
+        AssertQueueCount(service, "lowQueue", 0);
+        AssertQueueCount(service, "highQueue", 0);
+    }
+
+    [Fact]
     public void SteamRPCTarget_RemoteTarget_StillUsesQueueTransport()
     {
         var service = new SteamNetworkingService();

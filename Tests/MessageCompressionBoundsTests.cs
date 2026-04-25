@@ -90,4 +90,22 @@ public class MessageCompressionBoundsTests
         Assert.Equal(compressedFromMessage, compressedFromPayload);
         Assert.Equal(payload, Message.DecompressPayload(compressedFromPayload));
     }
+
+    [Fact]
+    public void Decompressed_Payload_Can_Be_Reused_With_SetBytes_And_Recompressed()
+    {
+        using var source = new Message(21u, "compress", 2);
+        source.WriteString("repeat");
+        source.WriteInt(31415);
+        source.WriteBytes(new byte[] { 2, 4, 6, 8 });
+
+        var compressed = source.CompressPayload();
+        var decompressed = Message.DecompressPayload(compressed);
+
+        using var rebuilt = new Message(0u, "placeholder", 0);
+        rebuilt.SetBytes(decompressed);
+
+        Assert.Equal(source.ToArray(), rebuilt.ToArray());
+        Assert.Equal(compressed, rebuilt.CompressPayload());
+    }
 }

@@ -2093,7 +2093,7 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void RegisterModSigner(uint modId, Func<byte[], byte[]> signerDelegate)
         {
-            ArgumentNullException.ThrowIfNull(signerDelegate);
+            if (signerDelegate == null) throw new ArgumentNullException(nameof(signerDelegate));
             lock (cryptoStateLock)
             {
                 modSigners[modId] = signerDelegate;

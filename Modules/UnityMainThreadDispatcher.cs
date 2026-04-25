@@ -128,7 +128,7 @@ namespace NetworkingLibrary.Modules
 
         public void Enqueue(Action a, float delaySeconds = 0f)
         {
-            ArgumentNullException.ThrowIfNull(a);
+            if (a == null) throw new ArgumentNullException(nameof(a));
             if (delaySeconds <= 0f)
             {
                 lock (queue) queue.Enqueue(a);
@@ -138,7 +138,7 @@ namespace NetworkingLibrary.Modules
 
         IEnumerator EnqueueDelayed(Action a, float d)
         {
-            ArgumentNullException.ThrowIfNull(a);
+            if (a == null) throw new ArgumentNullException(nameof(a));
             yield return new WaitForSeconds(d);
             lock (queue) queue.Enqueue(a);
         }

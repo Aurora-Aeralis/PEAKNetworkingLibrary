@@ -485,20 +485,67 @@ namespace NetworkingLibrary.Services
             if (!rpcs.TryGetValue(message.ModID, out var methods)) { Debug.LogWarning($"No mod {message.ModID}"); return; }
             if (!methods.TryGetValue(message.MethodName, out var handlers)) { Debug.LogWarning($"No method {message.MethodName}"); return; }
 
+            MessageHandler? chosenHandler = null;
+            object[]? chosenParams = null;
+            MessageHandler? fallbackHandler = null;
+            object[]? fallbackParams = null;
+
             foreach (var handler in handlers.ToArray())
             {
                 if (handler.Mask != message.Mask) continue;
+
+                if (!TryDeserializeForHandler(message, handler, from, out var callParams, out int unread))
+                    continue;
+
+                if (unread == 0)
+                {
+                    chosenHandler = handler;
+                    chosenParams = callParams;
+                    break;
+                }
+
+                fallbackHandler ??= handler;
+                fallbackParams ??= callParams;
+            }
+
+            if (chosenHandler == null)
+            {
+                chosenHandler = fallbackHandler;
+                chosenParams = fallbackParams;
+            }
+
+            if (chosenHandler == null || chosenParams == null)
+            {
+                Debug.LogWarning($"No matching overload for {message.MethodName} (mask {message.Mask})");
+                return;
+            }
+
+            try { chosenHandler.Method.Invoke(chosenHandler.Target, chosenParams); }
+            catch (Exception ex) { Debug.LogError($"Invoke RPC error: {ex}"); }
+        }
+
+        bool TryDeserializeForHandler(Message source, MessageHandler handler, ulong from, out object[] callParams, out int unread)
+        {
+            callParams = null!;
+            unread = int.MaxValue;
+            try
+            {
+                var msgCopy = new Message(source.ToArray());
                 var pi = handler.Parameters;
                 int paramCount = handler.TakesInfo ? pi.Length - 1 : pi.Length;
-                var callParams = new object[pi.Length];
-                for (int i = 0; i < paramCount; i++) callParams[i] = message.ReadObject(pi[i].ParameterType);
+                callParams = new object[pi.Length];
+                for (int i = 0; i < paramCount; i++) callParams[i] = msgCopy.ReadObject(pi[i].ParameterType);
                 if (handler.TakesInfo)
                 {
                     var t = pi[pi.Length - 1].ParameterType;
                     callParams[pi.Length - 1] = CreateRpcInfoInstance(t, from);
                 }
-                try { handler.Method.Invoke(handler.Target, callParams); }
-                catch (Exception ex) { Debug.LogError($"Invoke RPC error: {ex}"); }
+                unread = msgCopy.UnreadLength();
+                return true;
+            }
+            catch
+            {
+                return false;
             }
         }
 

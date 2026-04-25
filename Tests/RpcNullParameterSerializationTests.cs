@@ -30,6 +30,27 @@ public class RpcNullParameterSerializationTests
         void Shared(string value) { }
     }
 
+    sealed class DispatchOverloadReceiver
+    {
+        public string? LastOverload;
+        public string? LastStringValue;
+        public int? LastIntValue;
+
+        [CustomRPC]
+        void Shared(int value)
+        {
+            LastOverload = "int";
+            LastIntValue = value;
+        }
+
+        [CustomRPC]
+        void Shared(string value)
+        {
+            LastOverload = "string";
+            LastStringValue = value;
+        }
+    }
+
     [Fact]
     public void OfflineBuildMessage_AllowsNull_ForReferenceParameters_FromHandlerSignature()
     {
@@ -92,6 +113,20 @@ public class RpcNullParameterSerializationTests
         Assert.NotNull(msg);
         var read = new Message(msg!.ToArray());
         Assert.Null(read.ReadObject(typeof(string)));
+    }
+
+    [Fact]
+    public void OfflineDispatchIncoming_InvokesMatchingOverloadWithoutCorruptingReader()
+    {
+        var service = new OfflineNetworkingService();
+        var receiver = new DispatchOverloadReceiver();
+        using var token = service.RegisterNetworkObject(receiver, TestModId);
+
+        service.RPC(TestModId, "Shared", ReliableType.Reliable, "hi");
+
+        Assert.Equal("string", receiver.LastOverload);
+        Assert.Equal("hi", receiver.LastStringValue);
+        Assert.Null(receiver.LastIntValue);
     }
 
     [Fact]

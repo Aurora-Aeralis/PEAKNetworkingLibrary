@@ -20,6 +20,8 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public bool InLobby { get; private set; }
         /// <summary>
+        /// Current host identity for the active lobby.
+        /// In offline mode, host routing is always resolved to the local peer.
         /// </summary>
         public ulong HostSteamId64 { get; private set; } = 1000UL;
         /// <summary>
@@ -156,6 +158,9 @@ namespace NetworkingLibrary.Services
         }
 
         bool offlineIsHost = false;
+        /// <summary>
+        /// True while in an offline lobby because offline mode simulates a single-peer host.
+        /// </summary>
         public bool IsHost => offlineIsHost;
 
         /// <summary>
@@ -210,6 +215,9 @@ namespace NetworkingLibrary.Services
         }
 
         /// <summary>
+        /// Joins an offline lobby simulation.
+        /// Offline mode is single-peer host simulation, so host identity and host routing stay local.
+        /// The provided <paramref name="lobbySteamId64"/> is accepted for API compatibility only.
         /// </summary>
         public void JoinLobby(ulong lobbySteamId64)
         {
@@ -227,7 +235,7 @@ namespace NetworkingLibrary.Services
             EnsureLocalPeerKey();
             InLobby = true;
             if (lobbySteamId64 != LocalSteamId)
-                LogWarning($"Offline mode uses local peer {LocalSteamId} as host identity; lobby id {lobbySteamId64} is used for compatibility only.");
+                LogWarning($"Offline single-peer host simulation uses local peer {LocalSteamId} as host identity; lobby id {lobbySteamId64} is compatibility-only.");
             HostSteamId64 = LocalSteamId;
             lobbyData.Clear();
             perPlayerData.Clear();
@@ -235,7 +243,7 @@ namespace NetworkingLibrary.Services
             // Event contract (deterministic): LobbyEntered -> PlayerEntered(local member).
             LobbyEntered?.Invoke();
             PlayerEntered?.Invoke(LocalSteamId);
-            offlineIsHost = false;
+            offlineIsHost = true;
         }
 
         /// <summary>

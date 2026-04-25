@@ -11,10 +11,11 @@ namespace NetworkingLibrary.Modules
 {
     /// <summary>
     /// </summary>
-    public class Message : IDisposable
-    {
-        public const byte PROTOCOL_VERSION = 2;
-        public static int MaxSize = 64 * 1024;
+        public class Message : IDisposable
+        {
+            public const byte PROTOCOL_VERSION = 2;
+            public static int MaxSize = 64 * 1024;
+            public const int MaxOverallSizeMultiplier = 16;
 
         public byte ProtocolVersion;
         public uint ModID;
@@ -195,7 +196,8 @@ namespace NetworkingLibrary.Modules
         {
             int len = m.ReadInt();
             if (len < 0) throw new Exception($"{typeName} length out of range");
-            if (len > MaxSize) throw new Exception($"{typeName} length exceeds max payload size ({MaxSize})");
+            int maxAllowedLength = checked(MaxSize * MaxOverallSizeMultiplier);
+            if (len > maxAllowedLength) throw new Exception($"{typeName} length exceeds max payload size ({maxAllowedLength})");
             return len;
         }
 

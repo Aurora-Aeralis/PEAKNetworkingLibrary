@@ -181,6 +181,41 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
+    public void RpcTarget_LocalPeer_InLobby_DispatchesToLocalHandler()
+    {
+        var service = new OfflineNetworkingService();
+        var receiver = new RpcReceiver();
+
+        service.Initialize();
+        service.RegisterNetworkObject(receiver, TestModId);
+        service.CreateLobby();
+
+        service.RPCTarget(TestModId, "OnPing", service.LocalSteamId, ReliableType.Reliable, 27);
+
+        Assert.Equal(1, receiver.CallCount);
+        Assert.Equal(27, receiver.LastValue);
+    }
+
+    [Fact]
+    public void RpcTarget_NonLocalInvitedPeer_StrictLoopback_IsNoOp()
+    {
+        var service = new OfflineNetworkingService();
+        var receiver = new RpcReceiver();
+        var invitedSteamId = 5252UL;
+
+        service.Initialize();
+        service.RegisterNetworkObject(receiver, TestModId);
+        service.CreateLobby();
+        service.InviteToLobby(invitedSteamId);
+
+        service.RPCTarget(TestModId, "OnPing", invitedSteamId, ReliableType.Reliable, 27);
+
+        Assert.Equal(new[] { service.LocalSteamId }, service.GetLobbyMemberSteamIds());
+        Assert.Equal(0, receiver.CallCount);
+        Assert.Equal(-1, receiver.LastValue);
+    }
+
+    [Fact]
     public void RpcPaths_WithoutLobby_DoNotThrow_WhenNetLoggerIsUnavailable()
     {
         using var _ = WithUnavailableNetLogger();
@@ -495,7 +530,7 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
-    public void InviteToLobby_DuplicateSteamId_RaisesPlayerEnteredOnce()
+    public void InviteToLobby_NonLocalSteamId_IsIgnoredInStrictLoopbackMode()
     {
         var service = new OfflineNetworkingService();
         var invitedSteamId = 5252UL;
@@ -511,7 +546,8 @@ public class OfflineNetworkingServiceTests
         service.InviteToLobby(invitedSteamId);
         service.InviteToLobby(invitedSteamId);
 
-        Assert.Equal(1, playerEnteredCount);
+        Assert.Equal(new[] { service.LocalSteamId }, service.GetLobbyMemberSteamIds());
+        Assert.Equal(0, playerEnteredCount);
     }
 
     [Fact]

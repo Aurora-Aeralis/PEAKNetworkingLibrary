@@ -191,6 +191,14 @@ namespace NetworkingLibrary.Modules
         private static readonly Dictionary<Type, Action<Message, object>> writeCasters = new();
         private static readonly Dictionary<Type, Func<Message, object>> readCasters = new();
 
+        private static int ReadValidatedLength(Message m, string typeName)
+        {
+            int len = m.ReadInt();
+            if (len < 0) throw new Exception($"{typeName} length out of range");
+            if (len > MaxSize) throw new Exception($"{typeName} length exceeds max payload size ({MaxSize})");
+            return len;
+        }
+
         static Message()
         {
             writeCasters[typeof(byte)] = (m, o) => m.WriteByte((byte)o);
@@ -218,7 +226,16 @@ namespace NetworkingLibrary.Modules
             };
 
             readCasters[typeof(byte)] = (m) => m.ReadByte();
-            readCasters[typeof(byte[])] = (m) => { int l = m.ReadInt(); if (l == 0) return new byte[0]; var arr = new byte[l]; Array.Copy(m.readableBuffer, m.readPos, arr, 0, l); m.readPos += l; return arr; };
+            readCasters[typeof(byte[])] = (m) =>
+            {
+                int len = ReadValidatedLength(m, "Byte[]");
+                if (len == 0) return Array.Empty<byte>();
+                m.EnsureReadable(len, "ReadByteArray");
+                var arr = new byte[len];
+                Array.Copy(m.readableBuffer, m.readPos, arr, 0, len);
+                m.readPos += len;
+                return arr;
+            };
             readCasters[typeof(int)] = (m) => m.ReadInt();
             readCasters[typeof(uint)] = (m) => m.ReadUInt();
             readCasters[typeof(long)] = (m) => m.ReadLong();
@@ -231,15 +248,15 @@ namespace NetworkingLibrary.Modules
             readCasters[typeof(CSteamID)] = (m) => new CSteamID(m.ReadULong());
 
             readCasters[typeof(int[])] = (m) => {
-                int len = m.ReadInt();
-                if (len == 0) return new int[0];
+                int len = ReadValidatedLength(m, "Int32[]");
+                if (len == 0) return Array.Empty<int>();
                 var a = new int[len];
                 for (int i = 0; i < len; i++) a[i] = m.ReadInt();
                 return a;
             };
             readCasters[typeof(string[])] = (m) => {
-                int len = m.ReadInt();
-                if (len == 0) return new string[0];
+                int len = ReadValidatedLength(m, "String[]");
+                if (len == 0) return Array.Empty<string>();
                 var a = new string[len];
                 for (int i = 0; i < len; i++) a[i] = m.ReadString();
                 return a;
@@ -307,11 +324,7 @@ namespace NetworkingLibrary.Modules
         }
         public string ReadString()
         {
-            int len = ReadInt();
-            if (len < 0)
-            {
-                throw new Exception("ReadString out of range");
-            }
+            int len = ReadValidatedLength(this, "String");
             if (len == 0) return string.Empty;
             EnsureReadable(len, nameof(ReadString));
             string s = Encoding.UTF8.GetString(readableBuffer, readPos, len);
@@ -353,7 +366,7 @@ namespace NetworkingLibrary.Modules
             if (type.IsArray)
             {
                 var elemType = type.GetElementType()!;
-                int len = ReadInt();
+                int len = ReadValidatedLength(this, $"{type.FullName ?? "Array"}");
                 var arr = Array.CreateInstance(elemType, len);
                 for (int i = 0; i < len; i++)
                 {
@@ -369,7 +382,7 @@ namespace NetworkingLibrary.Modules
                 if (genDef == typeof(List<>) || genDef == typeof(IList<>))
                 {
                     var elemType = type.GetGenericArguments()[0];
-                    int len = ReadInt();
+                    int len = ReadValidatedLength(this, $"{type.FullName ?? "List"}");
                     var listType = typeof(List<>).MakeGenericType(elemType);
                     var list = (IList)Activator.CreateInstance(listType)!;
                     for (int i = 0; i < len; i++)

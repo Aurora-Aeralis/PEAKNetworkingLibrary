@@ -159,6 +159,7 @@ namespace NetworkingLibrary.Services
             perPlayerData[LocalSteamId] = new Dictionary<string, string>();
             LobbyCreated?.Invoke();
             LobbyEntered?.Invoke();
+            PlayerEntered?.Invoke(LocalSteamId);
             offlineIsHost = true;
         }
 
@@ -183,6 +184,7 @@ namespace NetworkingLibrary.Services
             InLobby = false;
             lobbyData.Clear();
             perPlayerData.Clear();
+            HostSteamId64 = LocalSteamId;
             LobbyLeft?.Invoke();
             offlineIsHost = false;
         }

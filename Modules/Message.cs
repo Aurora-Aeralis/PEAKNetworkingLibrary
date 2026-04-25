@@ -11,8 +11,6 @@ using Steamworks;
 
 namespace NetworkingLibrary.Modules
 {
-    /// <summary>
-    /// </summary>
     public class Message : IDisposable
     {
         public const byte PROTOCOL_VERSION = 3;
@@ -187,8 +185,6 @@ namespace NetworkingLibrary.Modules
         public Message WriteVector3(Vector3 v) { WriteFloat(v.x); WriteFloat(v.y); WriteFloat(v.z); return this; }
         public Message WriteQuaternion(Quaternion q) { WriteFloat(q.x); WriteFloat(q.y); WriteFloat(q.z); WriteFloat(q.w); return this; }
 
-        /// <summary>
-        /// </summary>
         public void WriteObject(Type type, object value)
         {
             ThrowIfDisposed();
@@ -483,8 +479,6 @@ namespace NetworkingLibrary.Modules
         public Vector3 ReadVector3() => new Vector3(ReadFloat(), ReadFloat(), ReadFloat());
         public Quaternion ReadQuaternion() => new Quaternion(ReadFloat(), ReadFloat(), ReadFloat(), ReadFloat());
 
-        /// <summary>
-        /// </summary>
         public object ReadObject(Type type)
         {
             ThrowIfDisposed();

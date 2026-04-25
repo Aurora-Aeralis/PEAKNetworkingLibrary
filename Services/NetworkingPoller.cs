@@ -81,14 +81,7 @@ namespace NetworkingLibrary.Services
                 pollReceiveHadFault = false;
                 pollReceiveSuppressedFault = false;
             }
-            /*
-            if (Time.unscaledTime - lastLog > 1f)
-            {
-                lastLog = Time.unscaledTime;
-                Net.Logger.LogInfo("NetworkingPollerDebug: PollReceive tick");
-            }*/
         }
-        //private float lastLog = 0f;
         void Awake()
         {
             DontDestroyOnLoad(this.gameObject);

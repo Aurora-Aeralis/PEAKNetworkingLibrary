@@ -1831,4 +1831,97 @@ namespace NetworkingLibrary.Services
         static byte[] HmacSha256RawStatic(byte[] key, byte[] payload) { using var h = new HMACSHA256(key); return h.ComputeHash(payload); }
     }
 }
+#else
+using NetworkingLibrary.Modules;
+using System;
+using System.Security.Cryptography;
+
+namespace NetworkingLibrary.Services
+{
+    /// <summary>
+    /// Editor-safe fallback that preserves the SteamNetworkingService type without Steamworks dependencies.
+    /// </summary>
+    public class SteamNetworkingService : INetworkingService
+    {
+        readonly OfflineNetworkingService offline = new();
+
+        public bool IsInitialized => offline.IsInitialized;
+        public bool InLobby => offline.InLobby;
+        public ulong HostSteamId64 => offline.HostSteamId64;
+        public string HostIdString => offline.HostIdString;
+        public bool IsHost => offline.IsHost;
+        public Func<Message, ulong, bool>? IncomingValidator
+        {
+            get => offline.IncomingValidator;
+            set => offline.IncomingValidator = value;
+        }
+
+        public event Action? LobbyCreated
+        {
+            add => offline.LobbyCreated += value;
+            remove => offline.LobbyCreated -= value;
+        }
+
+        public event Action? LobbyEntered
+        {
+            add => offline.LobbyEntered += value;
+            remove => offline.LobbyEntered -= value;
+        }
+
+        public event Action? LobbyLeft
+        {
+            add => offline.LobbyLeft += value;
+            remove => offline.LobbyLeft -= value;
+        }
+
+        public event Action<ulong>? PlayerEntered
+        {
+            add => offline.PlayerEntered += value;
+            remove => offline.PlayerEntered -= value;
+        }
+
+        public event Action<ulong>? PlayerLeft
+        {
+            add => offline.PlayerLeft += value;
+            remove => offline.PlayerLeft -= value;
+        }
+
+        public event Action<string[]>? LobbyDataChanged
+        {
+            add => offline.LobbyDataChanged += value;
+            remove => offline.LobbyDataChanged -= value;
+        }
+
+        public event Action<ulong, string[]>? PlayerDataChanged
+        {
+            add => offline.PlayerDataChanged += value;
+            remove => offline.PlayerDataChanged -= value;
+        }
+
+        public ulong GetLocalSteam64() => offline.GetLocalSteam64();
+        public ulong[] GetLobbyMemberSteamIds() => offline.GetLobbyMemberSteamIds();
+        public void Initialize() => offline.Initialize();
+        public void Shutdown() => offline.Shutdown();
+        public void CreateLobby(int maxPlayers = 8) => offline.CreateLobby(maxPlayers);
+        public void JoinLobby(ulong lobbySteamId64) => offline.JoinLobby(lobbySteamId64);
+        public void LeaveLobby() => offline.LeaveLobby();
+        public void InviteToLobby(ulong steamId64) => offline.InviteToLobby(steamId64);
+        public IDisposable RegisterNetworkObject(object instance, uint modId, int mask = 0) => offline.RegisterNetworkObject(instance, modId, mask);
+        public IDisposable RegisterNetworkType(Type type, uint modId, int mask = 0) => offline.RegisterNetworkType(type, modId, mask);
+        public void DeregisterNetworkObject(object instance, uint modId, int mask = 0) => offline.DeregisterNetworkObject(instance, modId, mask);
+        public void DeregisterNetworkType(Type type, uint modId, int mask = 0) => offline.DeregisterNetworkType(type, modId, mask);
+        public void RPC(uint modId, string methodName, ReliableType reliable, params object[] parameters) => offline.RPC(modId, methodName, reliable, parameters);
+        public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, params object[] parameters) => offline.RPCTarget(modId, methodName, targetSteamId64, reliable, parameters);
+        public void RPCToHost(uint modId, string methodName, ReliableType reliable, params object[] parameters) => offline.RPCToHost(modId, methodName, reliable, parameters);
+        public void RegisterLobbyDataKey(string key) => offline.RegisterLobbyDataKey(key);
+        public void SetLobbyData(string key, object value) => offline.SetLobbyData(key, value);
+        public T GetLobbyData<T>(string key) => offline.GetLobbyData<T>(key);
+        public void RegisterPlayerDataKey(string key) => offline.RegisterPlayerDataKey(key);
+        public void SetPlayerData(string key, object value) => offline.SetPlayerData(key, value);
+        public T GetPlayerData<T>(ulong steamId64, string key) => offline.GetPlayerData<T>(steamId64, key);
+        public void PollReceive() => offline.PollReceive();
+        public void RegisterModSigner(uint modId, Func<byte[], byte[]> signerDelegate) => offline.RegisterModSigner(modId, signerDelegate);
+        public void RegisterModPublicKey(uint modId, RSAParameters pub) => offline.RegisterModPublicKey(modId, pub);
+    }
+}
 #endif

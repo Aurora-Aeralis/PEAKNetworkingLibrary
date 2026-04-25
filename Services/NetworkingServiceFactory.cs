@@ -1,6 +1,7 @@
 ﻿using System;
-using System.Reflection;
+#if !UNITY_EDITOR
 using Steamworks;
+#endif
 using UnityEngine;
 
 namespace NetworkingLibrary.Services
@@ -9,6 +10,10 @@ namespace NetworkingLibrary.Services
     {
         public static INetworkingService CreateDefaultService()
         {
+#if UNITY_EDITOR
+            Net.Logger.LogInfo("UNITY_EDITOR detected. Creating OfflineNetworkingService.");
+            return new OfflineNetworkingService();
+#else
             try
             {
                 if (SteamAPI.IsSteamRunning())
@@ -24,6 +29,7 @@ namespace NetworkingLibrary.Services
 
             Net.Logger.LogInfo("Steam not available. Creating OfflineNetworkingService.");
             return new OfflineNetworkingService();
+#endif
         }
     }
 }

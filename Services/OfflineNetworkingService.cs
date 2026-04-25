@@ -56,6 +56,7 @@ namespace NetworkingLibrary.Services
         /// <summary>
         /// Persistent RPC registration map, not tied to lobby lifetime.
         /// </summary>
+        private readonly object rpcLock = new object();
         readonly Dictionary<uint, Dictionary<string, List<MessageHandler>>> rpcs = new();
         /// <summary>
         /// Per-lobby shared key/value data; cleared whenever lobby identity changes.
@@ -332,24 +333,27 @@ namespace NetworkingLibrary.Services
             if (instance == null) throw new ArgumentNullException(nameof(instance));
             var t = instance.GetType();
             var registeredHandlers = new List<HandlerRegistration>();
-            foreach (var method in t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            lock (rpcLock)
             {
-                var attrs = method.GetCustomAttributes(false).OfType<CustomRPCAttribute>().ToArray();
-                if (attrs.Length == 0) continue;
-                if (!rpcs.ContainsKey(modId)) rpcs[modId] = new Dictionary<string, List<MessageHandler>>();
-                if (!rpcs[modId].ContainsKey(method.Name)) rpcs[modId][method.Name] = new List<MessageHandler>();
-                var handlers = rpcs[modId][method.Name];
-                if (handlers.Any(existing => existing.Mask == mask && existing.Method == method && ReferenceEquals(existing.Target, instance))) continue;
-                var handler = new MessageHandler
+                foreach (var method in t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
                 {
-                    Target = instance,
-                    Method = method,
-                    Parameters = method.GetParameters(),
-                    TakesInfo = method.GetParameters().Length > 0 && IsRpcInfoParameterType(method.GetParameters().Last().ParameterType),
-                    Mask = mask
-                };
-                handlers.Add(handler);
-                registeredHandlers.Add(new HandlerRegistration { MethodName = method.Name, Handler = handler });
+                    var attrs = method.GetCustomAttributes(false).OfType<CustomRPCAttribute>().ToArray();
+                    if (attrs.Length == 0) continue;
+                    if (!rpcs.ContainsKey(modId)) rpcs[modId] = new Dictionary<string, List<MessageHandler>>();
+                    if (!rpcs[modId].ContainsKey(method.Name)) rpcs[modId][method.Name] = new List<MessageHandler>();
+                    var handlers = rpcs[modId][method.Name];
+                    if (handlers.Any(existing => existing.Mask == mask && existing.Method == method && ReferenceEquals(existing.Target, instance))) continue;
+                    var handler = new MessageHandler
+                    {
+                        Target = instance,
+                        Method = method,
+                        Parameters = method.GetParameters(),
+                        TakesInfo = method.GetParameters().Length > 0 && IsRpcInfoParameterType(method.GetParameters().Last().ParameterType),
+                        Mask = mask
+                    };
+                    handlers.Add(handler);
+                    registeredHandlers.Add(new HandlerRegistration { MethodName = method.Name, Handler = handler });
+                }
             }
             return new Token(() => DeregisterHandlers(modId, registeredHandlers));
         }
@@ -359,40 +363,46 @@ namespace NetworkingLibrary.Services
         {
             if (type == null) throw new ArgumentNullException(nameof(type));
             var registeredHandlers = new List<HandlerRegistration>();
-            foreach (var method in type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
+            lock (rpcLock)
             {
-                var attrs = method.GetCustomAttributes(false).OfType<CustomRPCAttribute>().ToArray();
-                if (attrs.Length == 0) continue;
-                if (!method.IsStatic) throw new InvalidOperationException($"Cannot register instance RPC method {type.FullName}.{method.Name} without an instance.");
-
-                if (!rpcs.ContainsKey(modId)) rpcs[modId] = new Dictionary<string, List<MessageHandler>>();
-                if (!rpcs[modId].ContainsKey(method.Name)) rpcs[modId][method.Name] = new List<MessageHandler>();
-                var handlers = rpcs[modId][method.Name];
-                if (handlers.Any(existing => existing.Mask == mask && existing.Method == method)) continue;
-                var handler = new MessageHandler
+                foreach (var method in type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
                 {
-                    Target = null!,
-                    Method = method,
-                    Parameters = method.GetParameters(),
-                    TakesInfo = method.GetParameters().Length > 0 && IsRpcInfoParameterType(method.GetParameters().Last().ParameterType),
-                    Mask = mask
-                };
-                handlers.Add(handler);
-                registeredHandlers.Add(new HandlerRegistration { MethodName = method.Name, Handler = handler });
+                    var attrs = method.GetCustomAttributes(false).OfType<CustomRPCAttribute>().ToArray();
+                    if (attrs.Length == 0) continue;
+                    if (!method.IsStatic) throw new InvalidOperationException($"Cannot register instance RPC method {type.FullName}.{method.Name} without an instance.");
+
+                    if (!rpcs.ContainsKey(modId)) rpcs[modId] = new Dictionary<string, List<MessageHandler>>();
+                    if (!rpcs[modId].ContainsKey(method.Name)) rpcs[modId][method.Name] = new List<MessageHandler>();
+                    var handlers = rpcs[modId][method.Name];
+                    if (handlers.Any(existing => existing.Mask == mask && existing.Method == method)) continue;
+                    var handler = new MessageHandler
+                    {
+                        Target = null!,
+                        Method = method,
+                        Parameters = method.GetParameters(),
+                        TakesInfo = method.GetParameters().Length > 0 && IsRpcInfoParameterType(method.GetParameters().Last().ParameterType),
+                        Mask = mask
+                    };
+                    handlers.Add(handler);
+                    registeredHandlers.Add(new HandlerRegistration { MethodName = method.Name, Handler = handler });
+                }
             }
             return new Token(() => DeregisterHandlers(modId, registeredHandlers));
         }
 
         void DeregisterHandlers(uint modId, List<HandlerRegistration> handlersToRemove)
         {
-            if (!rpcs.TryGetValue(modId, out var methods) || handlersToRemove.Count == 0) return;
-            foreach (var registration in handlersToRemove)
+            lock (rpcLock)
             {
-                if (!methods.TryGetValue(registration.MethodName, out var handlers)) continue;
-                handlers.Remove(registration.Handler);
-                if (handlers.Count == 0) methods.Remove(registration.MethodName);
+                if (!rpcs.TryGetValue(modId, out var methods) || handlersToRemove.Count == 0) return;
+                foreach (var registration in handlersToRemove)
+                {
+                    if (!methods.TryGetValue(registration.MethodName, out var handlers)) continue;
+                    handlers.Remove(registration.Handler);
+                    if (handlers.Count == 0) methods.Remove(registration.MethodName);
+                }
+                if (methods.Count == 0) rpcs.Remove(modId);
             }
-            if (methods.Count == 0) rpcs.Remove(modId);
         }
 
         /// <summary>
@@ -400,32 +410,38 @@ namespace NetworkingLibrary.Services
         public void DeregisterNetworkObject(object instance, uint modId, int mask = 0)
         {
             if (instance == null) throw new ArgumentNullException(nameof(instance));
-            if (!rpcs.TryGetValue(modId, out var methods)) return;
-            foreach (var method in instance.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            lock (rpcLock)
             {
-                var attrs = method.GetCustomAttributes(false).OfType<CustomRPCAttribute>().ToArray();
-                if (attrs.Length == 0) continue;
-                if (!methods.TryGetValue(method.Name, out var handlers)) continue;
-                for (int i = handlers.Count - 1; i >= 0; i--)
-                    if (handlers[i].Target == instance && handlers[i].Mask == mask) handlers.RemoveAt(i);
-                if (handlers.Count == 0) methods.Remove(method.Name);
+                if (!rpcs.TryGetValue(modId, out var methods)) return;
+                foreach (var method in instance.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                {
+                    var attrs = method.GetCustomAttributes(false).OfType<CustomRPCAttribute>().ToArray();
+                    if (attrs.Length == 0) continue;
+                    if (!methods.TryGetValue(method.Name, out var handlers)) continue;
+                    for (int i = handlers.Count - 1; i >= 0; i--)
+                        if (handlers[i].Target == instance && handlers[i].Mask == mask) handlers.RemoveAt(i);
+                    if (handlers.Count == 0) methods.Remove(method.Name);
+                }
+                if (methods.Count == 0) rpcs.Remove(modId);
             }
-            if (methods.Count == 0) rpcs.Remove(modId);
         }
         /// <summary>
         /// </summary>
         public void DeregisterNetworkType(Type type, uint modId, int mask = 0)
         {
             if (type == null) throw new ArgumentNullException(nameof(type));
-            if (!rpcs.TryGetValue(modId, out var methods)) return;
-            foreach (var methodName in methods.Keys.ToArray())
+            lock (rpcLock)
             {
-                if (!methods.TryGetValue(methodName, out var handlers)) continue;
-                for (int i = handlers.Count - 1; i >= 0; i--)
-                    if (handlers[i].Method.DeclaringType == type && handlers[i].Mask == mask) handlers.RemoveAt(i);
-                if (handlers.Count == 0) methods.Remove(methodName);
+                if (!rpcs.TryGetValue(modId, out var methods)) return;
+                foreach (var methodName in methods.Keys.ToArray())
+                {
+                    if (!methods.TryGetValue(methodName, out var handlers)) continue;
+                    for (int i = handlers.Count - 1; i >= 0; i--)
+                        if (handlers[i].Method.DeclaringType == type && handlers[i].Mask == mask) handlers.RemoveAt(i);
+                    if (handlers.Count == 0) methods.Remove(methodName);
+                }
+                if (methods.Count == 0) rpcs.Remove(modId);
             }
-            if (methods.Count == 0) rpcs.Remove(modId);
         }
 
         /// <summary>
@@ -559,10 +575,17 @@ namespace NetworkingLibrary.Services
         {
             try
             {
-                if (rpcs.TryGetValue(modId, out var methods) && methods.TryGetValue(methodName, out var handlers) && handlers.Count > 0)
+                MessageHandler[] handlersSnapshot = Array.Empty<MessageHandler>();
+                lock (rpcLock)
+                {
+                    if (rpcs.TryGetValue(modId, out var methods) && methods.TryGetValue(methodName, out var handlers) && handlers.Count > 0)
+                        handlersSnapshot = handlers.ToArray();
+                }
+
+                if (handlersSnapshot.Length > 0)
                 {
                     MessageHandler chosen = null!;
-                    foreach (var h in handlers)
+                    foreach (var h in handlersSnapshot)
                     {
                         if (h.Mask != mask) continue;
                         var expected = h.Parameters;
@@ -587,7 +610,7 @@ namespace NetworkingLibrary.Services
 
                     if (chosen == null)
                     {
-                        chosen = handlers.FirstOrDefault(h =>
+                        chosen = handlersSnapshot.FirstOrDefault(h =>
                         {
                             int expectedCount = h.TakesInfo ? h.Parameters.Length - 1 : h.Parameters.Length;
                             return expectedCount == parameters.Length && h.Mask == mask;
@@ -681,15 +704,20 @@ namespace NetworkingLibrary.Services
 
             if (!rateLimiter.IncomingAllowed()) return;
 
-            if (!rpcs.TryGetValue(message.ModID, out var methods)) { LogWarning($"No mod {message.ModID}"); return; }
-            if (!methods.TryGetValue(message.MethodName, out var handlers)) { LogWarning($"No method {message.MethodName}"); return; }
+            MessageHandler[] handlersSnapshot;
+            lock (rpcLock)
+            {
+                if (!rpcs.TryGetValue(message.ModID, out var methods)) { LogWarning($"No mod {message.ModID}"); return; }
+                if (!methods.TryGetValue(message.MethodName, out var handlers)) { LogWarning($"No method {message.MethodName}"); return; }
+                handlersSnapshot = handlers.ToArray();
+            }
 
             MessageHandler? chosenHandler = null;
             object[]? chosenParams = null;
             MessageHandler? fallbackHandler = null;
             object[]? fallbackParams = null;
 
-            IEnumerable<MessageHandler> dispatchOrder = handlers.Where(h => h.Mask == message.Mask);
+            IEnumerable<MessageHandler> dispatchOrder = handlersSnapshot.Where(h => h.Mask == message.Mask);
             if (!string.IsNullOrEmpty(message.OverloadKey))
             {
                 var keyed = dispatchOrder.Where(h => BuildOverloadKey(h) == message.OverloadKey).ToArray();

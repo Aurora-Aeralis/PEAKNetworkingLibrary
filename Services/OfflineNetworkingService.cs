@@ -24,7 +24,7 @@ namespace NetworkingLibrary.Services
         public bool InLobby { get; private set; }
         /// <summary>
         /// </summary>
-        public ulong HostSteamId64 { get; private set; } = 1UL;
+        public ulong HostSteamId64 { get; private set; } = 1000UL;
         /// <summary>
         /// </summary>
         public string HostIdString => HostSteamId64.ToString();
@@ -166,8 +166,9 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void JoinLobby(ulong lobbySteamId64)
         {
+            _ = lobbySteamId64;
             InLobby = true;
-            HostSteamId64 = lobbySteamId64;
+            HostSteamId64 = LocalSteamId;
             lobbyData.Clear();
             perPlayerData.Clear();
             perPlayerData[LocalSteamId] = new Dictionary<string, string>();
@@ -314,6 +315,11 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void RPCToHost(uint modId, string methodName, ReliableType reliable, params object[] parameters)
         {
+            if (!InLobby)
+            {
+                Net.Logger.LogError("Not in lobby");
+                return;
+            }
             RPCTarget(modId, methodName, HostSteamId64, reliable, parameters);
         }
 

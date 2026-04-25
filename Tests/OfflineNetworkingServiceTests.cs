@@ -346,6 +346,26 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
+    public void InviteToLobby_DuplicateSteamId_RaisesPlayerEnteredOnce()
+    {
+        var service = new OfflineNetworkingService();
+        var invitedSteamId = 5252UL;
+        var playerEnteredCount = 0;
+
+        service.PlayerEntered += steamId =>
+        {
+            if (steamId == invitedSteamId) playerEnteredCount++;
+        };
+
+        service.Initialize();
+        service.CreateLobby();
+        service.InviteToLobby(invitedSteamId);
+        service.InviteToLobby(invitedSteamId);
+
+        Assert.Equal(1, playerEnteredCount);
+    }
+
+    [Fact]
     public void LeaveLobby_ThenCreateLobby_AfterInitialize_KeepsConsistentState()
     {
         var service = new OfflineNetworkingService();

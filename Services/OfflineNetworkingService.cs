@@ -196,6 +196,9 @@ namespace NetworkingLibrary.Services
                 return;
             }
 
+            if (InLobby)
+                LeaveLobby();
+
             EnsureLocalPeerKey();
             InLobby = true;
             HostSteamId64 = LocalSteamId;
@@ -223,6 +226,9 @@ namespace NetworkingLibrary.Services
                 LogWarning("JoinLobby called with invalid lobby id 0.");
                 return;
             }
+
+            if (InLobby)
+                LeaveLobby();
 
             EnsureLocalPeerKey();
             InLobby = true;

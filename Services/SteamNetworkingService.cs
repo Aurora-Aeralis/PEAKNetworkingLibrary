@@ -372,6 +372,9 @@ namespace NetworkingLibrary.Services
                 maxPlayers = 1;
             }
 
+            if (InLobby && Lobby != CSteamID.Nil)
+                LeaveLobby();
+
             try { SteamMatchmaking.CreateLobby(ELobbyType.k_ELobbyTypePrivate, maxPlayers); }
             catch (Exception ex) { LogError($"CreateLobby failed: {ex}"); }
         }
@@ -390,6 +393,9 @@ namespace NetworkingLibrary.Services
                 LogWarning("JoinLobby called with invalid lobby id 0.");
                 return;
             }
+
+            if (InLobby && Lobby != CSteamID.Nil)
+                LeaveLobby();
 
             try { SteamMatchmaking.JoinLobby(new CSteamID(lobbySteamId64)); }
             catch (Exception ex) { LogError($"JoinLobby failed for lobby {lobbySteamId64}: {ex}"); }

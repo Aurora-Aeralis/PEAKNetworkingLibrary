@@ -200,6 +200,38 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void CreateLobby_WhileInLobby_LeavesCurrentLobby_First()
+    {
+        var service = new SteamNetworkingService();
+        SetInitialized(service, true);
+        SetInLobby(service, true);
+        SetLobby(service, 9001UL);
+        var lobbyLeftCount = 0;
+        service.LobbyLeft += () => lobbyLeftCount++;
+
+        service.CreateLobby();
+
+        Assert.Equal(1, lobbyLeftCount);
+        Assert.False(service.InLobby);
+    }
+
+    [Fact]
+    public void JoinLobby_WhileInLobby_LeavesCurrentLobby_First()
+    {
+        var service = new SteamNetworkingService();
+        SetInitialized(service, true);
+        SetInLobby(service, true);
+        SetLobby(service, 9001UL);
+        var lobbyLeftCount = 0;
+        service.LobbyLeft += () => lobbyLeftCount++;
+
+        service.JoinLobby(4242UL);
+
+        Assert.Equal(1, lobbyLeftCount);
+        Assert.False(service.InLobby);
+    }
+
+    [Fact]
     public void LeaveLobby_CalledTwice_RaisesLobbyLeftOnce()
     {
         var service = new SteamNetworkingService();

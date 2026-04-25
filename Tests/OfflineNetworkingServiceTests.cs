@@ -108,6 +108,38 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
+    public void CreateLobby_WhileInLobby_PerformsCleanLeaveBeforeRecreate()
+    {
+        var service = new OfflineNetworkingService();
+        var lobbyLeftCount = 0;
+        service.LobbyLeft += () => lobbyLeftCount++;
+
+        service.Initialize();
+        service.CreateLobby();
+        service.CreateLobby();
+
+        Assert.Equal(1, lobbyLeftCount);
+        Assert.True(service.InLobby);
+        Assert.Equal(service.LocalSteamId, service.HostSteamId64);
+    }
+
+    [Fact]
+    public void JoinLobby_WhileInLobby_PerformsCleanLeaveBeforeJoin()
+    {
+        var service = new OfflineNetworkingService();
+        var lobbyLeftCount = 0;
+        service.LobbyLeft += () => lobbyLeftCount++;
+
+        service.Initialize();
+        service.CreateLobby();
+        service.JoinLobby(4242UL);
+
+        Assert.Equal(1, lobbyLeftCount);
+        Assert.True(service.InLobby);
+        Assert.Equal(service.LocalSteamId, service.HostSteamId64);
+    }
+
+    [Fact]
     public void JoinLobby_RemoteLobbyId_SetsLocalHostIdentity_AndRpcToHostDispatchesToLocalRegisteredHandler()
     {
         var service = new OfflineNetworkingService();

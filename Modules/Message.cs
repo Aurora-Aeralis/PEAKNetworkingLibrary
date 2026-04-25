@@ -17,13 +17,10 @@ namespace NetworkingLibrary.Modules
         private const int DefaultMaxSize = 64 * 1024;
         private const int MinMaxSize = 1024;
         private const int MaxMaxSize = int.MaxValue / 16;
-        private static int _maxSize = DefaultMaxSize;
-        public static int MaxSize
-        {
-            get => _maxSize;
-            set => SetMaxSize(value);
-        }
-        public static int MaxLogicalSize => _maxSize * 16;
+        // NOTE: this must remain a field (not a property) for runtime ABI compatibility
+        // with precompiled assemblies that reference Message.MaxSize as a field symbol.
+        public static int MaxSize = DefaultMaxSize;
+        public static int MaxLogicalSize => MaxSize * 16;
 
         public static void SetMaxSize(int bytes)
         {
@@ -31,7 +28,7 @@ namespace NetworkingLibrary.Modules
             {
                 throw new ArgumentOutOfRangeException(nameof(bytes), bytes, $"Message max size must be between {MinMaxSize} and {MaxMaxSize} bytes.");
             }
-            _maxSize = bytes;
+            MaxSize = bytes;
         }
 
         public byte ProtocolVersion;

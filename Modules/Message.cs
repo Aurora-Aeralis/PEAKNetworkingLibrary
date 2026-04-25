@@ -569,7 +569,7 @@ namespace NetworkingLibrary.Modules
         public static byte[] DecompressPayload(byte[] compressed, int maxOutputSize = -1)
         {
             if (compressed == null) throw new ArgumentNullException(nameof(compressed));
-            if (maxOutputSize < 0) maxOutputSize = MaxSize;
+            if (maxOutputSize < 0) maxOutputSize = MaxLogicalSize;
             using var ms = new MemoryStream(compressed);
             using var gz = new GZipStream(ms, CompressionMode.Decompress);
             using var outMs = new MemoryStream();

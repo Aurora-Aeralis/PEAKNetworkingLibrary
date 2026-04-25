@@ -77,18 +77,24 @@ namespace NetworkingLibrary
             Service = initializedService;
 
             var pollerName = $"{MyPluginInfo.PLUGIN_NAME}.Poller";
-            var existingPoller = FindObjectsOfType<NetworkingPoller>(true).FirstOrDefault();
-            var go = existingPoller != null ? existingPoller.gameObject : GameObject.Find(pollerName);
-            var foundExistingObject = go != null;
-            if (go == null)
+            var pollers = FindObjectsOfType<NetworkingPoller>(true)
+                .OrderByDescending(poller => poller.gameObject.activeInHierarchy)
+                .ThenBy(poller => poller.GetInstanceID())
+                .ToList();
+            var canonicalPoller = pollers.FirstOrDefault();
+            if (canonicalPoller == null)
             {
-                go = new GameObject(pollerName);
-                go.AddComponent<NetworkingPoller>().hideFlags = HideFlags.HideAndDontSave;
+                var createdPollerObject = new GameObject(pollerName);
+                canonicalPoller = createdPollerObject.AddComponent<NetworkingPoller>();
+                canonicalPoller.hideFlags = HideFlags.HideAndDontSave;
             }
-            else if (go.GetComponent<NetworkingPoller>() == null)
-            {
-                go.AddComponent<NetworkingPoller>().hideFlags = HideFlags.HideAndDontSave;
-            }
+
+            foreach (var extraPoller in pollers.Skip(1))
+                Destroy(extraPoller);
+
+            var go = canonicalPoller.gameObject;
+            go.name = pollerName;
+            var foundExistingObject = pollers.Count > 0;
             
             // Persist the poller object across scene loads so networking lifecycle remains stable.
             if (foundExistingObject && go.scene.IsValid() && go.scene.name != "DontDestroyOnLoad")

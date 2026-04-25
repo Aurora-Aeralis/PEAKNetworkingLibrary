@@ -370,6 +370,11 @@ namespace NetworkingLibrary.Modules
                 {
                     var elemType = type.GetGenericArguments()[0];
                     int len = ReadInt();
+                    if (len < 0 || len > MaxSize)
+                    {
+                        throw new Exception($"ReadObject out of range for {type.FullName}: malformed list length {len}.");
+                    }
+
                     var listType = typeof(List<>).MakeGenericType(elemType);
                     var list = (IList)Activator.CreateInstance(listType)!;
                     for (int i = 0; i < len; i++)

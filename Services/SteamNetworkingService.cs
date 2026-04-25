@@ -1665,19 +1665,23 @@ namespace NetworkingLibrary.Services
 
         void DispatchIncoming(Message message, CSteamID sender)
         {
-            if (!rpcs.TryGetValue(message.ModID, out var methods))
+            MessageHandler[] handlersSnapshot;
+            lock (rpcLock)
             {
-                Net.Logger.LogWarning($"Dropping message for unknown mod {message.ModID}");
-                return;
+                if (!rpcs.TryGetValue(message.ModID, out var methods))
+                {
+                    Net.Logger.LogWarning($"Dropping message for unknown mod {message.ModID}");
+                    return;
+                }
+                if (!methods.TryGetValue(message.MethodName, out var handlers))
+                {
+                    Net.Logger.LogWarning($"Dropping message for method {message.MethodName} not registered for {message.ModID}");
+                    return;
+                }
+                handlersSnapshot = handlers.ToArray();
             }
 
-            if (!methods.TryGetValue(message.MethodName, out var handlers))
-            {
-                Net.Logger.LogWarning($"Dropping message for method {message.MethodName} not registered for {message.ModID}");
-                return;
-            }
-
-            IEnumerable<MessageHandler> candidates = handlers.Where(h => h.Mask == message.Mask);
+            IEnumerable<MessageHandler> candidates = handlersSnapshot.Where(h => h.Mask == message.Mask);
             if (!string.IsNullOrEmpty(message.OverloadKey))
             {
                 var keyed = candidates.Where(h => BuildOverloadKey(h) == message.OverloadKey).ToArray();
@@ -2059,10 +2063,15 @@ namespace NetworkingLibrary.Services
             ulong id = localSender.m_SteamID;
             if (IncomingValidator != null && !IncomingValidator(message, id)) return;
 
-            if (!rpcs.TryGetValue(message.ModID, out var methods)) return;
-            if (!methods.TryGetValue(message.MethodName, out var handlers)) return;
+            MessageHandler[] handlersSnapshot;
+            lock (rpcLock)
+            {
+                if (!rpcs.TryGetValue(message.ModID, out var methods)) return;
+                if (!methods.TryGetValue(message.MethodName, out var handlers)) return;
+                handlersSnapshot = handlers.ToArray();
+            }
 
-            IEnumerable<MessageHandler> candidates = handlers.Where(h => h.Mask == message.Mask);
+            IEnumerable<MessageHandler> candidates = handlersSnapshot.Where(h => h.Mask == message.Mask);
             if (!string.IsNullOrEmpty(message.OverloadKey))
             {
                 var keyed = candidates.Where(h => BuildOverloadKey(h) == message.OverloadKey).ToArray();
@@ -2138,11 +2147,17 @@ namespace NetworkingLibrary.Services
             try
             {
                 var msg = new Message(modId, methodName, mask);
+                MessageHandler[] handlersSnapshot = Array.Empty<MessageHandler>();
+                lock (rpcLock)
+                {
+                    if (rpcs.TryGetValue(modId, out var methods) && methods.TryGetValue(methodName, out var handlers) && handlers.Count > 0)
+                        handlersSnapshot = handlers.ToArray();
+                }
 
-                if (rpcs.TryGetValue(modId, out var methods) && methods.TryGetValue(methodName, out var handlers) && handlers.Count > 0)
+                if (handlersSnapshot.Length > 0)
                 {
                     MessageHandler chosen = null!;
-                    foreach (var h in handlers)
+                    foreach (var h in handlersSnapshot)
                     {
                         if (h.Mask != mask) continue;
                         var expected = h.Parameters;
@@ -2166,7 +2181,7 @@ namespace NetworkingLibrary.Services
 
                     if (chosen == null)
                     {
-                        chosen = handlers.FirstOrDefault(h =>
+                        chosen = handlersSnapshot.FirstOrDefault(h =>
                         {
                             int expectedCount = h.TakesInfo ? h.Parameters.Length - 1 : h.Parameters.Length;
                             return expectedCount == parameters.Length && h.Mask == mask;

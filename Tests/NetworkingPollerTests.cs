@@ -39,7 +39,9 @@ public class NetworkingPollerTests : IDisposable
         public void DeregisterNetworkObject(object instance, uint modId, int mask = 0) { }
         public void DeregisterNetworkType(Type type, uint modId, int mask = 0) { }
         public void RPC(uint modId, string methodName, ReliableType reliable, params object[] parameters) { }
+        public void RPC(uint modId, string methodName, ReliableType reliable, Type[] parameterTypes, params object?[] parameters) { }
         public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, params object[] parameters) { }
+        public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, Type[] parameterTypes, params object?[] parameters) { }
         public void RPCToHost(uint modId, string methodName, ReliableType reliable, params object[] parameters) { }
         public void RegisterLobbyDataKey(string key) { }
         public void SetLobbyData(string key, object value) { }

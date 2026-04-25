@@ -881,54 +881,64 @@ namespace NetworkingLibrary.Services
                 hasGlobalHmac = globalHmac != null;
                 globalMacKey = globalSharedSecret != null ? (byte[])globalSharedSecret.Clone() : null;
             }
-            if (hasGlobalHmac) flags |= HMAC_FLAG;
-            if (modSigners.ContainsKey(modId)) flags |= SIGN_FLAG;
-            if (reliable == ReliableType.Reliable) flags |= ACK_FLAG;
-
-            ulong seq;
-            lock (outgoingSequencePerMod)
+            try
             {
-                if (!outgoingSequencePerMod.TryGetValue(modId, out var cur)) cur = 0;
-                seq = ++cur;
-                outgoingSequencePerMod[modId] = cur;
+                if (hasGlobalHmac) flags |= HMAC_FLAG;
+                if (modSigners.ContainsKey(modId)) flags |= SIGN_FLAG;
+                if (reliable == ReliableType.Reliable) flags |= ACK_FLAG;
+
+                ulong seq;
+                lock (outgoingSequencePerMod)
+                {
+                    if (!outgoingSequencePerMod.TryGetValue(modId, out var cur)) cur = 0;
+                    seq = ++cur;
+                    outgoingSequencePerMod[modId] = cur;
+                }
+
+                ulong msgId = NextMessageId();
+
+                using var ms = new MemoryStream();
+                // Frame layout:
+                // [flags:1][msgId:8][seq:8][total:4][index:4][payload...][optional signature len:2 + signature...][optional global mac:32]
+                // Canonical MAC scope is every byte from flags through payload/signature (everything except the trailing MAC that is being appended).
+                ms.WriteByte(flags);
+                ms.Write(BitConverter.GetBytes(msgId), 0, 8);
+                ms.Write(BitConverter.GetBytes(seq), 0, 8);
+                ms.Write(BitConverter.GetBytes(1), 0, 4);
+                ms.Write(BitConverter.GetBytes(0), 0, 4);
+                ms.Write(payload, 0, payload.Length);
+
+                byte[] headerAndPayload = ms.ToArray();
+
+                if (modSigners.TryGetValue(modId, out var signer))
+                {
+                    var sig = signer(headerAndPayload);
+                    using var ms2 = new MemoryStream();
+                    ms2.Write(headerAndPayload, 0, headerAndPayload.Length);
+                    var len = (ushort)sig.Length;
+                    ms2.Write(BitConverter.GetBytes(len), 0, 2);
+                    ms2.Write(sig, 0, sig.Length);
+                    headerAndPayload = ms2.ToArray();
+                }
+
+                if (hasGlobalHmac && globalMacKey != null)
+                {
+                    var mac = HmacSha256RawStatic(globalMacKey, headerAndPayload);
+                    using var ms3 = new MemoryStream();
+                    ms3.Write(headerAndPayload, 0, headerAndPayload.Length);
+                    ms3.Write(mac, 0, mac.Length);
+                    headerAndPayload = ms3.ToArray();
+                }
+
+                return headerAndPayload;
             }
-
-            ulong msgId = NextMessageId();
-
-            using var ms = new MemoryStream();
-            // Frame layout:
-            // [flags:1][msgId:8][seq:8][total:4][index:4][payload...][optional signature len:2 + signature...][optional global mac:32]
-            // Canonical MAC scope is every byte from flags through payload/signature (everything except the trailing MAC that is being appended).
-            ms.WriteByte(flags);
-            ms.Write(BitConverter.GetBytes(msgId), 0, 8);
-            ms.Write(BitConverter.GetBytes(seq), 0, 8);
-            ms.Write(BitConverter.GetBytes(1), 0, 4);
-            ms.Write(BitConverter.GetBytes(0), 0, 4);
-            ms.Write(payload, 0, payload.Length);
-
-            byte[] headerAndPayload = ms.ToArray();
-
-            if (modSigners.TryGetValue(modId, out var signer))
+            finally
             {
-                var sig = signer(headerAndPayload);
-                using var ms2 = new MemoryStream();
-                ms2.Write(headerAndPayload, 0, headerAndPayload.Length);
-                var len = (ushort)sig.Length;
-                ms2.Write(BitConverter.GetBytes(len), 0, 2);
-                ms2.Write(sig, 0, sig.Length);
-                headerAndPayload = ms2.ToArray();
+                if (globalMacKey != null)
+                {
+                    CryptographicOperations.ZeroMemory(globalMacKey);
+                }
             }
-
-            if (hasGlobalHmac && globalMacKey != null)
-            {
-                var mac = HmacSha256RawStatic(globalMacKey, headerAndPayload);
-                using var ms3 = new MemoryStream();
-                ms3.Write(headerAndPayload, 0, headerAndPayload.Length);
-                ms3.Write(mac, 0, mac.Length);
-                headerAndPayload = ms3.ToArray();
-            }
-
-            return headerAndPayload;
         }
 
         void SendWithPossibleAck(byte[] framed, CSteamID target, ReliableType reliable)
@@ -940,8 +950,15 @@ namespace NetworkingLibrary.Services
             }
             if (sym != null)
             {
-                framed[0] = (byte)(framed[0] | HMAC_FLAG);
-                framed = AppendFrameMac(framed, sym);
+                try
+                {
+                    framed[0] = (byte)(framed[0] | HMAC_FLAG);
+                    framed = AppendFrameMac(framed, sym);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(sym);
+                }
             }
 
             bool requestAck = (framed[0] & ACK_FLAG) != 0;
@@ -1393,23 +1410,37 @@ namespace NetworkingLibrary.Services
                 peerSym = perPeerSymmetricKey.TryGetValue(senderSteamId, out var peer) ? (byte[])peer.Clone() : null;
                 localGlobalSharedSecret = globalSharedSecret != null ? (byte[])globalSharedSecret.Clone() : null;
             }
-            bool hasPeer = peerSym != null;
-            bool hasGlobal = localGlobalSharedSecret != null;
-            if (!hasPeer && !hasGlobal) return false;
-
-            var current = frameWithMacs;
-            if (hasPeer)
+            try
             {
-                if (!VerifyAndStripSingleFrameMac(current, peerSym!, out current)) return false;
-            }
+                bool hasPeer = peerSym != null;
+                bool hasGlobal = localGlobalSharedSecret != null;
+                if (!hasPeer && !hasGlobal) return false;
 
-            if (hasGlobal)
+                var current = frameWithMacs;
+                if (hasPeer)
+                {
+                    if (!VerifyAndStripSingleFrameMac(current, peerSym!, out current)) return false;
+                }
+
+                if (hasGlobal)
+                {
+                    if (!VerifyAndStripSingleFrameMac(current, localGlobalSharedSecret!, out current)) return false;
+                }
+
+                verifiedFrame = current;
+                return true;
+            }
+            finally
             {
-                if (!VerifyAndStripSingleFrameMac(current, localGlobalSharedSecret!, out current)) return false;
+                if (peerSym != null)
+                {
+                    CryptographicOperations.ZeroMemory(peerSym);
+                }
+                if (localGlobalSharedSecret != null)
+                {
+                    CryptographicOperations.ZeroMemory(localGlobalSharedSecret);
+                }
             }
-
-            verifiedFrame = current;
-            return true;
         }
 
         private static void ReadExact(Stream s, byte[] buffer, int count)

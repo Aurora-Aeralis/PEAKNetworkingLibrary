@@ -48,6 +48,7 @@ public class UnityMainThreadDispatcher : MonoBehaviour
 
     public void Enqueue(Action a, float delaySeconds = 0f)
     {
+        ArgumentNullException.ThrowIfNull(a);
         if (delaySeconds <= 0f)
         {
             lock (queue) queue.Enqueue(a);
@@ -57,6 +58,7 @@ public class UnityMainThreadDispatcher : MonoBehaviour
 
     IEnumerator EnqueueDelayed(Action a, float d)
     {
+        ArgumentNullException.ThrowIfNull(a);
         yield return new WaitForSeconds(d);
         lock (queue) queue.Enqueue(a);
     }

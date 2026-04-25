@@ -388,6 +388,20 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void RefreshPlayerList_WithInvalidLobbyState_RemainsSafe_AndClearsPlayers()
+    {
+        var service = new SteamNetworkingService();
+        SetField(service, "players", new[] { new CSteamID(111UL) });
+        SetLobby(service, 0UL);
+
+        var ex = Record.Exception(() => InvokeNonPublic(service, "RefreshPlayerList"));
+        var players = (CSteamID[])GetField(service, "players")!;
+
+        Assert.Null(ex);
+        Assert.Empty(players);
+    }
+
+    [Fact]
     public async Task DispatchIncoming_AndBuildMessage_HandleConcurrentRpcRegistrationChanges()
     {
         var service = new SteamNetworkingService();

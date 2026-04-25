@@ -568,7 +568,7 @@ namespace NetworkingLibrary.Services
             {
                 //LogInfo($"RefreshPlayerList: Lobby={Lobby} Owner={SteamMatchmaking.GetLobbyOwner(Lobby)} Local={SteamUser.GetSteamID()} InLobby={InLobby}");
 
-                if (Lobby == null || Lobby == CSteamID.Nil)
+                if (Lobby == CSteamID.Nil)
                 {
                     //LogWarning("RefreshPlayerList: Lobby is Nil; cannot query members.");
                     players = Array.Empty<CSteamID>();
@@ -577,6 +577,11 @@ namespace NetworkingLibrary.Services
 
                 int count = SteamMatchmaking.GetNumLobbyMembers(Lobby);
                 //LogInfo($"RefreshPlayerList: SteamMatchmaking.GetNumLobbyMembers returned {count}");
+                if (count <= 0)
+                {
+                    players = Array.Empty<CSteamID>();
+                    return;
+                }
                 players = new CSteamID[count];
 
                 for (int i = 0; i < players.Length; i++)

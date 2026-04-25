@@ -125,7 +125,7 @@ namespace NetworkingLibrary.Services
         public void Initialize()
         {
             if (IsInitialized) return;
-            var rng = RandomNumberGenerator.Create();
+            using var rng = RandomNumberGenerator.Create();
             var k = new byte[32];
             rng.GetBytes(k);
             perPeerSymmetricKey[LocalSteamId] = k;

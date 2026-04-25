@@ -26,6 +26,30 @@ public class SteamNetworkingServiceLifecycleTests
         }
     }
 
+    sealed class MixedTypeRpcReceiver
+    {
+        public static int StaticCallCount { get; private set; }
+        public static int InstanceCallCount { get; private set; }
+
+        [CustomRPC]
+        static void OnTypeStaticPing(int value)
+        {
+            StaticCallCount += value;
+        }
+
+        [CustomRPC]
+        void OnTypeInstancePing(int value)
+        {
+            InstanceCallCount += value;
+        }
+
+        public static void Reset()
+        {
+            StaticCallCount = 0;
+            InstanceCallCount = 0;
+        }
+    }
+
     [Fact]
     public void LeaveAndShutdown_ClearOutboundQueues()
     {
@@ -208,6 +232,19 @@ public class SteamNetworkingServiceLifecycleTests
         Assert.Equal(1, receiver.CallCount);
     }
 
+    [Fact]
+    public void RegisterNetworkType_RejectsInstanceHandlers_AndLeavesNoNullTargetInstanceHandlers()
+    {
+        var service = new SteamNetworkingService();
+        MixedTypeRpcReceiver.Reset();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => service.RegisterNetworkType(typeof(MixedTypeRpcReceiver), TestModId));
+        Assert.Contains("Cannot register instance RPC method", ex.Message);
+        Assert.False(HasAnyHandlers(service, TestModId));
+        Assert.Equal(0, MixedTypeRpcReceiver.StaticCallCount);
+        Assert.Equal(0, MixedTypeRpcReceiver.InstanceCallCount);
+    }
+
     static void SetInLobby(SteamNetworkingService service, bool value)
     {
         typeof(SteamNetworkingService).GetField("<InLobby>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(service, value);
@@ -325,5 +362,19 @@ public class SteamNetworkingServiceLifecycleTests
         service.Initialize();
         service.CreateLobby();
         service.RPC(TestModId, "OnPing", ReliableType.Reliable, value);
+    }
+
+    static bool HasAnyHandlers(SteamNetworkingService service, uint modId)
+    {
+        var rpcs = GetField(service, "rpcs") as IDictionary;
+        if (rpcs == null || !rpcs.Contains(modId)) return false;
+        var methods = rpcs[modId] as IDictionary;
+        if (methods == null) return false;
+        foreach (DictionaryEntry methodEntry in methods)
+        {
+            var handlers = methodEntry.Value as ICollection;
+            if (handlers != null && handlers.Count > 0) return true;
+        }
+        return false;
     }
 }

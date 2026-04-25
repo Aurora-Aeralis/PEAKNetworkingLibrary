@@ -647,10 +647,23 @@ namespace NetworkingLibrary.Services
         {
             int registered = 0;
             var registeredHandlers = new List<HandlerRegistration>();
+            var isTypeRegistration = instance == null;
 
             lock (rpcLock)
             {
-                var methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                if (isTypeRegistration)
+                {
+                    foreach (var method in type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                    {
+                        if (!method.GetCustomAttributes(false).OfType<CustomRPCAttribute>().Any()) continue;
+                        throw new InvalidOperationException($"Cannot register instance RPC method {type.FullName}.{method.Name} without an instance.");
+                    }
+                }
+
+                var flags = isTypeRegistration
+                    ? BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic
+                    : BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+                var methods = type.GetMethods(flags);
                 foreach (var method in methods)
                 {
                     var attrs = method.GetCustomAttributes(false).OfType<CustomRPCAttribute>().ToArray();
@@ -661,7 +674,7 @@ namespace NetworkingLibrary.Services
 
                     var mh = new MessageHandler
                     {
-                        Target = method.IsStatic ? null! : instance!,
+                        Target = isTypeRegistration ? null! : instance!,
                         Method = method,
                         Parameters = method.GetParameters(),
                         TakesInfo = method.GetParameters().Length > 0 && method.GetParameters().Last().ParameterType.Name == "RPCInfo",

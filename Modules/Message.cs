@@ -13,7 +13,7 @@ namespace NetworkingLibrary.Modules
     /// </summary>
     public class Message : IDisposable
     {
-        public const byte PROTOCOL_VERSION = 1;
+        public const byte PROTOCOL_VERSION = 2;
         public static int MaxSize = 64 * 1024;
 
         public byte ProtocolVersion;
@@ -24,6 +24,7 @@ namespace NetworkingLibrary.Modules
         private List<byte> buffer = new();
         internal byte[] readableBuffer = Array.Empty<byte>();
         internal int readPos = 0;
+        private bool UsesReferencePresenceFlags => ProtocolVersion >= 2;
 
         public bool Compressed { get; private set; } = false;
 
@@ -104,24 +105,30 @@ namespace NetworkingLibrary.Modules
         public void WriteObject(Type type, object value)
         {
             if (type == null) throw new ArgumentNullException(nameof(type));
-            if (value == null)
-            {
-                // Encode null...
-            }
 
-            if (writeCasters.TryGetValue(type, out var w))
-            {
-                w(this, value!);
-                return;
-            }
-
-            // Nullable<T>
             var nt = Nullable.GetUnderlyingType(type);
             if (nt != null)
             {
                 bool has = value != null;
                 WriteBool(has);
                 if (has) WriteObject(nt, value!);
+                return;
+            }
+
+            if (!type.IsValueType && UsesReferencePresenceFlags)
+            {
+                bool has = value != null;
+                WriteBool(has);
+                if (!has) return;
+            }
+            else if (value == null)
+            {
+                throw new ArgumentNullException(nameof(value), $"Cannot serialize null for non-nullable value type {type.FullName}.");
+            }
+
+            if (writeCasters.TryGetValue(type, out var w))
+            {
+                w(this, value!);
                 return;
             }
 
@@ -165,7 +172,7 @@ namespace NetworkingLibrary.Modules
                 throw new Exception("Cannot serialize non-generic IList (heterogeneous lists) without explicit serializer registration.");
             }
 
-            throw new Exception($"Unsupported type for WriteObject: {type.FullName}. Register a serializer using Message.RegisterSerializer.");
+            throw new Exception($"Unsupported type for WriteObject: {type.FullName}. Register a serializer using Message.RegisterSerializer. Null handling: reference-like types (including arrays/lists/string/byte[]) are encoded with a leading presence flag and may be null; non-null values for unsupported reference types still require registration.");
         }
 
         public static void RegisterSerializer<T>(Action<Message, T> writer, Func<Message, T> reader)
@@ -319,7 +326,6 @@ namespace NetworkingLibrary.Modules
         public object ReadObject(Type type)
         {
             if (type == null) throw new ArgumentNullException(nameof(type));
-            if (readCasters.TryGetValue(type, out var r)) return r(this);
 
             var nt = Nullable.GetUnderlyingType(type);
             if (nt != null)
@@ -328,6 +334,14 @@ namespace NetworkingLibrary.Modules
                 if (!has) return null!;
                 return ReadObject(nt);
             }
+
+            if (!type.IsValueType && UsesReferencePresenceFlags)
+            {
+                bool has = ReadBool();
+                if (!has) return null!;
+            }
+
+            if (readCasters.TryGetValue(type, out var r)) return r(this);
 
             if (type.IsEnum)
             {
@@ -367,7 +381,7 @@ namespace NetworkingLibrary.Modules
                 }
             }
 
-            throw new Exception($"Unsupported read type {type.FullName}. Register a deserializer using Message.RegisterSerializer.");
+            throw new Exception($"Unsupported read type {type.FullName}. Register a deserializer using Message.RegisterSerializer. Null handling: reference-like types (including arrays/lists/string/byte[]) are decoded from a leading presence flag and may be null; non-null payloads for unsupported reference types still require registration.");
         }
         #endregion
 

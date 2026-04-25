@@ -6,7 +6,6 @@ using System.Security.Cryptography;
 using System.Text;
 using NetworkingLibrary.Modules;
 using NetworkingLibrary.Services;
-using UnityEngine;
 
 namespace NetworkingLibrary.Services
 {
@@ -78,6 +77,16 @@ namespace NetworkingLibrary.Services
         readonly Dictionary<ulong, byte[]> perPeerSymmetricKey = new();
         byte[]? globalSharedSecret;
         HMACSHA256? globalHmac;
+
+        static void LogError(string message)
+        {
+            try { Net.Logger?.LogError(message); } catch { }
+        }
+
+        static void LogWarning(string message)
+        {
+            try { Net.Logger?.LogWarning(message); } catch { }
+        }
 
         public ulong GetLocalSteam64()
         {
@@ -379,8 +388,8 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void SetLobbyData(string key, object value)
         {
-            if (!InLobby) { Debug.LogError("Cannot set lobby data when not in lobby."); return; }
-            if (!lobbyKeys.Contains(key)) Debug.LogWarning($"Accessing unregistered lobby key {key}");
+            if (!InLobby) { LogError("Cannot set lobby data when not in lobby."); return; }
+            if (!lobbyKeys.Contains(key)) LogWarning($"Accessing unregistered lobby key {key}");
             var serialized = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
             lobbyData[key] = serialized;
             LobbyDataChanged?.Invoke(new[] { key });
@@ -389,11 +398,11 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public T GetLobbyData<T>(string key)
         {
-            if (!InLobby) { Debug.LogError("Cannot get lobby data when not in lobby."); return default!; }
-            if (!lobbyKeys.Contains(key)) Debug.LogWarning($"Accessing unregistered lobby key {key}");
+            if (!InLobby) { LogError("Cannot get lobby data when not in lobby."); return default!; }
+            if (!lobbyKeys.Contains(key)) LogWarning($"Accessing unregistered lobby key {key}");
             if (!lobbyData.TryGetValue(key, out var v)) return default!;
             try { return (T)Convert.ChangeType(v, typeof(T), System.Globalization.CultureInfo.InvariantCulture); }
-            catch { Debug.LogError($"Could not parse lobby data [{key},{v}]"); return default!; }
+            catch { LogError($"Could not parse lobby data [{key},{v}]"); return default!; }
         }
 
         /// <summary>
@@ -403,8 +412,8 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void SetPlayerData(string key, object value)
         {
-            if (!InLobby) { Debug.LogError("Cannot set player data when not in lobby."); return; }
-            if (!playerKeys.Contains(key)) Debug.LogWarning($"Accessing unregistered player key {key}");
+            if (!InLobby) { LogError("Cannot set player data when not in lobby."); return; }
+            if (!playerKeys.Contains(key)) LogWarning($"Accessing unregistered player key {key}");
             var serialized = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
             perPlayerData[LocalSteamId][key] = serialized;
             PlayerDataChanged?.Invoke(LocalSteamId, new[] { key });
@@ -413,12 +422,12 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public T GetPlayerData<T>(ulong steamId64, string key)
         {
-            if (!InLobby) { Debug.LogError("Cannot get player data when not in lobby."); return default!; }
-            if (!playerKeys.Contains(key)) Debug.LogWarning($"Accessing unregistered player key {key}");
+            if (!InLobby) { LogError("Cannot get player data when not in lobby."); return default!; }
+            if (!playerKeys.Contains(key)) LogWarning($"Accessing unregistered player key {key}");
             if (!perPlayerData.TryGetValue(steamId64, out var dict)) return default!;
             if (!dict.TryGetValue(key, out var v)) return default!;
             try { return (T)Convert.ChangeType(v, typeof(T), System.Globalization.CultureInfo.InvariantCulture); }
-            catch { Debug.LogError($"Could not parse player data [{key},{v}]"); return default!; }
+            catch { LogError($"Could not parse player data [{key},{v}]"); return default!; }
         }
 
         /// <summary>
@@ -469,7 +478,7 @@ namespace NetworkingLibrary.Services
 
                     if (chosen == null)
                     {
-                        Debug.LogError($"No RPC overload matched method '{methodName}' for mask {mask} and parameter list.");
+                        LogError($"No RPC overload matched method '{methodName}' for mask {mask} and parameter list.");
                         return null;
                     }
 
@@ -496,7 +505,7 @@ namespace NetworkingLibrary.Services
 
                     if (msg.Length() > Message.MaxLogicalSize)
                     {
-                        Debug.LogError("Message exceeds maximum allowed overall size.");
+                        LogError("Message exceeds maximum allowed overall size.");
                         return null;
                     }
 
@@ -536,14 +545,14 @@ namespace NetworkingLibrary.Services
 
                     if (msg.Length() > Message.MaxLogicalSize)
                     {
-                        Debug.LogError("Message exceeds maximum allowed overall size.");
+                        LogError("Message exceeds maximum allowed overall size.");
                         return null;
                     }
 
                     return msg;
                 }
             }
-            catch (Exception ex) { Debug.LogError($"BuildMessage failed: {ex}"); return null; }
+            catch (Exception ex) { LogError($"BuildMessage failed: {ex}"); return null; }
         }
 
         void DispatchIncoming(Message message, ulong from)
@@ -552,8 +561,8 @@ namespace NetworkingLibrary.Services
 
             if (!rateLimiter.IncomingAllowed()) return;
 
-            if (!rpcs.TryGetValue(message.ModID, out var methods)) { Debug.LogWarning($"No mod {message.ModID}"); return; }
-            if (!methods.TryGetValue(message.MethodName, out var handlers)) { Debug.LogWarning($"No method {message.MethodName}"); return; }
+            if (!rpcs.TryGetValue(message.ModID, out var methods)) { LogWarning($"No mod {message.ModID}"); return; }
+            if (!methods.TryGetValue(message.MethodName, out var handlers)) { LogWarning($"No method {message.MethodName}"); return; }
 
             MessageHandler? chosenHandler = null;
             object[]? chosenParams = null;
@@ -591,12 +600,12 @@ namespace NetworkingLibrary.Services
 
             if (chosenHandler == null || chosenParams == null)
             {
-                Debug.LogWarning($"No matching overload for {message.MethodName} (mask {message.Mask})");
+                LogWarning($"No matching overload for {message.MethodName} (mask {message.Mask})");
                 return;
             }
 
             try { chosenHandler.Method.Invoke(chosenHandler.Target, chosenParams); }
-            catch (Exception ex) { Debug.LogError($"Invoke RPC error: {ex}"); }
+            catch (Exception ex) { LogError($"Invoke RPC error: {ex}"); }
         }
 
         bool TryDeserializeForHandler(Message source, MessageHandler handler, ulong from, out object[] callParams, out int unread)

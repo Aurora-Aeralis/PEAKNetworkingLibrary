@@ -18,8 +18,6 @@ using UnityEngine;
 
 namespace NetworkingLibrary.Services
 {
-    /// <summary>
-    /// </summary>
     public class SteamNetworkingService : INetworkingService
     {
         const int CHANNEL = 120;
@@ -28,14 +26,8 @@ namespace NetworkingLibrary.Services
         private readonly object rpcLock = new object();
         private readonly object cryptoStateLock = new();
 
-        /// <summary>
-        /// </summary>
         public bool IsInitialized { get; private set; } = false;
-        /// <summary>
-        /// </summary>
         public bool InLobby { get; private set; } = false;
-        /// <summary>
-        /// </summary>
         public ulong HostSteamId64
         {
             get
@@ -46,8 +38,6 @@ namespace NetworkingLibrary.Services
                 return owner.m_SteamID;
             }
         }
-        /// <summary>
-        /// </summary>
         public string HostIdString
         {
             get
@@ -97,13 +87,9 @@ namespace NetworkingLibrary.Services
         }
 
 
-        /// <summary>
-        /// </summary>
         public CSteamID Lobby { get; private set; } = CSteamID.Nil;
         private CSteamID[] players = Array.Empty<CSteamID>();
 
-        /// <summary>
-        /// </summary>
         public bool IsHost
         {
             get
@@ -121,30 +107,14 @@ namespace NetworkingLibrary.Services
                 }
             }
         }
-        /// <summary>
-        /// </summary>
         public event Action? LobbyCreated;
-        /// <summary>
-        /// </summary>
         public event Action? LobbyEntered;
-        /// <summary>
-        /// </summary>
         public event Action? LobbyLeft;
-        /// <summary>
-        /// </summary>
         public event Action<ulong>? PlayerEntered;
-        /// <summary>
-        /// </summary>
         public event Action<ulong>? PlayerLeft;
-        /// <summary>
-        /// </summary>
         public event Action<string[]>? LobbyDataChanged;
-        /// <summary>
-        /// </summary>
         public event Action<ulong, string[]>? PlayerDataChanged;
 
-        /// <summary>
-        /// </summary>
         public Func<Message, ulong, bool>? IncomingValidator { get; set; }
 
         private readonly List<string> lobbyDataKeys = new();
@@ -225,8 +195,6 @@ namespace NetworkingLibrary.Services
         RSACryptoServiceProvider? LocalRsa;
         private Func<RSACryptoServiceProvider> localRsaFactory = () => new RSACryptoServiceProvider(2048);
 
-        /// <summary>
-        /// </summary>
         public SteamNetworkingService() { }
 
         readonly Dictionary<(ulong sender, ulong msgId), FragmentBuffer> fragmentBuffers = new();
@@ -248,8 +216,6 @@ namespace NetworkingLibrary.Services
             public MessageHandler Handler = null!;
         }
 
-        /// <summary>
-        /// </summary>
         public void Initialize()
         {
             if (IsInitialized) return;
@@ -330,8 +296,6 @@ namespace NetworkingLibrary.Services
             }
         }
 
-        /// <summary>
-        /// </summary>
         public void Shutdown()
         {
             if (InLobby || Lobby != CSteamID.Nil)
@@ -370,8 +334,6 @@ namespace NetworkingLibrary.Services
             LogInfo("SteamNetworkingService shutdown");
         }
 
-        /// <summary>
-        /// </summary>
         public void CreateLobby(int maxPlayers = 8)
         {
             if (!IsInitialized)
@@ -389,8 +351,6 @@ namespace NetworkingLibrary.Services
             try { SteamMatchmaking.CreateLobby(ELobbyType.k_ELobbyTypePrivate, maxPlayers); }
             catch (Exception ex) { LogError($"CreateLobby failed: {ex}"); }
         }
-        /// <summary>
-        /// </summary>
         public void JoinLobby(ulong lobbySteamId64)
         {
             if (!IsInitialized)
@@ -408,8 +368,6 @@ namespace NetworkingLibrary.Services
             try { SteamMatchmaking.JoinLobby(new CSteamID(lobbySteamId64)); }
             catch (Exception ex) { LogError($"JoinLobby failed for lobby {lobbySteamId64}: {ex}"); }
         }
-        /// <summary>
-        /// </summary>
         public void LeaveLobby()
         {
             if (!InLobby || Lobby == CSteamID.Nil) return;
@@ -425,8 +383,6 @@ namespace NetworkingLibrary.Services
 
             OnLobbyLeftInternal();
         }
-        /// <summary>
-        /// </summary>
         public void InviteToLobby(ulong steamId64)
         {
             if (!IsInitialized)
@@ -648,16 +604,12 @@ namespace NetworkingLibrary.Services
             }
         }
 
-        /// <summary>
-        /// </summary>
         public void RegisterLobbyDataKey(string key)
         {
             if (lobbyDataKeys.Contains(key)) LogWarning($"Lobby key {key} already registered");
             else lobbyDataKeys.Add(key);
         }
 
-        /// <summary>
-        /// </summary>
         public void SetLobbyData(string key, object value)
         {
             if (!InLobby) { LogError("Cannot set lobby data when not in lobby."); return; }
@@ -673,8 +625,6 @@ namespace NetworkingLibrary.Services
             }
         }
 
-        /// <summary>
-        /// </summary>
         public T GetLobbyData<T>(string key)
         {
             if (!InLobby) { LogError("Cannot get lobby data when not in lobby."); return default(T)!; }
@@ -694,16 +644,12 @@ namespace NetworkingLibrary.Services
             catch { LogError($"Could not parse lobby data [{key},{v}] as {typeof(T).Name}"); return default(T)!; }
         }
 
-        /// <summary>
-        /// </summary>
         public void RegisterPlayerDataKey(string key)
         {
             if (playerDataKeys.Contains(key)) LogWarning($"Player key {key} already registered");
             else playerDataKeys.Add(key);
         }
 
-        /// <summary>
-        /// </summary>
         public void SetPlayerData(string key, object value)
         {
             if (!InLobby) { LogError("Cannot set player data when not in lobby."); return; }
@@ -719,8 +665,6 @@ namespace NetworkingLibrary.Services
             }
         }
 
-        /// <summary>
-        /// </summary>
         public T GetPlayerData<T>(ulong steamId64, string key)
         {
             if (!InLobby) { LogError("Cannot get player data when not in lobby."); return default(T)!; }
@@ -741,15 +685,11 @@ namespace NetworkingLibrary.Services
             catch { LogError($"Could not parse player data [{key},{v}] as {typeof(T).Name}"); return default(T)!; }
         }
 
-        /// <summary>
-        /// </summary>
         public IDisposable RegisterNetworkObject(object instance, uint modId, int mask = 0)
         {
             if (instance == null) throw new ArgumentNullException(nameof(instance));
             return RegisterNetworkTypeInternal(instance.GetType(), instance, modId, mask);
         }
-        /// <summary>
-        /// </summary>
         public IDisposable RegisterNetworkType(Type type, uint modId, int mask = 0)
         {
             if (type == null) throw new ArgumentNullException(nameof(type));
@@ -811,15 +751,11 @@ namespace NetworkingLibrary.Services
             return new RegistrationToken(this, modId, registeredHandlers);
         }
 
-        /// <summary>
-        /// </summary>
         public void DeregisterNetworkObject(object instance, uint modId, int mask = 0)
         {
             if (instance == null) throw new ArgumentNullException(nameof(instance));
             DeregisterNetworkObjectInternal(instance.GetType(), instance, modId, mask);
         }
-        /// <summary>
-        /// </summary>
         public void DeregisterNetworkType(Type type, uint modId, int mask = 0)
         {
             if (type == null) throw new ArgumentNullException(nameof(type));
@@ -906,8 +842,6 @@ namespace NetworkingLibrary.Services
             }
         }
 
-        /// <summary>
-        /// </summary>
         public void RPC(uint modId, string methodName, ReliableType reliable, params object[] parameters)
         {
             if (!InLobby) { LogError("RPC called while not in lobby"); return; }
@@ -952,15 +886,11 @@ namespace NetworkingLibrary.Services
             InvokeLocalMessage(new Message(msg.ToArray()), SteamUser.GetSteamID());
         }
 
-        /// <summary>
-        /// </summary>
         public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, params object[] parameters)
         {
             RPCTarget(modId, methodName, new CSteamID(targetSteamId64), reliable, parameters);
         }
 
-        /// <summary>
-        /// </summary>
         public void RPCTarget(uint modId, string methodName, CSteamID target, ReliableType reliable, params object[] parameters)
         {
             if (!InLobby) { LogError("Cannot RPC target when not in lobby"); return; }
@@ -994,8 +924,6 @@ namespace NetworkingLibrary.Services
             EnqueueOrSend(framed, target, reliable, DeterminePriority(modId, methodName));
         }
 
-        /// <summary>
-        /// </summary>
         public void RPCToHost(uint modId, string methodName, ReliableType reliable, params object[] parameters)
         {
             if (!InLobby) { LogError("Not in lobby"); return; }
@@ -1245,8 +1173,6 @@ namespace NetworkingLibrary.Services
             }
         }
 
-        /// <summary>
-        /// </summary>
         public void PollReceive()
         {
             FlushQueues();
@@ -1978,8 +1904,6 @@ namespace NetworkingLibrary.Services
 
         class HandshakeState { public string? PeerPub; public string LocalNonce = string.Empty; public byte[]? Sym; public bool Completed = false; }
 
-        /// <summary>
-        /// </summary>
         public void StartHandshake(CSteamID target)
         {
             if (LocalRsa == null) return;
@@ -2166,8 +2090,6 @@ namespace NetworkingLibrary.Services
             return new RSAParameters { Modulus = mod, Exponent = exp };
         }
 
-        /// <summary>
-        /// </summary>
         public void SetSharedSecret(byte[]? secret)
         {
             lock (cryptoStateLock)
@@ -2185,8 +2107,6 @@ namespace NetworkingLibrary.Services
             }
         }
 
-        /// <summary>
-        /// </summary>
         public void RegisterModSigner(uint modId, Func<byte[], byte[]> signerDelegate)
         {
             if (signerDelegate == null) throw new ArgumentNullException(nameof(signerDelegate));
@@ -2195,8 +2115,6 @@ namespace NetworkingLibrary.Services
                 modSigners[modId] = signerDelegate;
             }
         }
-        /// <summary>
-        /// </summary>
         public void RegisterModPublicKey(uint modId, RSAParameters pub)
         {
             if (pub.Modulus == null || pub.Modulus.Length == 0)

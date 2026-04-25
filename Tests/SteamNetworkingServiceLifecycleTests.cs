@@ -4,6 +4,7 @@ using Steamworks;
 using System;
 using System.Collections;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -227,6 +228,23 @@ public class SteamNetworkingServiceLifecycleTests
         Assert.True(service.InLobby);
         Assert.Equal(42, receiver.LastValue);
         Assert.Equal(1, receiver.CallCount);
+    }
+
+    [Fact]
+    public void Initialize_WhenCallbackAndCryptoSetupFails_KeepsServiceUninitializedAndClearsPartialState()
+    {
+        var service = new SteamNetworkingService();
+        var rsaFactoryField = typeof(SteamNetworkingService).GetField("localRsaFactory", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        rsaFactoryField.SetValue(service, (Func<RSACryptoServiceProvider>)(() => throw new InvalidOperationException("simulated init failure")));
+
+        service.Initialize();
+
+        Assert.False(service.IsInitialized);
+        Assert.Null(GetField(service, "cbLobbyEnter"));
+        Assert.Null(GetField(service, "cbLobbyCreated"));
+        Assert.Null(GetField(service, "cbLobbyChatUpdate"));
+        Assert.Null(GetField(service, "cbLobbyDataUpdate"));
+        Assert.Null(GetField(service, "LocalRsa"));
     }
 
     static void SetInLobby(SteamNetworkingService service, bool value)

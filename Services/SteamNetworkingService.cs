@@ -190,6 +190,7 @@ namespace NetworkingLibrary.Services
         const int FRAME_HEADER_SIZE = 25; // flags[1] + msgId[8] + seq[8] + total[4] + index[4]
 
         RSACryptoServiceProvider? LocalRsa;
+        private Func<RSACryptoServiceProvider> localRsaFactory = () => new RSACryptoServiceProvider(2048);
 
         /// <summary>
         /// </summary>
@@ -243,15 +244,37 @@ namespace NetworkingLibrary.Services
             }
             catch { }
 
-            cbLobbyEnter = Callback<LobbyEnter_t>.Create(OnLobbyEnter);
-            cbLobbyCreated = Callback<LobbyCreated_t>.Create(OnLobbyCreated);
-            cbLobbyChatUpdate = Callback<LobbyChatUpdate_t>.Create(OnLobbyChatUpdate);
-            cbLobbyDataUpdate = Callback<LobbyDataUpdate_t>.Create(OnLobbyDataUpdate);
-
-            LocalRsa = new RSACryptoServiceProvider(2048);
+            if (!TryInitializeSteamCallbacksAndCrypto())
+            {
+                IsInitialized = false;
+                return;
+            }
 
             IsInitialized = true;
             Net.Logger.LogInfo("SteamNetworkingService initialized");
+        }
+
+        private bool TryInitializeSteamCallbacksAndCrypto()
+        {
+            try
+            {
+                cbLobbyEnter = Callback<LobbyEnter_t>.Create(OnLobbyEnter);
+                cbLobbyCreated = Callback<LobbyCreated_t>.Create(OnLobbyCreated);
+                cbLobbyChatUpdate = Callback<LobbyChatUpdate_t>.Create(OnLobbyChatUpdate);
+                cbLobbyDataUpdate = Callback<LobbyDataUpdate_t>.Create(OnLobbyDataUpdate);
+                LocalRsa = localRsaFactory();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Net.Logger.LogError($"Failed to initialize Steam callbacks and crypto: {ex}");
+                cbLobbyEnter = null;
+                cbLobbyCreated = null;
+                cbLobbyChatUpdate = null;
+                cbLobbyDataUpdate = null;
+                LocalRsa = null;
+                return false;
+            }
         }
 
         /// <summary>

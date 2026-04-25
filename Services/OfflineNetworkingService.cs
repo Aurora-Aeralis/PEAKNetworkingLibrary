@@ -226,7 +226,9 @@ namespace NetworkingLibrary.Services
 
             EnsureLocalPeerKey();
             InLobby = true;
-            HostSteamId64 = lobbySteamId64;
+            if (lobbySteamId64 != LocalSteamId)
+                LogWarning($"Offline mode uses local peer {LocalSteamId} as host identity; lobby id {lobbySteamId64} is used for compatibility only.");
+            HostSteamId64 = LocalSteamId;
             lobbyData.Clear();
             perPlayerData.Clear();
             perPlayerData[LocalSteamId] = new Dictionary<string, string>();

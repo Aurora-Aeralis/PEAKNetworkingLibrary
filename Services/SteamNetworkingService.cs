@@ -1708,11 +1708,6 @@ namespace NetworkingLibrary.Services
             if (!rpcs.TryGetValue(message.ModID, out var methods)) return;
             if (!methods.TryGetValue(message.MethodName, out var handlers)) return;
 
-            MessageHandler? chosenHandler = null;
-            object[]? chosenParams = null;
-            MessageHandler? fallbackHandler = null;
-            object[]? fallbackParams = null;
-
             IEnumerable<MessageHandler> candidates = handlers.Where(h => h.Mask == message.Mask);
             if (!string.IsNullOrEmpty(message.OverloadKey))
             {
@@ -1720,35 +1715,41 @@ namespace NetworkingLibrary.Services
                 if (keyed.Length > 0) candidates = keyed.Concat(candidates.Where(h => BuildOverloadKey(h) != message.OverloadKey));
             }
 
+            var deserialized = new List<(MessageHandler Handler, object[] CallParams, int Unread, string OverloadKey)>();
             foreach (var handler in candidates)
             {
-                if (!TryDeserializeForHandler(message, handler, localSender, out var callParams, out int unread)) continue;
+                if (!TryDeserializeForHandler(message, handler, localSender, out var callParams, out int unread))
+                    continue;
 
-                if (unread == 0)
-                {
-                    chosenHandler = handler;
-                    chosenParams = callParams;
-                    break;
-                }
-
-                fallbackHandler ??= handler;
-                fallbackParams ??= callParams;
+                deserialized.Add((handler, callParams, unread, BuildOverloadKey(handler)));
             }
 
-            if (chosenHandler == null)
-            {
-                chosenHandler = fallbackHandler;
-                chosenParams = fallbackParams;
-            }
-
-            if (chosenHandler == null || chosenParams == null)
+            if (deserialized.Count == 0)
             {
                 Net.Logger.LogWarning($"No handler matched for local {message.ModID}:{message.MethodName} mask={message.Mask}");
                 return;
             }
 
-            try { chosenHandler.Method.Invoke(chosenHandler.Target, chosenParams); }
-            catch (Exception ex) { Net.Logger.LogError($"Local invoke error: {ex}"); }
+            int chosenIndex = deserialized.FindIndex(c => c.Unread == 0);
+            if (chosenIndex < 0) chosenIndex = 0;
+            string chosenOverloadKey = deserialized[chosenIndex].OverloadKey;
+
+            bool invokedAny = false;
+            foreach (var candidate in deserialized.Where(c => c.OverloadKey == chosenOverloadKey))
+            {
+                try
+                {
+                    candidate.Handler.Method.Invoke(candidate.Handler.Target, candidate.CallParams);
+                    invokedAny = true;
+                }
+                catch (Exception ex)
+                {
+                    Net.Logger.LogError($"Local invoke error: {ex}");
+                }
+            }
+
+            if (!invokedAny)
+                Net.Logger.LogWarning($"No handler matched for local {message.ModID}:{message.MethodName} mask={message.Mask}");
         }
 
         bool TryDeserializeForHandler(Message source, MessageHandler handler, CSteamID sender, out object[] callParams, out int unread)

@@ -874,15 +874,6 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void PollReceive()
         {
-            try
-            {
-                SteamAPI.RunCallbacks();
-            }
-            catch (Exception ex)
-            {
-                Net.Logger.LogError($"SteamAPI.RunCallbacks error: {ex}");
-            }
-
             FlushQueues();
             RetransmitUnacked();
             ReceiveMessages();

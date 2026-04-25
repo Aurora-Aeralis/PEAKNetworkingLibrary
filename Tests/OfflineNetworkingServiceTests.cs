@@ -30,6 +30,25 @@ public class OfflineNetworkingServiceTests
             CallCount++;
         }
     }
+    
+    sealed class StaticRpcReceiver
+    {
+        public static int LastValue { get; private set; } = -1;
+        public static int CallCount { get; private set; }
+
+        [CustomRPC]
+        static void OnStaticPing(int value)
+        {
+            LastValue = value;
+            CallCount++;
+        }
+
+        public static void Reset()
+        {
+            LastValue = -1;
+            CallCount = 0;
+        }
+    }
 
     [Fact]
     public void LeaveLobby_ResetsLobbyState_AndHostIdentity()
@@ -252,7 +271,7 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
-    public void RegisterSameObjectTwice_DisposeTokens_RemovesOnlyCapturedHandlers()
+    public void RegisterSameObjectTwice_IsIdempotent_AndSecondTokenDoesNotCaptureExistingHandlers()
     {
         var service = new OfflineNetworkingService();
         var receiver = new RpcReceiver();
@@ -264,16 +283,41 @@ public class OfflineNetworkingServiceTests
         var second = service.RegisterNetworkObject(receiver, TestModId, mask: 0);
 
         service.RPC(TestModId, "OnPing", ReliableType.Reliable, 1);
-        Assert.Equal(2, receiver.CallCount);
-
-        first.Dispose();
-        service.RPC(TestModId, "OnPing", ReliableType.Reliable, 2);
-        Assert.Equal(3, receiver.CallCount);
-        Assert.Equal(2, receiver.LastValue);
+        Assert.Equal(1, receiver.CallCount);
 
         second.Dispose();
+        service.RPC(TestModId, "OnPing", ReliableType.Reliable, 2);
+        Assert.Equal(2, receiver.CallCount);
+        Assert.Equal(2, receiver.LastValue);
+
+        first.Dispose();
         service.RPC(TestModId, "OnPing", ReliableType.Reliable, 3);
-        Assert.Equal(3, receiver.CallCount);
+        Assert.Equal(2, receiver.CallCount);
+    }
+
+    [Fact]
+    public void RegisterSameTypeTwice_IsIdempotent_AndSecondTokenDoesNotCaptureExistingHandlers()
+    {
+        var service = new OfflineNetworkingService();
+        StaticRpcReceiver.Reset();
+
+        service.Initialize();
+        service.CreateLobby();
+
+        var first = service.RegisterNetworkType(typeof(StaticRpcReceiver), TestModId, mask: 0);
+        var second = service.RegisterNetworkType(typeof(StaticRpcReceiver), TestModId, mask: 0);
+
+        service.RPC(TestModId, "OnStaticPing", ReliableType.Reliable, 1);
+        Assert.Equal(1, StaticRpcReceiver.CallCount);
+
+        second.Dispose();
+        service.RPC(TestModId, "OnStaticPing", ReliableType.Reliable, 2);
+        Assert.Equal(2, StaticRpcReceiver.CallCount);
+        Assert.Equal(2, StaticRpcReceiver.LastValue);
+
+        first.Dispose();
+        service.RPC(TestModId, "OnStaticPing", ReliableType.Reliable, 3);
+        Assert.Equal(2, StaticRpcReceiver.CallCount);
     }
 
     [Fact]

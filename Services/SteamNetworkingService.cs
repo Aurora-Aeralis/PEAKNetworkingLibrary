@@ -692,6 +692,11 @@ namespace NetworkingLibrary.Services
 
                     if (!rpcs.ContainsKey(modId)) rpcs[modId] = new Dictionary<string, List<MessageHandler>>();
                     if (!rpcs[modId].ContainsKey(method.Name)) rpcs[modId][method.Name] = new List<MessageHandler>();
+                    var handlers = rpcs[modId][method.Name];
+                    var alreadyRegistered = instance == null
+                        ? handlers.Any(existing => existing.Mask == mask && existing.Method == method)
+                        : handlers.Any(existing => existing.Mask == mask && existing.Method == method && ReferenceEquals(existing.Target, instance));
+                    if (alreadyRegistered) continue;
 
                     var mh = new MessageHandler
                     {
@@ -701,7 +706,7 @@ namespace NetworkingLibrary.Services
                         TakesInfo = method.GetParameters().Length > 0 && method.GetParameters().Last().ParameterType.Name == "RPCInfo",
                         Mask = mask
                     };
-                    rpcs[modId][method.Name].Add(mh);
+                    handlers.Add(mh);
                     registeredHandlers.Add(new HandlerRegistration { MethodName = method.Name, Handler = mh });
                     registered++;
                 }

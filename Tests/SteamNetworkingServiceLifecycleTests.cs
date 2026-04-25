@@ -36,6 +36,25 @@ public class SteamNetworkingServiceLifecycleTests
         void OnInstancePing(int value) { }
     }
 
+    sealed class StaticRpcReceiver
+    {
+        public static int LastValue { get; private set; } = -1;
+        public static int CallCount { get; private set; }
+
+        [CustomRPC]
+        static void OnStaticPing(int value)
+        {
+            LastValue = value;
+            CallCount++;
+        }
+
+        public static void Reset()
+        {
+            LastValue = -1;
+            CallCount = 0;
+        }
+    }
+
     [Fact]
     public void LeaveAndShutdown_ClearOutboundQueues()
     {
@@ -179,7 +198,7 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
-    public void RegisterSameObjectTwice_DisposeTokens_RemovesOnlyCapturedHandlers()
+    public void RegisterSameObjectTwice_IsIdempotent_AndSecondTokenDoesNotCaptureExistingHandlers()
     {
         var service = new SteamNetworkingService();
         var receiver = new RpcReceiver();
@@ -188,15 +207,37 @@ public class SteamNetworkingServiceLifecycleTests
         var second = service.RegisterNetworkObject(receiver, TestModId, mask: 0);
 
         DispatchPing(service, 1);
+        Assert.Equal(1, receiver.CallCount);
+
+        second.Dispose();
+        DispatchPing(service, 2);
         Assert.Equal(2, receiver.CallCount);
 
         first.Dispose();
-        DispatchPing(service, 2);
-        Assert.Equal(3, receiver.CallCount);
+        DispatchPing(service, 3);
+        Assert.Equal(2, receiver.CallCount);
+    }
+
+    [Fact]
+    public void RegisterSameTypeTwice_IsIdempotent_AndSecondTokenDoesNotCaptureExistingHandlers()
+    {
+        var service = new SteamNetworkingService();
+        StaticRpcReceiver.Reset();
+
+        var first = service.RegisterNetworkType(typeof(StaticRpcReceiver), TestModId, mask: 0);
+        var second = service.RegisterNetworkType(typeof(StaticRpcReceiver), TestModId, mask: 0);
+
+        DispatchMessage(service, "OnStaticPing", 1);
+        Assert.Equal(1, StaticRpcReceiver.CallCount);
 
         second.Dispose();
-        DispatchPing(service, 3);
-        Assert.Equal(3, receiver.CallCount);
+        DispatchMessage(service, "OnStaticPing", 2);
+        Assert.Equal(2, StaticRpcReceiver.CallCount);
+        Assert.Equal(2, StaticRpcReceiver.LastValue);
+
+        first.Dispose();
+        DispatchMessage(service, "OnStaticPing", 3);
+        Assert.Equal(2, StaticRpcReceiver.CallCount);
     }
 
     [Fact]
@@ -352,10 +393,15 @@ public class SteamNetworkingServiceLifecycleTests
 
     static void DispatchPing(SteamNetworkingService service, int value)
     {
+        DispatchMessage(service, "OnPing", value);
+    }
+
+    static void DispatchMessage(SteamNetworkingService service, string methodName, int value)
+    {
         var invokeLocal = typeof(SteamNetworkingService).GetMethod("InvokeLocalMessage", BindingFlags.Instance | BindingFlags.NonPublic);
         if (invokeLocal != null)
         {
-            var message = new Message(TestModId, "OnPing", 0);
+            var message = new Message(TestModId, methodName, 0);
             message.WriteObject(typeof(int), value);
             invokeLocal.Invoke(service, new object[] { message, new CSteamID(1234UL) });
             return;
@@ -363,6 +409,6 @@ public class SteamNetworkingServiceLifecycleTests
 
         service.Initialize();
         service.CreateLobby();
-        service.RPC(TestModId, "OnPing", ReliableType.Reliable, value);
+        service.RPC(TestModId, methodName, ReliableType.Reliable, value);
     }
 }

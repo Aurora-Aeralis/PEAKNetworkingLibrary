@@ -442,7 +442,6 @@ namespace NetworkingLibrary.Services
 
                 if ((change & EChatMemberStateChange.k_EChatMemberStateChangeEntered) != 0)
                 {
-                    //LogInfo($"OnLobbyChatUpdate: Entered -> {player}");
                     PlayerEntered?.Invoke(player.m_SteamID);
                 }
 
@@ -454,7 +453,6 @@ namespace NetworkingLibrary.Services
 
                 if ((change & leftMask) != 0)
                 {
-                    //LogInfo($"OnLobbyChatUpdate: Left/Disconnected/Kicked/Banned -> {player}");
                     PlayerLeft?.Invoke(player.m_SteamID);
                 }
             }
@@ -540,23 +538,19 @@ namespace NetworkingLibrary.Services
         {
             try
             {
-                //LogInfo($"RefreshPlayerList: Lobby={Lobby} Owner={SteamMatchmaking.GetLobbyOwner(Lobby)} Local={SteamUser.GetSteamID()} InLobby={InLobby}");
 
                 if (Lobby == CSteamID.Nil)
                 {
-                    //LogWarning("RefreshPlayerList: Lobby is Nil; cannot query members.");
                     players = Array.Empty<CSteamID>();
                     return;
                 }
 
                 int count = getNumLobbyMembers(Lobby);
-                //LogInfo($"RefreshPlayerList: SteamMatchmaking.GetNumLobbyMembers returned {count}");
                 players = new CSteamID[count];
 
                 for (int i = 0; i < players.Length; i++)
                 {
                     players[i] = getLobbyMemberByIndex(Lobby, i);
-                    //LogInfo($"RefreshPlayerList: member[{i}] = {players[i]}");
                 }
                 LogDebug($"RefreshPlayerList: total members = {players.Length}");
             }
@@ -847,17 +841,13 @@ namespace NetworkingLibrary.Services
             var msg = BuildMessage(modId, methodName, 0, parameters, null);
             if (msg == null) return;
 
-            //LogError($"{players}");
             foreach (var p in players)
             {
-                //LogError($"{p}");
                 if (p == SteamUser.GetSteamID())
                 {
-                    //LogError($"{SteamUser.GetSteamID()} == {p}");
                     continue;
                 }
-                EnqueueOrSend(BuildFramedBytesWithMeta(msg, modId, reliable), p, reliable, DeterminePriority(modId, methodName));
-                //LogError($"Fired to user: {p}");
+                EnqueueOrSend(BuildFramedBytesWithMeta(msg, modId, reliable), p, reliable, DeterminePriority(methodName));
             }
 
             InvokeLocalMessage(new Message(msg.ToArray()), SteamUser.GetSteamID());
@@ -869,17 +859,13 @@ namespace NetworkingLibrary.Services
             var msg = BuildMessage(modId, methodName, 0, parameters, parameterTypes);
             if (msg == null) return;
 
-            //LogError($"{players}");
             foreach (var p in players)
             {
-                //LogError($"{p}");
                 if (p == SteamUser.GetSteamID())
                 {
-                    //LogError($"{SteamUser.GetSteamID()} == {p}");
                     continue;
                 }
-                EnqueueOrSend(BuildFramedBytesWithMeta(msg, modId, reliable), p, reliable, DeterminePriority(modId, methodName));
-                //LogError($"Fired to user: {p}");
+                EnqueueOrSend(BuildFramedBytesWithMeta(msg, modId, reliable), p, reliable, DeterminePriority(methodName));
             }
 
             InvokeLocalMessage(new Message(msg.ToArray()), SteamUser.GetSteamID());
@@ -901,7 +887,7 @@ namespace NetworkingLibrary.Services
                 return;
             }
             var framed = BuildFramedBytesWithMeta(msg, modId, reliable);
-            EnqueueOrSend(framed, target, reliable, DeterminePriority(modId, methodName));
+            EnqueueOrSend(framed, target, reliable, DeterminePriority(methodName));
         }
 
         public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, Type[] parameterTypes, params object?[] parameters)
@@ -920,7 +906,7 @@ namespace NetworkingLibrary.Services
                 return;
             }
             var framed = BuildFramedBytesWithMeta(msg, modId, reliable);
-            EnqueueOrSend(framed, target, reliable, DeterminePriority(modId, methodName));
+            EnqueueOrSend(framed, target, reliable, DeterminePriority(methodName));
         }
 
         public void RPCToHost(uint modId, string methodName, ReliableType reliable, params object[] parameters)
@@ -931,10 +917,13 @@ namespace NetworkingLibrary.Services
             RPCTarget(modId, methodName, host, reliable, parameters);
         }
 
-        Priority DeterminePriority(uint modId, string methodName)
+        Priority DeterminePriority(string methodName)
         {
-            var lower = methodName.ToLowerInvariant();
-            if (lower.Contains("admin") || lower.Contains("control") || lower.Contains("critical") || lower.Contains("sync")) return Priority.High;
+            if (methodName.IndexOf("admin", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                methodName.IndexOf("control", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                methodName.IndexOf("critical", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                methodName.IndexOf("sync", StringComparison.OrdinalIgnoreCase) >= 0)
+                return Priority.High;
             return Priority.Normal;
         }
 
@@ -943,7 +932,6 @@ namespace NetworkingLibrary.Services
             var rl = GetOrCreateRateLimiter(target.m_SteamID);
             if (!rl.Allowed())
             {
-                //LogWarning($"Rate limit: dropping send to {target}");
                 return;
             }
 
@@ -1036,10 +1024,6 @@ namespace NetworkingLibrary.Services
                 ulong msgId = NextMessageId();
 
                 using var ms = new MemoryStream();
-                // Frame layout:
-                // [flags:1][msgId:8][seq:8][total:4][index:4][payload...][optional signature len:2 + signature...][optional global mac:32]
-                // Signature scope is canonical on-the-wire bytes [flags..payload], regardless of payload compression.
-                // Canonical MAC scope is every byte from flags through payload/signature (everything except the trailing MAC that is being appended).
                 ms.WriteByte(flags);
                 WriteU64LE(ms, msgId);
                 WriteU64LE(ms, seq);
@@ -1138,7 +1122,6 @@ namespace NetworkingLibrary.Services
                 int flags = Constants.k_nSteamNetworkingSend_AutoRestartBrokenSession | ResolveSendModeFlag(reliable);
 
                 var res = SteamNetworkingMessages.SendMessageToUser(ref id, p, (uint)data.Length, flags, CHANNEL);
-                //LogInfo($"SendMessageToUser -> res={res} to={target} framedLen={data.Length}");
                 if (res != EResult.k_EResultOK)
                 {
                     LogError($"SendMessageToUser failed: {res} to {target}");
@@ -1194,7 +1177,6 @@ namespace NetworkingLibrary.Services
                         if (info.Attempts >= maxRetransmitAttempts)
                         {
                             unacked.Remove(key);
-                            //LogDebug($"RetransmitUnacked: Message {key.msgId} to {key.target} dropped after {info.Attempts} attempts. framedLen={info.Framed?.Length ?? 0}");
                         }
                         else
                         {
@@ -1202,7 +1184,6 @@ namespace NetworkingLibrary.Services
                             info.LastSent = now;
                             unacked[key] = info;
                             toRetransmit.Add(info);
-                            //LogDebug($"RetransmitUnacked: scheduling retransmit attempt {info.Attempts} for msg {key.msgId} to {key.target}");
                         }
                     }
                 }
@@ -1226,7 +1207,6 @@ namespace NetworkingLibrary.Services
             try
             {
                 int count = SteamNetworkingMessages.ReceiveMessagesOnChannel(CHANNEL, this.inMessages, MAX_IN_MESSAGES);
-                //if (count > 0) LogInfo($"ReceiveMessages: count={count} (channel {CHANNEL})");
                 if (count <= 0) return;
 
                 for (int i = 0; i < count; i++)
@@ -1235,18 +1215,15 @@ namespace NetworkingLibrary.Services
                     SteamNetworkingMessage_t steamMsg = Marshal.PtrToStructure<SteamNetworkingMessage_t>(outPtr);
                     int size = (int)steamMsg.m_cbSize;
 
-                    //LogInfo($"ReceiveMessages: rawMsg[{i}] size={size} ptr={outPtr}");
 
                     if (size <= 0)
                     {
-                        //LogWarning("ReceiveMessages: msg size <= 0, releasing.");
                         SteamNetworkingMessage_t.Release(outPtr);
                         continue;
                     }
 
                     if (size > Message.MaxSize)
                     {
-                        //LogError($"Incoming message size {size} > max {Message.MaxSize} (dropping)");
                         SteamNetworkingMessage_t.Release(outPtr);
                         continue;
                     }
@@ -1254,7 +1231,6 @@ namespace NetworkingLibrary.Services
                     CSteamID sender = steamMsg.m_identityPeer.GetSteamID();
                     if (sender == CSteamID.Nil)
                     {
-                        //LogWarning("ReceiveMessages: sender is Nil - skipping");
                         SteamNetworkingMessage_t.Release(outPtr);
                         continue;
                     }
@@ -1262,10 +1238,6 @@ namespace NetworkingLibrary.Services
                     byte[] bytes = new byte[size];
                     Marshal.Copy(steamMsg.m_pData, bytes, 0, size);
 
-                    /*int dumpLen = Math.Min(32, bytes.Length);
-                    var sb = new System.Text.StringBuilder();
-                    for (int b = 0; b < dumpLen; b++) sb.AppendFormat("{0:X2} ", bytes[b]);
-                    LogInfo($"ReceiveMessages: from={sender} size={size} preview={sb}");*/
                     try
                     {
                         ProcessIncomingFrame(bytes, sender);
@@ -1286,7 +1258,6 @@ namespace NetworkingLibrary.Services
 
         void ProcessIncomingFrame(byte[] frame, CSteamID sender)
         {
-            //LogInfo($"ProcessIncomingFrame: from={sender} bytes={frame.Length}");
             // Expected frame layout mirrors BuildFramedBytesWithMeta.
             // MAC verification always runs against canonical scope [flags..payload/signature], before any payload mutation/stripping.
 
@@ -1306,7 +1277,6 @@ namespace NetworkingLibrary.Services
             flags = msHeader.ReadByte();
             if (flags < 0)
             {
-                //LogWarning("ProcessIncomingFrame: flags read < 0");
                 return;
             }
 
@@ -1323,12 +1293,10 @@ namespace NetworkingLibrary.Services
                     return;
                 }
 
-                //LogInfo($"ProcessIncomingFrame: header flags=0x{flags:X2} msgId={msgId} seq={seq} total={total} idx={index}");
 
                 int remainingHeader = (int)(msHeader.Length - msHeader.Position);
                 if (remainingHeader <= 0)
                 {
-                    //LogWarning("ProcessIncomingFrame: Empty payload received (remainingHeader<=0)");
                     return;
                 }
 
@@ -1351,7 +1319,6 @@ namespace NetworkingLibrary.Services
                         }
 
                         fb.Fragments[index] = payloadFragment;
-                        //LogInfo($"ProcessIncomingFrame: stored fragment {index}/{total - 1} for key {sender}:{msgId} (fragments={fb.Fragments.Count})");
 
                         if (nowUtc >= nextFragmentCleanupAt)
                         {
@@ -1368,7 +1335,6 @@ namespace NetworkingLibrary.Services
                             {
                                 foreach (var staleKey in staleKeys)
                                 {
-                                    //LogWarning($"ProcessIncomingFrame: removing stale fragment buffer for key {staleKey}");
                                     fragmentBuffers.Remove(staleKey);
                                 }
                             }
@@ -1376,7 +1342,6 @@ namespace NetworkingLibrary.Services
 
                         if (fb.Fragments.Count != fb.Total)
                         {
-                            //LogInfo($"ProcessIncomingFrame: waiting for more fragments ({fb.Fragments.Count}/{fb.Total})");
                             return;
                         }
 
@@ -1389,7 +1354,6 @@ namespace NetworkingLibrary.Services
                     {
                         if (!completedBuffer.Fragments.TryGetValue(i, out var part))
                         {
-                            //LogWarning($"ProcessIncomingFrame: missing fragment {i}; discarding buffer for key {key}");
                             return;
                         }
 
@@ -1397,7 +1361,6 @@ namespace NetworkingLibrary.Services
                     }
 
                     assembledPayload = outMs.ToArray();
-                    //LogInfo($"ProcessIncomingFrame: reassembled payload len={assembledPayload.Length} for key {sender}:{msgId}");
                 }
                 else
                 {
@@ -1411,13 +1374,11 @@ namespace NetworkingLibrary.Services
                 {
                     if (payloadToProcess.Length < 5)
                     {
-                        //LogWarning("ProcessIncomingFrame: Signed payload too small");
                         return;
                     }
 
                     if (payloadToProcess.Length < 1 + 4)
                     {
-                        //LogWarning("ProcessIncomingFrame: Signed payload too small to contain ModID");
                         return;
                     }
 
@@ -1450,7 +1411,6 @@ namespace NetworkingLibrary.Services
                     {
                         if (!modPublicKeys.TryGetValue(modId, out rsaParams))
                         {
-                            //LogWarning($"ProcessIncomingFrame: No public key registered for mod {modId}; dropping signed msg");
                             return;
                         }
                     }
@@ -1458,21 +1418,18 @@ namespace NetworkingLibrary.Services
                     int expectedSigLen = rsaParams.Modulus?.Length ?? 0;
                     if (expectedSigLen <= 0 || payloadToProcess.Length < expectedSigLen + 2)
                     {
-                        //LogWarning("ProcessIncomingFrame: Signed payload too small for expected signature length");
                         return;
                     }
 
                     int sigSectionStart = payloadToProcess.Length - expectedSigLen - 2;
                     if (sigSectionStart < 0)
                     {
-                        //LogWarning("ProcessIncomingFrame: Signature section invalid");
                         return;
                     }
 
                     ushort declaredLen = BinaryPrimitives.ReadUInt16LittleEndian(payloadToProcess.AsSpan(sigSectionStart, 2));
                     if (declaredLen != expectedSigLen)
                     {
-                        //LogWarning($"ProcessIncomingFrame: Signature length mismatch (declared={declaredLen}, expected={expectedSigLen}); dropping");
                         return;
                     }
 
@@ -1488,7 +1445,6 @@ namespace NetworkingLibrary.Services
                         var ok = rsa.VerifyData(dataOnly, CryptoConfig.MapNameToOID("SHA256"), signature);
                         if (!ok)
                         {
-                            //LogWarning("ProcessIncomingFrame: Signature verification failed; dropping");
                             return;
                         }
                         payloadToProcess = dataOnly;
@@ -1517,11 +1473,9 @@ namespace NetworkingLibrary.Services
 
                 if (message.ModID == 0)
                 {
-                    //LogInfo($"ProcessIncomingFrame: internal message {message.MethodName}");
                     HandleInternalMessage(message, sender, msgId, seq, requiresAck);
                     if (requiresAck && message.MethodName != "NETWORK_INTERNAL_ACK")
                     {
-                        //LogInfo($"ProcessIncomingFrame: sending ACK for msgId={msgId} to {sender}");
                         SendAckToSender(sender, msgId);
                     }
                     return;
@@ -1531,25 +1485,21 @@ namespace NetworkingLibrary.Services
                 var rl = GetOrCreateRateLimiter(sender64);
                 if (!rl.IncomingAllowed())
                 {
-                    //LogWarning($"ProcessIncomingFrame: Rate limit: dropping incoming from {sender64}");
                     return;
                 }
 
                 if (!CheckAndUpdateSequence(sender64, message.ModID, seq))
                 {
-                    //LogDebug($"ProcessIncomingFrame: Dropped replay/out-of-order seq {seq} from {sender64} for mod {message.ModID}");
                     return;
                 }
 
                 if (requiresAck)
                 {
-                    //LogInfo($"ProcessIncomingFrame: will send ACK for msgId={msgId} to {sender}");
                     SendAckToSender(sender, msgId);
                 }
 
                 if (IncomingValidator != null && !IncomingValidator(message, sender64))
                 {
-                    //LogDebug($"ProcessIncomingFrame: Incoming message from {sender64} rejected by validator");
                     return;
                 }
 
@@ -1663,7 +1613,6 @@ namespace NetworkingLibrary.Services
 
         void SendAckToSender(CSteamID sender, ulong msgId)
         {
-            //LogInfo($"SendAckToSender: to={sender} ackId={msgId}");
             var ackMsg = new Message(0u, "NETWORK_INTERNAL_ACK", 0);
             ackMsg.WriteULong(msgId);
             // Transport ACK frames reliably so a dropped ACK does not stall sender-side retransmit logic.

@@ -3,9 +3,7 @@ using BepInEx.Configuration;
 using BepInEx.Logging;
 using HarmonyLib;
 using System;
-using System.IO;
 using UnityEngine;
-using System.Reflection;
 using System.Linq;
 
 using NetworkingLibrary.Services;
@@ -97,7 +95,6 @@ namespace NetworkingLibrary
             go.name = pollerName;
             var foundExistingObject = pollers.Count > 0;
             
-            // Persist the poller object across scene loads so networking lifecycle remains stable.
             if (foundExistingObject && go.scene.IsValid() && go.scene.name != "DontDestroyOnLoad")
                 Logger.LogDebug($"Promoting existing poller object '{go.name}' from scene '{go.scene.name}' to DontDestroyOnLoad lifecycle.");
             DontDestroyOnLoad(go);

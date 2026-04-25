@@ -248,6 +248,18 @@ namespace NetworkingLibrary.Modules
         #endregion
 
         #region Read helpers
+        private static int MaxCollectionElementCount => MaxSize;
+
+        private int ReadValidatedCollectionLength(string collectionKind)
+        {
+            int len = ReadInt();
+            if (len < 0 || len > MaxCollectionElementCount)
+            {
+                throw new Exception($"Malformed or oversized payload: {collectionKind} length {len} is outside allowed range [0, {MaxCollectionElementCount}].");
+            }
+            return len;
+        }
+
         private void EnsureReadable(int count, string opName)
         {
             if (count < 0 || readPos < 0 || readPos + count > readableBuffer.Length)
@@ -353,7 +365,7 @@ namespace NetworkingLibrary.Modules
             if (type.IsArray)
             {
                 var elemType = type.GetElementType()!;
-                int len = ReadInt();
+                int len = ReadValidatedCollectionLength("array");
                 var arr = Array.CreateInstance(elemType, len);
                 for (int i = 0; i < len; i++)
                 {
@@ -369,7 +381,7 @@ namespace NetworkingLibrary.Modules
                 if (genDef == typeof(List<>) || genDef == typeof(IList<>))
                 {
                     var elemType = type.GetGenericArguments()[0];
-                    int len = ReadInt();
+                    int len = ReadValidatedCollectionLength("list");
                     var listType = typeof(List<>).MakeGenericType(elemType);
                     var list = (IList)Activator.CreateInstance(listType)!;
                     for (int i = 0; i < len; i++)

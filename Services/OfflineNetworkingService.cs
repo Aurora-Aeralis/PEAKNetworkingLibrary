@@ -1,5 +1,4 @@
-﻿#if !UNITY_EDITOR
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -7,7 +6,6 @@ using System.Security.Cryptography;
 using System.Text;
 using NetworkingLibrary.Modules;
 using NetworkingLibrary.Services;
-using Steamworks;
 using UnityEngine;
 
 namespace NetworkingLibrary.Services
@@ -516,4 +514,3 @@ namespace NetworkingLibrary.Services
         class MessageHandler { public object Target = null!; public MethodInfo Method = null!; public ParameterInfo[] Parameters = null!; public bool TakesInfo; public int Mask; }
     }
 }
-#endif

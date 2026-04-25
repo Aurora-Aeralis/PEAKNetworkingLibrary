@@ -257,7 +257,7 @@ namespace NetworkingLibrary.Services
             cbLobbyDataUpdate = null;
 
             rpcs.Clear();
-            unacked.Clear();
+            ClearOutboundState();
             lobbyDataKeys.Clear();
             playerDataKeys.Clear();
             lastLobbyData.Clear();
@@ -370,7 +370,7 @@ namespace NetworkingLibrary.Services
             Lobby = CSteamID.Nil;
             InLobby = false;
 
-            lock (unackedLock) unacked.Clear();
+            ClearOutboundState();
             lock (lastSeenSequence) lastSeenSequence.Clear();
             lock (rateLimiters) rateLimiters.Clear();
             lock (fragmentLock) fragmentBuffers.Clear();
@@ -378,6 +378,21 @@ namespace NetworkingLibrary.Services
             perPeerSymmetricKey.Clear();
 
             LobbyLeft?.Invoke();
+        }
+
+        void ClearOutboundState()
+        {
+            lock (queueLock)
+            {
+                highQueue.Clear();
+                normalQueue.Clear();
+                lowQueue.Clear();
+
+                lock (unackedLock)
+                {
+                    unacked.Clear();
+                }
+            }
         }
 
         void RefreshPlayerList()
@@ -763,6 +778,7 @@ namespace NetworkingLibrary.Services
 
         void FlushQueues(int maxPerFrame = 8)
         {
+            if (!InLobby) return;
             int sent = 0;
             while (sent < maxPerFrame)
             {

@@ -297,6 +297,8 @@ namespace NetworkingLibrary.Services
                 if (attrs.Length == 0) continue;
                 if (!rpcs.ContainsKey(modId)) rpcs[modId] = new Dictionary<string, List<MessageHandler>>();
                 if (!rpcs[modId].ContainsKey(method.Name)) rpcs[modId][method.Name] = new List<MessageHandler>();
+                var handlers = rpcs[modId][method.Name];
+                if (handlers.Any(existing => existing.Mask == mask && existing.Method == method && ReferenceEquals(existing.Target, instance))) continue;
                 var handler = new MessageHandler
                 {
                     Target = instance,
@@ -305,7 +307,7 @@ namespace NetworkingLibrary.Services
                     TakesInfo = method.GetParameters().Length > 0 && IsRpcInfoParameterType(method.GetParameters().Last().ParameterType),
                     Mask = mask
                 };
-                rpcs[modId][method.Name].Add(handler);
+                handlers.Add(handler);
                 registeredHandlers.Add(new HandlerRegistration { MethodName = method.Name, Handler = handler });
             }
             return new Token(() => DeregisterHandlers(modId, registeredHandlers));
@@ -324,6 +326,8 @@ namespace NetworkingLibrary.Services
 
                 if (!rpcs.ContainsKey(modId)) rpcs[modId] = new Dictionary<string, List<MessageHandler>>();
                 if (!rpcs[modId].ContainsKey(method.Name)) rpcs[modId][method.Name] = new List<MessageHandler>();
+                var handlers = rpcs[modId][method.Name];
+                if (handlers.Any(existing => existing.Mask == mask && existing.Method == method)) continue;
                 var handler = new MessageHandler
                 {
                     Target = null!,
@@ -332,7 +336,7 @@ namespace NetworkingLibrary.Services
                     TakesInfo = method.GetParameters().Length > 0 && IsRpcInfoParameterType(method.GetParameters().Last().ParameterType),
                     Mask = mask
                 };
-                rpcs[modId][method.Name].Add(handler);
+                handlers.Add(handler);
                 registeredHandlers.Add(new HandlerRegistration { MethodName = method.Name, Handler = handler });
             }
             return new Token(() => DeregisterHandlers(modId, registeredHandlers));

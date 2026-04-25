@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using System.Buffers.Binary;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -112,6 +113,42 @@ namespace NetworkingLibrary.Modules
         }
 
         #region Write helpers
+        private static byte[] WriteInt32LE(int value)
+        {
+            var bytes = new byte[4];
+            BinaryPrimitives.WriteInt32LittleEndian(bytes, value);
+            return bytes;
+        }
+
+        private static byte[] WriteUInt32LE(uint value)
+        {
+            var bytes = new byte[4];
+            BinaryPrimitives.WriteUInt32LittleEndian(bytes, value);
+            return bytes;
+        }
+
+        private static byte[] WriteInt64LE(long value)
+        {
+            var bytes = new byte[8];
+            BinaryPrimitives.WriteInt64LittleEndian(bytes, value);
+            return bytes;
+        }
+
+        private static byte[] WriteUInt64LE(ulong value)
+        {
+            var bytes = new byte[8];
+            BinaryPrimitives.WriteUInt64LittleEndian(bytes, value);
+            return bytes;
+        }
+
+        private static byte[] WriteSingleLE(float value) => WriteInt32LE(BitConverter.SingleToInt32Bits(value));
+
+        private static int ReadInt32LE(byte[] bytes, int offset) => BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset, 4));
+        private static uint ReadUInt32LE(byte[] bytes, int offset) => BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(offset, 4));
+        private static long ReadInt64LE(byte[] bytes, int offset) => BinaryPrimitives.ReadInt64LittleEndian(bytes.AsSpan(offset, 8));
+        private static ulong ReadUInt64LE(byte[] bytes, int offset) => BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan(offset, 8));
+        private static float ReadSingleLE(byte[] bytes, int offset) => BitConverter.Int32BitsToSingle(ReadInt32LE(bytes, offset));
+
         public Message WriteByte(byte v) { ThrowIfDisposed(); buffer.Add(v); return this; }
         public Message WriteBytes(byte[] v)
         {
@@ -121,12 +158,12 @@ namespace NetworkingLibrary.Modules
             buffer.AddRange(v);
             return this;
         }
-        public Message WriteInt(int v) { ThrowIfDisposed(); buffer.AddRange(BitConverter.GetBytes(v)); return this; }
-        public Message WriteUInt(uint v) { ThrowIfDisposed(); buffer.AddRange(BitConverter.GetBytes(v)); return this; }
-        public Message WriteLong(long v) { ThrowIfDisposed(); buffer.AddRange(BitConverter.GetBytes(v)); return this; }
-        public Message WriteULong(ulong v) { ThrowIfDisposed(); buffer.AddRange(BitConverter.GetBytes(v)); return this; }
-        public Message WriteFloat(float v) { ThrowIfDisposed(); buffer.AddRange(BitConverter.GetBytes(v)); return this; }
-        public Message WriteBool(bool v) { ThrowIfDisposed(); buffer.AddRange(BitConverter.GetBytes(v)); return this; }
+        public Message WriteInt(int v) { ThrowIfDisposed(); buffer.AddRange(WriteInt32LE(v)); return this; }
+        public Message WriteUInt(uint v) { ThrowIfDisposed(); buffer.AddRange(WriteUInt32LE(v)); return this; }
+        public Message WriteLong(long v) { ThrowIfDisposed(); buffer.AddRange(WriteInt64LE(v)); return this; }
+        public Message WriteULong(ulong v) { ThrowIfDisposed(); buffer.AddRange(WriteUInt64LE(v)); return this; }
+        public Message WriteFloat(float v) { ThrowIfDisposed(); buffer.AddRange(WriteSingleLE(v)); return this; }
+        public Message WriteBool(bool v) { ThrowIfDisposed(); buffer.Add(v ? (byte)1 : (byte)0); return this; }
         public Message WriteString(string v)
         {
             ThrowIfDisposed();
@@ -369,7 +406,7 @@ namespace NetworkingLibrary.Modules
         {
             ThrowIfDisposed();
             EnsureReadable(4, nameof(ReadInt));
-            int v = BitConverter.ToInt32(readableBuffer, readPos);
+            int v = ReadInt32LE(readableBuffer, readPos);
             readPos += 4;
             return v;
         }
@@ -377,7 +414,7 @@ namespace NetworkingLibrary.Modules
         {
             ThrowIfDisposed();
             EnsureReadable(4, nameof(ReadUInt));
-            uint v = BitConverter.ToUInt32(readableBuffer, readPos);
+            uint v = ReadUInt32LE(readableBuffer, readPos);
             readPos += 4;
             return v;
         }
@@ -385,7 +422,7 @@ namespace NetworkingLibrary.Modules
         {
             ThrowIfDisposed();
             EnsureReadable(8, nameof(ReadLong));
-            long v = BitConverter.ToInt64(readableBuffer, readPos);
+            long v = ReadInt64LE(readableBuffer, readPos);
             readPos += 8;
             return v;
         }
@@ -393,7 +430,7 @@ namespace NetworkingLibrary.Modules
         {
             ThrowIfDisposed();
             EnsureReadable(8, nameof(ReadULong));
-            ulong v = BitConverter.ToUInt64(readableBuffer, readPos);
+            ulong v = ReadUInt64LE(readableBuffer, readPos);
             readPos += 8;
             return v;
         }
@@ -401,7 +438,7 @@ namespace NetworkingLibrary.Modules
         {
             ThrowIfDisposed();
             EnsureReadable(4, nameof(ReadFloat));
-            float v = BitConverter.ToSingle(readableBuffer, readPos);
+            float v = ReadSingleLE(readableBuffer, readPos);
             readPos += 4;
             return v;
         }
@@ -409,7 +446,7 @@ namespace NetworkingLibrary.Modules
         {
             ThrowIfDisposed();
             EnsureReadable(1, nameof(ReadBool));
-            bool v = BitConverter.ToBoolean(readableBuffer, readPos);
+            bool v = readableBuffer[readPos] != 0;
             readPos += 1;
             return v;
         }

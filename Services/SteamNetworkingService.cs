@@ -292,10 +292,42 @@ namespace NetworkingLibrary.Services
 
         /// <summary>
         /// </summary>
-        public void CreateLobby(int maxPlayers = 8) => SteamMatchmaking.CreateLobby(ELobbyType.k_ELobbyTypePrivate, maxPlayers);
+        public void CreateLobby(int maxPlayers = 8)
+        {
+            if (!IsInitialized)
+            {
+                Net.Logger?.LogError("CreateLobby called before SteamNetworkingService.Initialize.");
+                return;
+            }
+
+            if (maxPlayers <= 0)
+            {
+                Net.Logger.LogWarning($"CreateLobby maxPlayers {maxPlayers} is invalid. Clamping to 1.");
+                maxPlayers = 1;
+            }
+
+            try { SteamMatchmaking.CreateLobby(ELobbyType.k_ELobbyTypePrivate, maxPlayers); }
+            catch (Exception ex) { Net.Logger.LogError($"CreateLobby failed: {ex}"); }
+        }
         /// <summary>
         /// </summary>
-        public void JoinLobby(ulong lobbySteamId64) => SteamMatchmaking.JoinLobby(new CSteamID(lobbySteamId64));
+        public void JoinLobby(ulong lobbySteamId64)
+        {
+            if (!IsInitialized)
+            {
+                Net.Logger?.LogError("JoinLobby called before SteamNetworkingService.Initialize.");
+                return;
+            }
+
+            if (lobbySteamId64 == 0UL)
+            {
+                Net.Logger.LogWarning("JoinLobby called with invalid lobby id 0.");
+                return;
+            }
+
+            try { SteamMatchmaking.JoinLobby(new CSteamID(lobbySteamId64)); }
+            catch (Exception ex) { Net.Logger.LogError($"JoinLobby failed for lobby {lobbySteamId64}: {ex}"); }
+        }
         /// <summary>
         /// </summary>
         public void LeaveLobby()
@@ -316,7 +348,29 @@ namespace NetworkingLibrary.Services
         }
         /// <summary>
         /// </summary>
-        public void InviteToLobby(ulong steamId64) => SteamMatchmaking.InviteUserToLobby(Lobby, new CSteamID(steamId64));
+        public void InviteToLobby(ulong steamId64)
+        {
+            if (!IsInitialized)
+            {
+                Net.Logger?.LogError("InviteToLobby called before SteamNetworkingService.Initialize.");
+                return;
+            }
+
+            if (!InLobby || Lobby == CSteamID.Nil)
+            {
+                Net.Logger.LogWarning("InviteToLobby called while not in a lobby.");
+                return;
+            }
+
+            if (steamId64 == 0UL)
+            {
+                Net.Logger.LogWarning("InviteToLobby called with invalid target Steam64 id 0.");
+                return;
+            }
+
+            try { SteamMatchmaking.InviteUserToLobby(Lobby, new CSteamID(steamId64)); }
+            catch (Exception ex) { Net.Logger.LogError($"InviteToLobby failed for target {steamId64}: {ex}"); }
+        }
 
         void OnLobbyEnter(LobbyEnter_t param)
         {

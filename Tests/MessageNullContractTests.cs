@@ -216,6 +216,13 @@ public class MessageNullContractTests
         Assert.Equal(payload, (byte[])read.ReadObject(typeof(byte[])));
     }
 
+    [Fact]
+    public void WriteBytes_Rejects_Null()
+    {
+        var message = NewMessage();
+        Assert.Throws<ArgumentNullException>(() => message.WriteBytes(null!));
+    }
+
     private static byte[] BuildLegacyMessageData(Action<Message> writePayload)
     {
         var legacy = NewMessage();

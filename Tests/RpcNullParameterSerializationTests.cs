@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Linq;
 using System.Reflection;
 using NetworkingLibrary.Modules;
 using NetworkingLibrary.Services;
@@ -14,6 +15,8 @@ public class RpcNullParameterSerializationTests
     static readonly MethodInfo OfflineBuildMessage = typeof(OfflineNetworkingService).GetMethod("BuildMessage", BindingFlags.Instance | BindingFlags.NonPublic)!;
     static readonly MethodInfo SteamBuildMessage = typeof(SteamNetworkingService).GetMethod("BuildMessage", BindingFlags.Instance | BindingFlags.NonPublic)!;
     static readonly MethodInfo SteamDispatchIncoming = typeof(SteamNetworkingService).GetMethod("DispatchIncoming", BindingFlags.Instance | BindingFlags.NonPublic)!;
+    static readonly MethodInfo OfflineBuildOverloadKey = typeof(OfflineNetworkingService).GetMethod("BuildOverloadKey", BindingFlags.Static | BindingFlags.NonPublic)!;
+    static readonly MethodInfo SteamBuildOverloadKey = typeof(SteamNetworkingService).GetMethod("BuildOverloadKey", BindingFlags.Static | BindingFlags.NonPublic)!;
 
     sealed class NullReceiver
     {
@@ -73,6 +76,12 @@ public class RpcNullParameterSerializationTests
             LastOverload = "bool";
             LastBoolValue = value;
         }
+    }
+
+    sealed class CanonicalOverloadReceiver
+    {
+        [CustomRPC]
+        void Shared(int? value, string[] names, System.Collections.Generic.Dictionary<string, int[]> map) { }
     }
 
     sealed class MaskedReceiver
@@ -281,6 +290,44 @@ public class RpcNullParameterSerializationTests
     }
 
     [Fact]
+    public void BuildOverloadKey_UsesStableCanonicalTypeIdentity_AcrossServices()
+    {
+        const string expected = "System.Int32?|System.String[]|System.Collections.Generic.Dictionary<System.String,System.Int32[]>";
+        var method = typeof(CanonicalOverloadReceiver).GetMethod("Shared", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        var offlineKey = InvokeBuildOverloadKey(OfflineBuildOverloadKey, typeof(OfflineNetworkingService), method);
+        var steamKey = InvokeBuildOverloadKey(SteamBuildOverloadKey, typeof(SteamNetworkingService), method);
+
+        Assert.Equal(expected, offlineKey);
+        Assert.Equal(expected, steamKey);
+        Assert.DoesNotContain("Version=", offlineKey);
+        Assert.DoesNotContain("Version=", steamKey);
+    }
+
+    [Fact]
+    public void SteamDispatchIncoming_StableOverloadKey_MatchesAcrossSimulatedAssemblyVersions()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new ByteBoolDispatchReceiver();
+        using var token = service.RegisterNetworkObject(receiver, TestModId);
+
+        var msg = (Message?)SteamBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { true }, null });
+        Assert.NotNull(msg);
+
+        var v1Key = BuildSimulatedVersionAgnosticKey("1.0.0.0", typeof(bool));
+        var v2Key = BuildSimulatedVersionAgnosticKey("9.9.9.9", typeof(bool));
+        Assert.Equal(v1Key, v2Key);
+        Assert.Equal(v1Key, msg!.OverloadKey);
+
+        msg.OverloadKey = v2Key;
+        SteamDispatchIncoming.Invoke(service, new object?[] { msg, new CSteamID(42UL) });
+
+        Assert.Equal("bool", receiver.LastOverload);
+        Assert.True(receiver.LastBoolValue);
+        Assert.Null(receiver.LastByteValue);
+    }
+
+    [Fact]
     public void SteamRPCTarget_SelfTarget_InvokesLocalHandler_WithoutQueueing()
     {
         var service = new SteamNetworkingService();
@@ -389,5 +436,24 @@ public class RpcNullParameterSerializationTests
     {
         var queue = (ICollection)typeof(SteamNetworkingService).GetField(queueFieldName, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(service)!;
         Assert.Equal(expected, queue.Count);
+    }
+
+    static string InvokeBuildOverloadKey(MethodInfo buildOverloadKeyMethod, Type serviceType, MethodInfo method)
+    {
+        var handlerType = serviceType.GetNestedType("MessageHandler", BindingFlags.NonPublic)!;
+        var handler = Activator.CreateInstance(handlerType)!;
+        handlerType.GetField("Parameters", BindingFlags.Instance | BindingFlags.Public)!.SetValue(handler, method.GetParameters());
+        handlerType.GetField("TakesInfo", BindingFlags.Instance | BindingFlags.Public)!.SetValue(handler, false);
+        return (string)buildOverloadKeyMethod.Invoke(null, new[] { handler })!;
+    }
+
+    static string BuildSimulatedVersionAgnosticKey(string version, params Type[] types)
+    {
+        return string.Join("|", types.Select(type =>
+        {
+            var simulatedLegacy = $"{type.FullName}, {type.Assembly.GetName().Name}, Version={version}, Culture=neutral, PublicKeyToken=null";
+            var commaIndex = simulatedLegacy.IndexOf(',');
+            return commaIndex >= 0 ? simulatedLegacy.Substring(0, commaIndex) : simulatedLegacy;
+        }));
     }
 }

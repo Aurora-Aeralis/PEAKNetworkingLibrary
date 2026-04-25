@@ -1896,7 +1896,7 @@ namespace NetworkingLibrary.Services
             var pi = handler.Parameters;
             int parameterCount = handler.TakesInfo ? pi.Length - 1 : pi.Length;
             if (parameterCount <= 0) return string.Empty;
-            return string.Join("|", pi.Take(parameterCount).Select(p => p.ParameterType.AssemblyQualifiedName ?? p.ParameterType.FullName ?? p.ParameterType.Name));
+            return string.Join("|", pi.Take(parameterCount).Select(p => CanonicalTypeName.For(p.ParameterType)));
         }
 
         SlidingWindowRateLimiter GetOrCreateRateLimiter(ulong steam64)

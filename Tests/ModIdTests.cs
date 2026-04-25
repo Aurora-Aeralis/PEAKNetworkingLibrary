@@ -6,48 +6,48 @@ namespace NetworkingLibrary.Tests;
 public class ModIdTests
 {
     [Fact]
-    public void FromGuid_IsStable_ForKnownGuid()
+    public void FromGuid_Legacy_IsStable_ForKnownGuid()
     {
-        var guid = "123e4567-e89b-12d3-a456-426614174000";
-
-        var modId = ModId.FromGuid(guid);
+        var modId = ModId.FromGuid("123e4567-e89b-12d3-a456-426614174000");
 
         Assert.Equal(3702665787u, modId);
     }
 
     [Fact]
-    public void FromGuid_TrimsWhitespace_BeforeHashing()
+    public void FromGuidV2_IsDeterministic_ForKnownGuidVectors()
     {
-        var guid = "123e4567-e89b-12d3-a456-426614174000";
-
-        var clean = ModId.FromGuid(guid);
-        var padded = ModId.FromGuid($"  {guid}  ");
-
-        Assert.Equal(clean, padded);
+        Assert.Equal(4203402889u, ModId.FromGuidV2("123e4567-e89b-12d3-a456-426614174000"));
+        Assert.Equal(1128267358u, ModId.FromGuidV2("00000000-0000-0000-0000-000000000001"));
+        Assert.Equal(2851418380u, ModId.FromGuidV2("ffffffff-ffff-ffff-ffff-ffffffffffff"));
     }
 
     [Fact]
-    public void FromGuid_NormalizesEquivalentGuidRepresentations()
+    public void FromGuidV2_NormalizesEquivalentGuidRepresentations()
     {
         const string canonical = "123e4567-e89b-12d3-a456-426614174000";
         const string uppercase = "123E4567-E89B-12D3-A456-426614174000";
         const string noHyphens = "123e4567e89b12d3a456426614174000";
         const string braced = "{123e4567-e89b-12d3-a456-426614174000}";
 
-        var canonicalId = ModId.FromGuid(canonical);
-        var uppercaseId = ModId.FromGuid(uppercase);
-        var noHyphensId = ModId.FromGuid(noHyphens);
-        var bracedId = ModId.FromGuid(braced);
+        var canonicalId = ModId.FromGuidV2(canonical);
 
-        Assert.Equal(canonicalId, uppercaseId);
-        Assert.Equal(canonicalId, noHyphensId);
-        Assert.Equal(canonicalId, bracedId);
+        Assert.Equal(canonicalId, ModId.FromGuidV2(uppercase));
+        Assert.Equal(canonicalId, ModId.FromGuidV2(noHyphens));
+        Assert.Equal(canonicalId, ModId.FromGuidV2(braced));
     }
 
     [Fact]
-    public void FromGuid_ThrowsForInvalidGuidFormat()
+    public void FromGuidV2_TrimsWhitespace_BeforeHashing()
     {
-        var ex = Assert.Throws<ArgumentException>(() => ModId.FromGuid("not-a-guid"));
+        var guid = "123e4567-e89b-12d3-a456-426614174000";
+
+        Assert.Equal(ModId.FromGuidV2(guid), ModId.FromGuidV2($"  {guid}  "));
+    }
+
+    [Fact]
+    public void FromGuidV2_ThrowsForInvalidGuidFormat()
+    {
+        var ex = Assert.Throws<ArgumentException>(() => ModId.FromGuidV2("not-a-guid"));
 
         Assert.Equal("guid", ex.ParamName);
         Assert.Contains("valid GUID string", ex.Message);

@@ -11,6 +11,14 @@ namespace NetworkingLibrary.Services
             try
             {
                 UnityMainThreadDispatcher.ProcessPendingMainThreadWork();
+            }
+            catch (Exception ex)
+            {
+                Net.Logger?.LogError($"NetworkingPollerDebug Main-thread dispatcher error: {ex}");
+            }
+
+            try
+            {
                 Net.Service?.PollReceive();
             }
             catch (Exception ex)

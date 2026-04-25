@@ -67,6 +67,28 @@ public class SteamNetworkingServiceLifecycleTests
         }
     }
 
+    sealed class ScopeAction : IDisposable
+    {
+        Action? onDispose;
+        public ScopeAction(Action onDispose) { this.onDispose = onDispose; }
+        public void Dispose()
+        {
+            var action = onDispose;
+            if (action == null) return;
+            onDispose = null;
+            action();
+        }
+    }
+
+    static IDisposable WithUnavailableNetLogger()
+    {
+        var loggerField = typeof(Net).GetField("<Logger>k__BackingField", BindingFlags.Static | BindingFlags.NonPublic);
+        if (loggerField == null) return new ScopeAction(() => { });
+        var original = loggerField.GetValue(null);
+        loggerField.SetValue(null, null);
+        return new ScopeAction(() => loggerField.SetValue(null, original));
+    }
+
     [Fact]
     public void LeaveAndShutdown_ClearOutboundQueues()
     {
@@ -155,6 +177,19 @@ public class SteamNetworkingServiceLifecycleTests
     [Fact]
     public void JoinLobby_WithInvalidLobbyId_DoesNotThrow_AndDoesNotEnterLobby()
     {
+        var service = new SteamNetworkingService();
+        SetInitialized(service, true);
+
+        var ex = Record.Exception(() => service.JoinLobby(0UL));
+
+        Assert.Null(ex);
+        Assert.False(service.InLobby);
+    }
+
+    [Fact]
+    public void JoinLobby_WithInvalidLobbyId_DoesNotThrow_WhenNetLoggerIsUnavailable()
+    {
+        using var _ = WithUnavailableNetLogger();
         var service = new SteamNetworkingService();
         SetInitialized(service, true);
 

@@ -212,6 +212,11 @@ namespace NetworkingLibrary.Services
                 LogError("JoinLobby called before OfflineNetworkingService.Initialize.");
                 return;
             }
+            if (lobbySteamId64 == 0UL)
+            {
+                LogWarning("JoinLobby called with invalid lobby id 0.");
+                return;
+            }
 
             EnsureLocalPeerKey();
             InLobby = true;
@@ -270,6 +275,11 @@ namespace NetworkingLibrary.Services
             }
 
             if (!InLobby) return;
+            if (steamId64 == 0UL)
+            {
+                LogWarning("InviteToLobby called with invalid target Steam64 id 0.");
+                return;
+            }
             if (perPlayerData.ContainsKey(steamId64)) return;
             perPlayerData[steamId64] = new Dictionary<string, string>();
             PlayerEntered?.Invoke(steamId64);
@@ -469,6 +479,11 @@ namespace NetworkingLibrary.Services
             if (!InLobby) { LogError("Cannot set player data when not in lobby."); return; }
             if (!playerKeys.Contains(key)) LogWarning($"Accessing unregistered player key {key}");
             var serialized = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+            if (!perPlayerData.ContainsKey(LocalSteamId))
+            {
+                LogWarning($"Local player {LocalSteamId} was missing in per-player state while setting key '{key}'. Recreating local state bucket.");
+                perPlayerData[LocalSteamId] = new Dictionary<string, string>();
+            }
             perPlayerData[LocalSteamId][key] = serialized;
             PlayerDataChanged?.Invoke(LocalSteamId, new[] { key });
         }

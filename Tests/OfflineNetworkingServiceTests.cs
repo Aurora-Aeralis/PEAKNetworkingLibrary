@@ -390,6 +390,34 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
+    public void JoinLobby_InvalidLobbyId_DoesNotEnterLobby()
+    {
+        var service = new OfflineNetworkingService();
+
+        service.Initialize();
+        service.JoinLobby(0UL);
+
+        Assert.False(service.InLobby);
+        Assert.Equal(service.LocalSteamId, service.HostSteamId64);
+        Assert.Empty(service.GetLobbyMemberSteamIds());
+    }
+
+    [Fact]
+    public void InviteToLobby_InvalidSteamId_DoesNotAddMember()
+    {
+        var service = new OfflineNetworkingService();
+        var playerEnteredCount = 0;
+        service.PlayerEntered += _ => playerEnteredCount++;
+
+        service.Initialize();
+        service.CreateLobby();
+        service.InviteToLobby(0UL);
+
+        Assert.Equal(new[] { service.LocalSteamId }, service.GetLobbyMemberSteamIds());
+        Assert.Equal(1, playerEnteredCount);
+    }
+
+    [Fact]
     public void InviteToLobby_DuplicateSteamId_RaisesPlayerEnteredOnce()
     {
         var service = new OfflineNetworkingService();

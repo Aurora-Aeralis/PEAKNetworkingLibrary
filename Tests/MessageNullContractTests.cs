@@ -118,6 +118,18 @@ public class MessageNullContractTests
         Assert.Equal(new List<int> { 10, 11, 12 }, (List<int>)read.ReadObject(typeof(List<int>)));
     }
 
+
+    [Fact]
+    public void ReadString_Rejects_Excessive_Length()
+    {
+        var malformed = NewMessage();
+        malformed.WriteInt(Message.MaxSize + 1);
+
+        var read = Roundtrip(malformed);
+        var ex = Assert.Throws<Exception>(() => read.ReadString());
+        Assert.Contains("length exceeds max", ex.Message);
+    }
+
     [Fact]
     public void ReadObject_ByteArray_Rejects_Negative_Length()
     {

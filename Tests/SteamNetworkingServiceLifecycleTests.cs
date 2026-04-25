@@ -456,6 +456,52 @@ public class SteamNetworkingServiceLifecycleTests
         Assert.True(receiver.CallCount > 0);
     }
 
+    [Fact]
+    public void MultipleInstances_HaveIsolatedInboundBuffers_WithConfiguredCapacity()
+    {
+        var first = new SteamNetworkingService();
+        var second = new SteamNetworkingService();
+
+        var firstBuffer = GetInboundBuffer(first);
+        var secondBuffer = GetInboundBuffer(second);
+
+        Assert.Equal(500, firstBuffer.Length);
+        Assert.Equal(500, secondBuffer.Length);
+        Assert.NotSame(firstBuffer, secondBuffer);
+
+        firstBuffer[0] = new IntPtr(111);
+        secondBuffer[0] = new IntPtr(222);
+
+        Assert.Equal(new IntPtr(111), firstBuffer[0]);
+        Assert.Equal(new IntPtr(222), secondBuffer[0]);
+    }
+
+    [Fact]
+    public async Task MultipleInstances_CanMutateInboundBuffersConcurrently_WithoutCrossInstanceWrites()
+    {
+        var first = new SteamNetworkingService();
+        var second = new SteamNetworkingService();
+        var firstBuffer = GetInboundBuffer(first);
+        var secondBuffer = GetInboundBuffer(second);
+        var writes = Math.Min(firstBuffer.Length, secondBuffer.Length);
+
+        await Task.WhenAll(
+            Task.Run(() =>
+            {
+                for (var i = 0; i < writes; i++) firstBuffer[i] = new IntPtr(i + 1);
+            }),
+            Task.Run(() =>
+            {
+                for (var i = 0; i < writes; i++) secondBuffer[i] = new IntPtr(i + 10_000);
+            })
+        );
+
+        Assert.Equal(new IntPtr(1), firstBuffer[0]);
+        Assert.Equal(new IntPtr(10_000), secondBuffer[0]);
+        Assert.Equal(new IntPtr(writes), firstBuffer[writes - 1]);
+        Assert.Equal(new IntPtr(writes - 1 + 10_000), secondBuffer[writes - 1]);
+    }
+
     static void SetInLobby(SteamNetworkingService service, bool value)
     {
         typeof(SteamNetworkingService).GetField("<InLobby>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(service, value);
@@ -553,6 +599,11 @@ public class SteamNetworkingServiceLifecycleTests
     static object? GetField(SteamNetworkingService service, string fieldName)
     {
         return typeof(SteamNetworkingService).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(service);
+    }
+
+    static IntPtr[] GetInboundBuffer(SteamNetworkingService service)
+    {
+        return (IntPtr[])GetField(service, "inMessages")!;
     }
 
     static object? InvokeNonPublic(SteamNetworkingService service, string methodName, params object[] args)

@@ -24,7 +24,7 @@ namespace NetworkingLibrary.Services
     {
         const int CHANNEL = 120;
         const int MAX_IN_MESSAGES = 500;
-        static IntPtr[] inMessages = new IntPtr[MAX_IN_MESSAGES]; 
+        readonly IntPtr[] inMessages = new IntPtr[MAX_IN_MESSAGES];
         private readonly object rpcLock = new object();
         private readonly object cryptoStateLock = new();
 
@@ -1245,13 +1245,13 @@ namespace NetworkingLibrary.Services
         {
             try
             {
-                int count = SteamNetworkingMessages.ReceiveMessagesOnChannel(CHANNEL, inMessages, MAX_IN_MESSAGES);
+                int count = SteamNetworkingMessages.ReceiveMessagesOnChannel(CHANNEL, this.inMessages, MAX_IN_MESSAGES);
                 //if (count > 0) LogInfo($"ReceiveMessages: count={count} (channel {CHANNEL})");
                 if (count <= 0) return;
 
                 for (int i = 0; i < count; i++)
                 {
-                    IntPtr outPtr = inMessages[i];
+                    IntPtr outPtr = this.inMessages[i];
                     SteamNetworkingMessage_t steamMsg = Marshal.PtrToStructure<SteamNetworkingMessage_t>(outPtr);
                     int size = (int)steamMsg.m_cbSize;
 

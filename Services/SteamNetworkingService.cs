@@ -724,6 +724,11 @@ namespace NetworkingLibrary.Services
             if (!InLobby) { Net.Logger.LogError("Cannot RPC target when not in lobby"); return; }
             var msg = BuildMessage(modId, methodName, 0, parameters, null);
             if (msg == null) return;
+            if (target == SteamUser.GetSteamID())
+            {
+                InvokeLocalMessage(new Message(msg.ToArray()), SteamUser.GetSteamID());
+                return;
+            }
             var framed = BuildFramedBytesWithMeta(msg, modId, reliable);
             EnqueueOrSend(framed, target, reliable, DeterminePriority(modId, methodName));
         }
@@ -733,6 +738,11 @@ namespace NetworkingLibrary.Services
             if (!InLobby) { Net.Logger.LogError("Cannot RPC target when not in lobby"); return; }
             var msg = BuildMessage(modId, methodName, 0, parameters, parameterTypes);
             if (msg == null) return;
+            if (target == SteamUser.GetSteamID())
+            {
+                InvokeLocalMessage(new Message(msg.ToArray()), SteamUser.GetSteamID());
+                return;
+            }
             var framed = BuildFramedBytesWithMeta(msg, modId, reliable);
             EnqueueOrSend(framed, target, reliable, DeterminePriority(modId, methodName));
         }

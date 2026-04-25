@@ -247,6 +247,28 @@ public class SteamNetworkingServiceLifecycleTests
         Assert.Null(GetField(service, "LocalRsa"));
     }
 
+    [Fact]
+    public void GetLobbyMemberSteamIds_SkipsNilMembers_AndReturnsCompactArray()
+    {
+        var service = new SteamNetworkingService();
+
+        SetInLobby(service, true);
+        SetLobby(service, 9001UL);
+        SetField(service, "getNumLobbyMembers", (Func<CSteamID, int>)(_ => 4));
+        SetField(service, "getLobbyMemberByIndex", (Func<CSteamID, int, CSteamID>)((_, index) => index switch
+        {
+            0 => new CSteamID(111UL),
+            1 => CSteamID.Nil,
+            2 => new CSteamID(333UL),
+            _ => CSteamID.Nil
+        }));
+
+        var ids = service.GetLobbyMemberSteamIds();
+
+        Assert.Equal(new ulong[] { 111UL, 333UL }, ids);
+        Assert.DoesNotContain(0UL, ids);
+    }
+
     static void SetInLobby(SteamNetworkingService service, bool value)
     {
         typeof(SteamNetworkingService).GetField("<InLobby>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(service, value);
@@ -255,6 +277,16 @@ public class SteamNetworkingServiceLifecycleTests
     static void SetInitialized(SteamNetworkingService service, bool value)
     {
         typeof(SteamNetworkingService).GetField("<IsInitialized>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(service, value);
+    }
+
+    static void SetLobby(SteamNetworkingService service, ulong lobbyId)
+    {
+        typeof(SteamNetworkingService).GetField("<Lobby>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(service, new CSteamID(lobbyId));
+    }
+
+    static void SetField(SteamNetworkingService service, string fieldName, object value)
+    {
+        typeof(SteamNetworkingService).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(service, value);
     }
 
     static void EnqueueTo(SteamNetworkingService service, string queueFieldName)

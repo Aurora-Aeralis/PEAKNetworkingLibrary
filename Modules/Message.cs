@@ -13,7 +13,7 @@ namespace NetworkingLibrary.Modules
     /// </summary>
     public class Message : IDisposable
     {
-        public const byte PROTOCOL_VERSION = 1;
+        public const byte PROTOCOL_VERSION = 2;
         public static int MaxSize = 64 * 1024;
 
         public byte ProtocolVersion;
@@ -24,6 +24,7 @@ namespace NetworkingLibrary.Modules
         private List<byte> buffer = new();
         internal byte[] readableBuffer = Array.Empty<byte>();
         internal int readPos = 0;
+        private bool UsesReferencePresenceFlags => ProtocolVersion >= 2;
 
         public bool Compressed { get; private set; } = false;
 
@@ -114,7 +115,7 @@ namespace NetworkingLibrary.Modules
                 return;
             }
 
-            if (!type.IsValueType)
+            if (!type.IsValueType && UsesReferencePresenceFlags)
             {
                 bool has = value != null;
                 WriteBool(has);
@@ -334,7 +335,7 @@ namespace NetworkingLibrary.Modules
                 return ReadObject(nt);
             }
 
-            if (!type.IsValueType)
+            if (!type.IsValueType && UsesReferencePresenceFlags)
             {
                 bool has = ReadBool();
                 if (!has) return null!;

@@ -89,4 +89,41 @@ public class MessageNullContractTests
         Assert.Contains("Null handling", ex.Message);
         Assert.Contains("RegisterSerializer", ex.Message);
     }
+
+    [Fact]
+    public void ReadObject_Version1_String_DoesNotExpect_PresenceFlag()
+    {
+        var legacyData = BuildLegacyMessageData((m) => m.WriteString("legacy"));
+
+        var read = new Message(legacyData);
+        Assert.Equal((byte)1, read.ProtocolVersion);
+        Assert.Equal("legacy", read.ReadObject(typeof(string)));
+    }
+
+    [Fact]
+    public void ReadObject_Version1_List_DoesNotExpect_PresenceFlag()
+    {
+        var legacyData = BuildLegacyMessageData((m) =>
+        {
+            var values = new List<int> { 10, 11, 12 };
+            m.WriteInt(values.Count);
+            foreach (var value in values)
+            {
+                m.WriteObject(typeof(int), value);
+            }
+        });
+
+        var read = new Message(legacyData);
+        Assert.Equal((byte)1, read.ProtocolVersion);
+        Assert.Equal(new List<int> { 10, 11, 12 }, (List<int>)read.ReadObject(typeof(List<int>)));
+    }
+
+    private static byte[] BuildLegacyMessageData(Action<Message> writePayload)
+    {
+        var legacy = NewMessage();
+        writePayload(legacy);
+        var bytes = legacy.ToArray();
+        bytes[0] = 1; // simulate older sender protocol that did not include reference presence flags.
+        return bytes;
+    }
 }

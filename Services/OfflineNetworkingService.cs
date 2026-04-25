@@ -357,7 +357,8 @@ namespace NetworkingLibrary.Services
         {
             if (!InLobby) { Debug.LogError("Cannot set lobby data when not in lobby."); return; }
             if (!lobbyKeys.Contains(key)) Debug.LogWarning($"Accessing unregistered lobby key {key}");
-            lobbyData[key] = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture);
+            var serialized = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+            lobbyData[key] = serialized;
             LobbyDataChanged?.Invoke(new[] { key });
         }
         /// <summary>
@@ -380,7 +381,8 @@ namespace NetworkingLibrary.Services
         {
             if (!InLobby) { Debug.LogError("Cannot set player data when not in lobby."); return; }
             if (!playerKeys.Contains(key)) Debug.LogWarning($"Accessing unregistered player key {key}");
-            perPlayerData[LocalSteamId][key] = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture);
+            var serialized = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+            perPlayerData[LocalSteamId][key] = serialized;
             PlayerDataChanged?.Invoke(LocalSteamId, new[] { key });
         }
         /// <summary>

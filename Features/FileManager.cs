@@ -1,10 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Text;
+﻿using System.IO;
 using BepInEx.Configuration;
 using BepInEx;
-using UnityEngine;
 
 namespace NetworkingLibrary.Features
 {
@@ -60,11 +56,9 @@ namespace NetworkingLibrary.Features
         static void MigrateConfig(ConfigFile config, string previousVersion, string currentVersion)
         {
             _ = currentVersion;
-            // Only migrate keys that changed semantics/schema between versions.
             if (string.IsNullOrWhiteSpace(previousVersion))
                 return;
 
-            // Legacy version key migration: preserve existing value while moving to dedicated schema key.
             var legacyVersion = config.Bind(VersionSection, LegacyVersionKey, string.Empty, string.Empty).Value;
             if (string.IsNullOrWhiteSpace(config.Bind(VersionSection, VersionKey, string.Empty, string.Empty).Value) && !string.IsNullOrWhiteSpace(legacyVersion))
                 config.Bind(VersionSection, VersionKey, legacyVersion, "Tracks config schema version for non-destructive migrations.").Value = legacyVersion;

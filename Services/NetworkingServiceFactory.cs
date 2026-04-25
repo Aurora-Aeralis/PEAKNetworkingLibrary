@@ -2,7 +2,6 @@
 #if !UNITY_EDITOR
 using Steamworks;
 #endif
-using UnityEngine;
 
 namespace NetworkingLibrary.Services
 {

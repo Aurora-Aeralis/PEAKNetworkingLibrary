@@ -14,4 +14,14 @@ public class RpcInfoSteamFallbackTests
 
         Assert.Null(ex);
     }
+
+    [Fact]
+    public void Constructor_FromCSteamId_PreservesIdentifiers_WhenSteamApiUnavailable()
+    {
+        var sid = new CSteamID(12345678901234567UL);
+        var info = new RPCInfo(sid);
+
+        Assert.Equal(sid.m_SteamID, info.SteamId64);
+        Assert.Equal(sid.ToString(), info.SteamIdString);
+    }
 }

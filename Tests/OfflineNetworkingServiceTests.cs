@@ -2,6 +2,8 @@ using NetworkingLibrary.Modules;
 using NetworkingLibrary.Services;
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Threading;
@@ -52,6 +54,20 @@ public class OfflineNetworkingServiceTests
             LastValue = -1;
             CallCount = 0;
         }
+    }
+
+    sealed class VisibilityRpcReceiver
+    {
+        public int PublicCallCount { get; private set; }
+        public int PrivateCallCount { get; private set; }
+
+        [CustomRPC]
+        public void PublicPing(int value) => PublicCallCount += value;
+
+        [CustomRPC]
+        void PrivatePing(int value) => PrivateCallCount += value;
+
+        public void NotRpc(int value) => PublicCallCount += value * 1000;
     }
 
     sealed class ScopeAction : IDisposable
@@ -479,6 +495,26 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
+    public void RegisterNetworkObject_RegistersOnlyAttributedInstanceMethods_AndDispatchParityHolds()
+    {
+        var service = new OfflineNetworkingService();
+        var receiver = new VisibilityRpcReceiver();
+
+        service.Initialize();
+        service.CreateLobby();
+        using var _ = service.RegisterNetworkObject(receiver, TestModId, mask: 7);
+
+        Assert.Equal(2, GetRegisteredHandlerCount(service, TestModId));
+
+        service.RPC(TestModId, nameof(VisibilityRpcReceiver.PublicPing), ReliableType.Reliable, 2);
+        service.RPC(TestModId, "PrivatePing", ReliableType.Reliable, 3);
+        service.RPC(TestModId, nameof(VisibilityRpcReceiver.NotRpc), ReliableType.Reliable, 4);
+
+        Assert.Equal(2, receiver.PublicCallCount);
+        Assert.Equal(3, receiver.PrivateCallCount);
+    }
+
+    [Fact]
     public void Rpc_RegisteredHandler_OversizedPayload_IsRejected()
     {
         var service = new OfflineNetworkingService();
@@ -710,5 +746,14 @@ public class OfflineNetworkingServiceTests
 
         if (exceptions.TryPeek(out var ex))
             Assert.Fail($"Encountered exception during concurrent RPC churn: {ex}");
+    }
+
+    static int GetRegisteredHandlerCount(OfflineNetworkingService service, uint modId)
+    {
+        var rpcs = (Dictionary<uint, Dictionary<string, List<MessageHandler>>>)typeof(OfflineNetworkingService)
+            .GetField("rpcs", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(service)!;
+        if (!rpcs.TryGetValue(modId, out var methods)) return 0;
+        return methods.Sum(entry => entry.Value.Count);
     }
 }

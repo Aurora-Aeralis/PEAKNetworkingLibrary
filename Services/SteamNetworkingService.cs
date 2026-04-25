@@ -709,15 +709,14 @@ namespace NetworkingLibrary.Services
                 {
                     var instanceRpc = type
                         .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                        .FirstOrDefault(method => method.GetCustomAttributes(false).OfType<CustomRPCAttribute>().Any());
+                        .FirstOrDefault(method => method.IsDefined(typeof(CustomRPCAttribute), inherit: false));
                     if (instanceRpc != null) throw new InvalidOperationException($"Cannot register instance RPC method {type.FullName}.{instanceRpc.Name} without an instance.");
                 }
 
                 var methods = type.GetMethods(registrationFlags);
                 foreach (var method in methods)
                 {
-                    var attrs = method.GetCustomAttributes(false).OfType<CustomRPCAttribute>().ToArray();
-                    if (attrs.Length == 0) continue;
+                    if (!method.IsDefined(typeof(CustomRPCAttribute), inherit: false)) continue;
 
                     if (!rpcs.ContainsKey(modId)) rpcs[modId] = new Dictionary<string, List<MessageHandler>>();
                     if (!rpcs[modId].ContainsKey(method.Name)) rpcs[modId][method.Name] = new List<MessageHandler>();

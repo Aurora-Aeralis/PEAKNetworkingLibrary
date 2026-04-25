@@ -299,8 +299,7 @@ namespace NetworkingLibrary.Services
             {
                 foreach (var method in t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
                 {
-                    var attrs = method.GetCustomAttributes(false).OfType<CustomRPCAttribute>().ToArray();
-                    if (attrs.Length == 0) continue;
+                    if (!method.IsDefined(typeof(CustomRPCAttribute), inherit: false)) continue;
                     if (!rpcs.ContainsKey(modId)) rpcs[modId] = new Dictionary<string, List<MessageHandler>>();
                     if (!rpcs[modId].ContainsKey(method.Name)) rpcs[modId][method.Name] = new List<MessageHandler>();
                     var handlers = rpcs[modId][method.Name];
@@ -327,8 +326,7 @@ namespace NetworkingLibrary.Services
             {
                 foreach (var method in type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
                 {
-                    var attrs = method.GetCustomAttributes(false).OfType<CustomRPCAttribute>().ToArray();
-                    if (attrs.Length == 0) continue;
+                    if (!method.IsDefined(typeof(CustomRPCAttribute), inherit: false)) continue;
                     if (!method.IsStatic) throw new InvalidOperationException($"Cannot register instance RPC method {type.FullName}.{method.Name} without an instance.");
 
                     if (!rpcs.ContainsKey(modId)) rpcs[modId] = new Dictionary<string, List<MessageHandler>>();
@@ -373,8 +371,7 @@ namespace NetworkingLibrary.Services
                 if (!rpcs.TryGetValue(modId, out var methods)) return;
                 foreach (var method in instance.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
                 {
-                    var attrs = method.GetCustomAttributes(false).OfType<CustomRPCAttribute>().ToArray();
-                    if (attrs.Length == 0) continue;
+                    if (!method.IsDefined(typeof(CustomRPCAttribute), inherit: false)) continue;
                     if (!methods.TryGetValue(method.Name, out var handlers)) continue;
                     for (int i = handlers.Count - 1; i >= 0; i--)
                         if (handlers[i].Target == instance && handlers[i].Mask == mask) handlers.RemoveAt(i);

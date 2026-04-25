@@ -47,6 +47,21 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
+    public void LeaveLobby_CalledTwice_RaisesLobbyLeftOnce()
+    {
+        var service = new OfflineNetworkingService();
+        var lobbyLeftCount = 0;
+        service.LobbyLeft += () => lobbyLeftCount++;
+
+        service.CreateLobby();
+        service.LeaveLobby();
+        service.LeaveLobby();
+
+        Assert.Equal(1, lobbyLeftCount);
+        Assert.False(service.InLobby);
+    }
+
+    [Fact]
     public void JoinLobby_RemoteHost_ThenRpcToHost_DoesNotDispatchToLocalRegisteredHandler()
     {
         var service = new OfflineNetworkingService();

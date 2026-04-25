@@ -1,7 +1,11 @@
 <Project>
-  <!--
-  -->
+  <!-- Root-scoped properties used by shared imports and defaults. -->
+  <PropertyGroup>
+    <!-- Define a variable that points to this repository root. -->
+    <SolutionRoot>$(MSBuildThisFileDirectory)</SolutionRoot>
+  </PropertyGroup>
 
+  <!-- Optional user overrides at repository root (not committed). -->
   <Import
     Project="$(SolutionRoot)Config.Build.user.props"
     Condition="Exists('$(SolutionRoot)Config.Build.user.props')"
@@ -35,8 +39,6 @@
 
   <!-- Custom props -->
   <PropertyGroup>
-    <!-- Define a variable that points to this directory. -->
-    <SolutionRoot>$(MSBuildThisFileDirectory)</SolutionRoot>
     <!-- Default values for game files. -->
     <PathBeforeSteam Condition="'$([MSBuild]::IsOSUnixLike())' == 'true'">$(HOME)/.local/share/</PathBeforeSteam>
     <PathBeforeSteam Condition="'$([MSBuild]::IsOSUnixLike())' != 'true'">$(MSBuildProgramFiles32)/</PathBeforeSteam>

@@ -26,6 +26,15 @@ public class SteamNetworkingServiceLifecycleTests
         }
     }
 
+    sealed class MixedRpcReceiver
+    {
+        [CustomRPC]
+        static void OnStaticPing(int value) { }
+
+        [CustomRPC]
+        void OnInstancePing(int value) { }
+    }
+
     [Fact]
     public void LeaveAndShutdown_ClearOutboundQueues()
     {
@@ -187,6 +196,18 @@ public class SteamNetworkingServiceLifecycleTests
         second.Dispose();
         DispatchPing(service, 3);
         Assert.Equal(3, receiver.CallCount);
+    }
+
+    [Fact]
+    public void RegisterNetworkType_WithInstanceRpc_ThrowsAndDoesNotCreateHandlers()
+    {
+        var service = new SteamNetworkingService();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => service.RegisterNetworkType(typeof(MixedRpcReceiver), TestModId));
+        Assert.Contains("Cannot register instance RPC method", ex.Message);
+
+        var rpcs = (IDictionary)GetField(service, "rpcs")!;
+        Assert.Equal(0, rpcs.Count);
     }
 
     [Fact]

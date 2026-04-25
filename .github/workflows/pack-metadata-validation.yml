@@ -1,0 +1,44 @@
+name: Pack Metadata Validation
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+jobs:
+  validate-pack-metadata:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore
+        run: dotnet restore NetworkingLibrary.sln
+
+      - name: Pack
+        run: dotnet pack NetworkingLibrary.csproj -c Release --no-restore
+
+      - name: Validate NuGet metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          NUPKG_PATH="$(find artifacts -type f -name 'PEAKNetworkingLibrary.*.nupkg' ! -name '*.symbols.nupkg' | head -n 1)"
+          if [ -z "$NUPKG_PATH" ]; then
+            echo "No package found under artifacts/."
+            exit 1
+          fi
+
+          NUSPEC_CONTENT="$(unzip -p "$NUPKG_PATH" '*.nuspec')"
+
+          echo "$NUSPEC_CONTENT" | grep -q '<id>PEAKNetworkingLibrary</id>'
+          echo "$NUSPEC_CONTENT" | grep -q '<authors>DAaCollective</authors>'
+          echo "$NUSPEC_CONTENT" | grep -q '<license type="expression">LGPL-3.0-or-later</license>'
+          echo "$NUSPEC_CONTENT" | grep -q '<description>Networking library for mods using Steam instead of PUN.</description>'

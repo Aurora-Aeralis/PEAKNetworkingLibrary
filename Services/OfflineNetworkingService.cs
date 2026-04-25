@@ -387,14 +387,46 @@ namespace NetworkingLibrary.Services
                 var msg = new Message(modId, methodName, mask);
                 if (rpcs.TryGetValue(modId, out var methods) && methods.TryGetValue(methodName, out var handlers) && handlers.Count > 0)
                 {
-                    var handler = handlers[0];
-                    var expected = handler.Parameters;
-                    int expectedCount = handler.TakesInfo ? expected.Length - 1 : expected.Length;
-                    if (expectedCount != parameters.Length)
-                        throw new Exception($"Parameter count mismatch: expected {expectedCount}, got {parameters.Length}");
-                    for (int i = 0; i < expectedCount; i++)
+                    MessageHandler chosen = null!;
+                    foreach (var h in handlers)
                     {
-                        var t = expected[i].ParameterType;
+                        if (h.Mask != mask) continue;
+                        var expected = h.Parameters;
+                        int expectedCount = h.TakesInfo ? expected.Length - 1 : expected.Length;
+                        if (expectedCount != parameters.Length) continue;
+
+                        bool ok = true;
+                        for (int i = 0; i < expectedCount; i++)
+                        {
+                            var t = expected[i].ParameterType;
+                            var p = parameters[i];
+                            if (p == null)
+                            {
+                                if (t.IsValueType && Nullable.GetUnderlyingType(t) == null) { ok = false; break; }
+                                continue;
+                            }
+                            if (!t.IsAssignableFrom(p.GetType())) { ok = false; break; }
+                        }
+
+                        if (ok) { chosen = h; break; }
+                    }
+
+                    if (chosen == null)
+                    {
+                        chosen = handlers.FirstOrDefault(h =>
+                        {
+                            int expectedCount = h.TakesInfo ? h.Parameters.Length - 1 : h.Parameters.Length;
+                            return expectedCount == parameters.Length && h.Mask == mask;
+                        }) ?? handlers[0];
+                    }
+
+                    var expectedParams = chosen.Parameters;
+                    int expectedCountFinal = chosen.TakesInfo ? expectedParams.Length - 1 : expectedParams.Length;
+                    if (expectedCountFinal != parameters.Length)
+                        throw new Exception($"Parameter count mismatch for {methodName}: expected {expectedCountFinal}, got {parameters.Length}");
+                    for (int i = 0; i < expectedCountFinal; i++)
+                    {
+                        var t = expectedParams[i].ParameterType;
                         var p = parameters[i];
                         if (p == null)
                         {
@@ -403,7 +435,8 @@ namespace NetworkingLibrary.Services
                             msg.WriteObject(t, null!);
                             continue;
                         }
-                        if (!t.IsAssignableFrom(p.GetType())) throw new Exception($"Type mismatch {t} vs {p.GetType()}");
+                        if (!t.IsAssignableFrom(p.GetType()))
+                            throw new Exception($"Parameter {i} type mismatch: expected {t}, got {p.GetType()}");
                         msg.WriteObject(t, p);
                     }
                 }
@@ -424,7 +457,8 @@ namespace NetworkingLibrary.Services
                                 msg.WriteObject(t, null!);
                                 continue;
                             }
-                            if (!t.IsAssignableFrom(p.GetType())) throw new Exception($"Type mismatch {t} vs {p.GetType()}");
+                            if (!t.IsAssignableFrom(p.GetType()))
+                                throw new Exception($"Parameter {i} type mismatch: expected {t}, got {p.GetType()}");
                             msg.WriteObject(t, p);
                         }
                     }

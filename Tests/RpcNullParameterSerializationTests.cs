@@ -18,6 +18,18 @@ public class RpcNullParameterSerializationTests
         void StringAndBytes(string text, byte[] bytes) { }
     }
 
+    sealed class IntOverloadReceiver
+    {
+        [CustomRPC]
+        void Shared(int value) { }
+    }
+
+    sealed class StringOverloadReceiver
+    {
+        [CustomRPC]
+        void Shared(string value) { }
+    }
+
     [Fact]
     public void OfflineBuildMessage_AllowsNull_ForReferenceParameters_FromHandlerSignature()
     {
@@ -52,6 +64,34 @@ public class RpcNullParameterSerializationTests
         var read = new Message(msg!.ToArray());
         Assert.Null(read.ReadObject(typeof(string)));
         Assert.Null(read.ReadObject(typeof(byte[])));
+    }
+
+    [Fact]
+    public void OfflineBuildMessage_ChoosesAssignableOverload_InsteadOfFirstHandler()
+    {
+        var service = new OfflineNetworkingService();
+        using var first = service.RegisterNetworkObject(new IntOverloadReceiver(), TestModId);
+        using var second = service.RegisterNetworkObject(new StringOverloadReceiver(), TestModId);
+
+        var msg = (Message?)OfflineBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { "hi" }, null });
+
+        Assert.NotNull(msg);
+        var read = new Message(msg!.ToArray());
+        Assert.Equal("hi", read.ReadObject(typeof(string)));
+    }
+
+    [Fact]
+    public void OfflineBuildMessage_ChoosesNullAcceptingReferenceOverload()
+    {
+        var service = new OfflineNetworkingService();
+        using var first = service.RegisterNetworkObject(new IntOverloadReceiver(), TestModId);
+        using var second = service.RegisterNetworkObject(new StringOverloadReceiver(), TestModId);
+
+        var msg = (Message?)OfflineBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { null }, null });
+
+        Assert.NotNull(msg);
+        var read = new Message(msg!.ToArray());
+        Assert.Null(read.ReadObject(typeof(string)));
     }
 
     [Fact]

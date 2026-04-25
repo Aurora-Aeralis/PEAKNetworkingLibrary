@@ -262,7 +262,6 @@ namespace NetworkingLibrary.Services
             cbLobbyChatUpdate = null;
             cbLobbyDataUpdate = null;
 
-            rpcs.Clear();
             ClearOutboundState();
             lobbyDataKeys.Clear();
             playerDataKeys.Clear();

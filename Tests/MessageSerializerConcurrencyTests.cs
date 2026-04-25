@@ -72,6 +72,12 @@ public class MessageSerializerConcurrencyTests
 
                     var target = new Message(0u, "placeholder", 0);
                     target.SetBytes(payload);
+
+                    Assert.Equal((byte)2, target.ReadByte());
+                    Assert.Equal(2u, target.ReadUInt());
+                    Assert.Equal("setbytes", target.ReadString());
+                    Assert.Equal(1, target.ReadInt());
+
                     Assert.Equal(77, target.ReadInt());
                     Assert.Equal("cache", target.ReadString());
                 }

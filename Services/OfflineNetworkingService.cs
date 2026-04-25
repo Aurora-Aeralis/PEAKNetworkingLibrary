@@ -181,6 +181,7 @@ namespace NetworkingLibrary.Services
         public void LeaveLobby()
         {
             InLobby = false;
+            HostSteamId64 = LocalSteamId;
             lobbyData.Clear();
             perPlayerData.Clear();
             LobbyLeft?.Invoke();

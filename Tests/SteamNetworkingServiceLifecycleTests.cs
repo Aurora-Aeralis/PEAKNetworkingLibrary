@@ -1,5 +1,6 @@
 using NetworkingLibrary.Modules;
 using NetworkingLibrary.Services;
+using System.Buffers.Binary;
 using Steamworks;
 using System;
 using System.Collections;
@@ -607,6 +608,22 @@ public class SteamNetworkingServiceLifecycleTests
 
         Assert.Equal(1, validatorCalls);
         Assert.Equal(0, receiver.CallCount);
+    }
+
+    [Fact]
+    public void TryExtractSignedMessageModId_ReadsAfterProtocolByte()
+    {
+        var signedData = new byte[1 + sizeof(uint) + 2];
+        signedData[0] = 2;
+        BinaryPrimitives.WriteUInt32LittleEndian(signedData.AsSpan(1, sizeof(uint)), TestModId);
+
+        var method = typeof(SteamNetworkingService).GetMethod("TryExtractSignedMessageModId", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var args = new object[] { signedData, false, 0u };
+
+        var result = (bool)method.Invoke(null, args)!;
+
+        Assert.True(result);
+        Assert.Equal(TestModId, (uint)args[2]);
     }
 
     [Fact]

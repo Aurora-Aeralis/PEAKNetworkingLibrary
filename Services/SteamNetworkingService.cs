@@ -1621,12 +1621,13 @@ namespace NetworkingLibrary.Services
                 }
             }
 
-            if (candidate.Length < sizeof(uint))
+            const int protocolVersionSize = sizeof(byte);
+            if (candidate.Length < protocolVersionSize + sizeof(uint))
             {
                 return false;
             }
 
-            modId = BinaryPrimitives.ReadUInt32LittleEndian(candidate);
+            modId = BinaryPrimitives.ReadUInt32LittleEndian(candidate.AsSpan(protocolVersionSize, sizeof(uint)));
             return true;
         }
 

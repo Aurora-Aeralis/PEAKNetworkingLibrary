@@ -1,5 +1,6 @@
 using NetworkingLibrary.Services;
 using System;
+using System.Reflection;
 using Xunit;
 
 namespace NetworkingLibrary.Tests;
@@ -7,6 +8,18 @@ namespace NetworkingLibrary.Tests;
 #if !UNITY_EDITOR
 public class NetworkingServiceFactoryTests
 {
+    sealed class PrivatePropertySteamManagerProbe
+    {
+        static bool Initialized { get; set; }
+        public static void Set(bool value) => Initialized = value;
+    }
+
+    sealed class PrivateFieldSteamManagerProbe
+    {
+        static bool Initialized;
+        public static void Set(bool value) => Initialized = value;
+    }
+
     sealed class FakeService : INetworkingService
     {
         public bool IsInitialized => false;
@@ -142,6 +155,33 @@ public class NetworkingServiceFactoryTests
         {
             NetworkingServiceFactory.ResetTestHooks();
         }
+    }
+
+    [Fact]
+    public void TryReadInitializedFromType_ReadsNonPublicInitializedProperty()
+    {
+        PrivatePropertySteamManagerProbe.Set(true);
+        var read = InvokeTryReadInitializedFromType(typeof(PrivatePropertySteamManagerProbe), out var isInitialized);
+        Assert.True(read);
+        Assert.True(isInitialized);
+    }
+
+    [Fact]
+    public void TryReadInitializedFromType_ReadsNonPublicInitializedField()
+    {
+        PrivateFieldSteamManagerProbe.Set(true);
+        var read = InvokeTryReadInitializedFromType(typeof(PrivateFieldSteamManagerProbe), out var isInitialized);
+        Assert.True(read);
+        Assert.True(isInitialized);
+    }
+
+    static bool InvokeTryReadInitializedFromType(Type steamManagerType, out bool isInitialized)
+    {
+        var method = typeof(NetworkingServiceFactory).GetMethod("TryReadInitializedFromType", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var args = new object?[] { steamManagerType, false };
+        var read = (bool)method.Invoke(null, args)!;
+        isInitialized = (bool)(args[1] ?? false);
+        return read;
     }
 }
 #endif

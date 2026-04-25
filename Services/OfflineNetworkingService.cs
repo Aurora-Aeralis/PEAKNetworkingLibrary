@@ -168,9 +168,8 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void JoinLobby(ulong lobbySteamId64)
         {
-            _ = lobbySteamId64;
             InLobby = true;
-            HostSteamId64 = LocalSteamId;
+            HostSteamId64 = lobbySteamId64;
             lobbyData.Clear();
             perPlayerData.Clear();
             perPlayerData[LocalSteamId] = new Dictionary<string, string>();

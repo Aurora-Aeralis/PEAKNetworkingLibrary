@@ -11,8 +11,6 @@ using Steamworks;
 
 namespace NetworkingLibrary.Modules
 {
-    /// <summary>
-    /// </summary>
     public class Message : IDisposable
     {
         public const byte PROTOCOL_VERSION = 3;
@@ -188,6 +186,8 @@ namespace NetworkingLibrary.Modules
         public Message WriteQuaternion(Quaternion q) { WriteFloat(q.x); WriteFloat(q.y); WriteFloat(q.z); WriteFloat(q.w); return this; }
 
         /// <summary>
+        /// Serializes an object using the protocol's fixed primitive map and dynamic collection handling.
+        /// This method defines wire-format compatibility expectations for RPC payload arguments.
         /// </summary>
         public void WriteObject(Type type, object value)
         {
@@ -484,6 +484,8 @@ namespace NetworkingLibrary.Modules
         public Quaternion ReadQuaternion() => new Quaternion(ReadFloat(), ReadFloat(), ReadFloat(), ReadFloat());
 
         /// <summary>
+        /// Deserializes an object using the protocol's fixed primitive map and dynamic collection handling.
+        /// Keep this logic aligned with <see cref="WriteObject(Type, object)"/> to preserve wire compatibility.
         /// </summary>
         public object ReadObject(Type type)
         {

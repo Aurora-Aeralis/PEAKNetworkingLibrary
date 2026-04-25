@@ -693,10 +693,12 @@ namespace NetworkingLibrary.Services
                     if (!rpcs.ContainsKey(modId)) rpcs[modId] = new Dictionary<string, List<MessageHandler>>();
                     if (!rpcs[modId].ContainsKey(method.Name)) rpcs[modId][method.Name] = new List<MessageHandler>();
                     var handlers = rpcs[modId][method.Name];
-                    var alreadyRegistered = instance == null
-                        ? handlers.Any(existing => existing.Mask == mask && existing.Method == method)
-                        : handlers.Any(existing => existing.Mask == mask && existing.Method == method && ReferenceEquals(existing.Target, instance));
-                    if (alreadyRegistered) continue;
+                    // Preserve historical instance registration fan-out semantics: repeated
+                    // RegisterNetworkObject calls for the same receiver should add another slot.
+                    // Only static/type registrations are deduplicated.
+                    var alreadyRegisteredStatic = instance == null
+                        && handlers.Any(existing => existing.Mask == mask && existing.Method == method);
+                    if (alreadyRegisteredStatic) continue;
 
                     var mh = new MessageHandler
                     {

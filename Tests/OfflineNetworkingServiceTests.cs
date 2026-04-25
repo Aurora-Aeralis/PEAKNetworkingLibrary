@@ -1,5 +1,7 @@
 using NetworkingLibrary.Modules;
 using NetworkingLibrary.Services;
+using System;
+using System.Security.Cryptography;
 using Xunit;
 
 namespace NetworkingLibrary.Tests;
@@ -305,5 +307,24 @@ public class OfflineNetworkingServiceTests
         service.RPC(TestModId + 1, "UnregisteredBytes", ReliableType.Reliable, new[] { typeof(byte[]) }, oversizedPayload);
 
         Assert.Equal(0, dispatchCount);
+    }
+
+    [Fact]
+    public void RegisterModSigner_RejectsNullDelegate()
+    {
+        var service = new OfflineNetworkingService();
+        Assert.Throws<ArgumentNullException>(() => service.RegisterModSigner(TestModId, null!));
+    }
+
+    [Fact]
+    public void RegisterModSecurityArtifacts_IsNoopCompatibleAcrossShutdown()
+    {
+        var service = new OfflineNetworkingService();
+        using var rsa = RSA.Create(2048);
+        service.RegisterModSigner(TestModId, bytes => bytes);
+        service.RegisterModPublicKey(TestModId, rsa.ExportParameters(false));
+
+        var ex = Record.Exception(service.Shutdown);
+        Assert.Null(ex);
     }
 }

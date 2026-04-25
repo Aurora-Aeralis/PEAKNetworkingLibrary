@@ -77,6 +77,8 @@ namespace NetworkingLibrary.Services
         readonly Dictionary<ulong, byte[]> perPeerSymmetricKey = new();
         byte[]? globalSharedSecret;
         HMACSHA256? globalHmac;
+        readonly Dictionary<uint, Func<byte[], byte[]>> modSigners = new();
+        readonly Dictionary<uint, RSAParameters> modPublicKeys = new();
 
         static void LogError(string message)
         {
@@ -100,11 +102,24 @@ namespace NetworkingLibrary.Services
         }
 
         /// <summary>
+        /// Registers a per-mod signer delegate for API parity with Steam networking.
+        /// Offline mode does not emit signed wire frames, but keeping registrations
+        /// allows shared setup code to run without feature checks.
         /// </summary>
-        public void RegisterModSigner(uint modId, Func<byte[], byte[]> signerDelegate) => Net.Logger.LogWarning("This feature is currently not setup in the offline system");
+        public void RegisterModSigner(uint modId, Func<byte[], byte[]> signerDelegate)
+        {
+            if (signerDelegate == null) throw new ArgumentNullException(nameof(signerDelegate));
+            modSigners[modId] = signerDelegate;
+        }
         /// <summary>
+        /// Registers a per-mod public key for API parity with Steam networking.
+        /// Offline mode does not verify signatures, but stores keys so mod bootstrap
+        /// code behaves consistently across service implementations.
         /// </summary>
-        public void RegisterModPublicKey(uint modId, RSAParameters pub) => Net.Logger.LogWarning("This feature is currently not setup in the offline system");
+        public void RegisterModPublicKey(uint modId, RSAParameters pub)
+        {
+            modPublicKeys[modId] = pub;
+        }
 
         long _nextMessageId = 0;
         private ulong NextMessageId() => (ulong)System.Threading.Interlocked.Increment(ref _nextMessageId);
@@ -159,6 +174,8 @@ namespace NetworkingLibrary.Services
             perPlayerData.Clear();
             ClearPerPeerSymmetricKeys();
             ClearGlobalSharedSecret();
+            modSigners.Clear();
+            modPublicKeys.Clear();
             globalHmac?.Dispose(); globalHmac = null;
         }
 

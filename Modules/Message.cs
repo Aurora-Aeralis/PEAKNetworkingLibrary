@@ -35,7 +35,7 @@ namespace NetworkingLibrary.Modules
 
         public Message(uint modId, string methodName, int mask, string? overloadKey)
         {
-            ProtocolVersion = PROTOCOL_VERSION;
+            ProtocolVersion = overloadKey == null ? (byte)2 : PROTOCOL_VERSION;
             ModID = modId;
             MethodName = methodName;
             Mask = mask;
@@ -45,8 +45,11 @@ namespace NetworkingLibrary.Modules
             WriteUInt(ModID);
             WriteString(MethodName);
             WriteInt(Mask);
-            WriteBool(overloadKey != null);
-            if (overloadKey != null) WriteString(overloadKey);
+            if (ProtocolVersion >= 3)
+            {
+                WriteBool(true);
+                WriteString(overloadKey!);
+            }
         }
 
         public Message(byte[] data)

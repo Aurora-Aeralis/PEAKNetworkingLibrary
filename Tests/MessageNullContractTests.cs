@@ -118,6 +118,32 @@ public class MessageNullContractTests
         Assert.Equal(new List<int> { 10, 11, 12 }, (List<int>)read.ReadObject(typeof(List<int>)));
     }
 
+    [Fact]
+    public void Header_WithoutOverloadKey_UsesVersion2Layout()
+    {
+        var message = NewMessage();
+        message.WriteBool(true);
+        message.WriteInt(42);
+
+        var read = Roundtrip(message);
+        Assert.Equal((byte)2, read.ProtocolVersion);
+        Assert.Null(read.OverloadKey);
+        Assert.True(read.ReadBool());
+        Assert.Equal(42, read.ReadInt());
+    }
+
+    [Fact]
+    public void Header_WithOverloadKey_UsesVersion3Layout()
+    {
+        var message = new Message(1u, "method", 0, "shared(System.String)");
+        message.WriteString("value");
+
+        var read = Roundtrip(message);
+        Assert.Equal((byte)3, read.ProtocolVersion);
+        Assert.Equal("shared(System.String)", read.OverloadKey);
+        Assert.Equal("value", read.ReadString());
+    }
+
 
     [Fact]
     public void ReadString_Rejects_Excessive_Length()

@@ -293,7 +293,7 @@ namespace NetworkingLibrary.Services
 
             try
             {
-                Message.MaxSize = (int)Constants.k_cbMaxSteamNetworkingSocketsMessageSizeSend;
+                Message.SetMaxSize((int)Constants.k_cbMaxSteamNetworkingSocketsMessageSizeSend);
             }
             catch { }
 

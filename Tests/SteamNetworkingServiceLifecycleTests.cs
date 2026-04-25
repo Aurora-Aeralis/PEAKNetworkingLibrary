@@ -387,15 +387,24 @@ public class SteamNetworkingServiceLifecycleTests
         var service = new SteamNetworkingService();
         var rsaFactoryField = typeof(SteamNetworkingService).GetField("localRsaFactory", BindingFlags.Instance | BindingFlags.NonPublic)!;
         rsaFactoryField.SetValue(service, (Func<RSACryptoServiceProvider>)(() => throw new InvalidOperationException("simulated init failure")));
+        SteamCallbackPump.EnablePumping();
 
-        service.Initialize();
+        try
+        {
+            service.Initialize();
 
-        Assert.False(service.IsInitialized);
-        Assert.Null(GetField(service, "cbLobbyEnter"));
-        Assert.Null(GetField(service, "cbLobbyCreated"));
-        Assert.Null(GetField(service, "cbLobbyChatUpdate"));
-        Assert.Null(GetField(service, "cbLobbyDataUpdate"));
-        Assert.Null(GetField(service, "LocalRsa"));
+            Assert.False(service.IsInitialized);
+            Assert.False(SteamCallbackPump.CallbackPumpingEnabled);
+            Assert.Null(GetField(service, "cbLobbyEnter"));
+            Assert.Null(GetField(service, "cbLobbyCreated"));
+            Assert.Null(GetField(service, "cbLobbyChatUpdate"));
+            Assert.Null(GetField(service, "cbLobbyDataUpdate"));
+            Assert.Null(GetField(service, "LocalRsa"));
+        }
+        finally
+        {
+            SteamCallbackPump.DisablePumping();
+        }
     }
 
     [Fact]

@@ -15,6 +15,7 @@ namespace NetworkingLibrary.Modules
     {
         public const byte PROTOCOL_VERSION = 2;
         public static int MaxSize = 64 * 1024;
+        public static int MaxLogicalSize => MaxSize * 16;
 
         public byte ProtocolVersion;
         public uint ModID;
@@ -53,9 +54,9 @@ namespace NetworkingLibrary.Modules
         public void SetBytes(byte[] data)
         {
             if (data == null) throw new ArgumentNullException(nameof(data));
-            if (data.Length > MaxSize * 16)
+            if (data.Length > MaxLogicalSize)
             {
-                throw new Exception($"Message payload exceeds max allowed size {MaxSize * 16}");
+                throw new Exception($"Message payload exceeds max allowed size {MaxLogicalSize}");
             }
             buffer.Clear();
             buffer.AddRange(data);
@@ -428,12 +429,26 @@ namespace NetworkingLibrary.Modules
             return ms.ToArray();
         }
 
-        public static byte[] DecompressPayload(byte[] compressed)
+        public static byte[] DecompressPayload(byte[] compressed, int maxOutputSize = -1)
         {
+            if (compressed == null) throw new ArgumentNullException(nameof(compressed));
+            if (maxOutputSize < 0) maxOutputSize = MaxSize;
             using var ms = new MemoryStream(compressed);
             using var gz = new GZipStream(ms, CompressionMode.Decompress);
             using var outMs = new MemoryStream();
-            gz.CopyTo(outMs);
+            var buffer = new byte[8 * 1024];
+            var totalRead = 0;
+            while (true)
+            {
+                var bytesRead = gz.Read(buffer, 0, buffer.Length);
+                if (bytesRead == 0) break;
+                totalRead += bytesRead;
+                if (totalRead > maxOutputSize)
+                {
+                    throw new InvalidDataException($"Decompressed payload exceeds max allowed size {maxOutputSize}");
+                }
+                outMs.Write(buffer, 0, bytesRead);
+            }
             return outMs.ToArray();
         }
         #endregion

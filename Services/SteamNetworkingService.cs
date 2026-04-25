@@ -1244,7 +1244,7 @@ namespace NetworkingLibrary.Services
                 {
                     try
                     {
-                        payloadToProcess = Message.DecompressPayload(payloadToProcess);
+                        payloadToProcess = Message.DecompressPayload(payloadToProcess, Message.MaxLogicalSize);
                     }
                     catch (Exception ex)
                     {
@@ -1800,7 +1800,7 @@ namespace NetworkingLibrary.Services
                     }
                 }
 
-                if (msg.Length() > Message.MaxSize * 16)
+                if (msg.Length() > Message.MaxLogicalSize)
                 {
                     Net.Logger.LogError("Message exceeds maximum allowed overall size.");
                     return null;

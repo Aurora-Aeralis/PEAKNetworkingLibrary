@@ -1374,10 +1374,9 @@ namespace NetworkingLibrary.Services
             Buffer.BlockCopy(framedWithMac, 0, frameScope, 0, dataLen);
             using var h = new HMACSHA256(key);
             var computed = h.ComputeHash(frameScope);
-            for (int i = 0; i < 32; i++)
-            {
-                if (computed[i] != framedWithMac[dataLen + i]) return false;
-            }
+            var expectedMac = new byte[32];
+            Buffer.BlockCopy(framedWithMac, dataLen, expectedMac, 0, expectedMac.Length);
+            if (!CryptographicOperations.FixedTimeEquals(computed, expectedMac)) return false;
             strippedFrame = frameScope;
             return true;
         }

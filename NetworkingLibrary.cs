@@ -78,7 +78,8 @@ namespace NetworkingLibrary
 
             var pollerName = $"{MyPluginInfo.PLUGIN_NAME}.Poller";
             var pollers = FindObjectsOfType<NetworkingPoller>(true)
-                .OrderByDescending(poller => poller.gameObject.activeInHierarchy)
+                .OrderByDescending(poller => poller.isActiveAndEnabled)
+                .ThenByDescending(poller => poller.gameObject.activeInHierarchy)
                 .ThenBy(poller => poller.GetInstanceID())
                 .ToList();
             var canonicalPoller = pollers.FirstOrDefault();

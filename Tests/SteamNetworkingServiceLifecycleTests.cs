@@ -456,6 +456,61 @@ public class SteamNetworkingServiceLifecycleTests
         Assert.True(receiver.CallCount > 0);
     }
 
+    [Fact]
+    public void SendBytes_SelfTarget_FramedRpc_RoutesThroughFrameProcessor_AndDispatchesOnce()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new RpcReceiver();
+        using var token = service.RegisterNetworkObject(receiver, TestModId);
+
+        var msg = new Message(TestModId, "OnPing", 0);
+        msg.WriteObject(typeof(int), 17);
+        var framed = BuildFramedBytesWithMeta(service, msg, TestModId, ReliableType.Reliable);
+
+        InvokeNonPublic(service, "SendBytes", framed, SteamUser.GetSteamID(), ReliableType.Reliable);
+
+        Assert.Equal(17, receiver.LastValue);
+        Assert.Equal(1, receiver.CallCount);
+    }
+
+    [Fact]
+    public void SendBytes_SelfTarget_FramedInternalAck_ConsumesUnackedWithoutRpcDispatch()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new RpcReceiver();
+        using var token = service.RegisterNetworkObject(receiver, TestModId);
+        var local = SteamUser.GetSteamID();
+        const ulong AckId = 991UL;
+        AddUnacked(service, local, AckId);
+
+        var ack = new Message(0u, "NETWORK_INTERNAL_ACK", 0);
+        ack.WriteULong(AckId);
+        var framed = BuildFramedBytesWithMeta(service, ack, 0u, ReliableType.Reliable);
+
+        InvokeNonPublic(service, "SendBytes", framed, local, ReliableType.Reliable);
+
+        AssertUnackedCount(service, 0);
+        Assert.Equal(0, receiver.CallCount);
+    }
+
+    [Fact]
+    public void Rpc_LocalPlayerInRoster_DispatchesExactlyOnce()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new RpcReceiver();
+        using var token = service.RegisterNetworkObject(receiver, TestModId);
+        SetInLobby(service, true);
+        SetPlayers(service, new[] { SteamUser.GetSteamID() });
+
+        service.RPC(TestModId, "OnPing", ReliableType.Reliable, 23);
+
+        Assert.Equal(23, receiver.LastValue);
+        Assert.Equal(1, receiver.CallCount);
+        AssertQueueCount(service, "normalQueue", 0);
+        AssertQueueCount(service, "lowQueue", 0);
+        AssertQueueCount(service, "highQueue", 0);
+    }
+
     static void SetInLobby(SteamNetworkingService service, bool value)
     {
         typeof(SteamNetworkingService).GetField("<InLobby>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(service, value);
@@ -469,6 +524,11 @@ public class SteamNetworkingServiceLifecycleTests
     static void SetLobby(SteamNetworkingService service, ulong lobbyId)
     {
         typeof(SteamNetworkingService).GetField("<Lobby>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(service, new CSteamID(lobbyId));
+    }
+
+    static void SetPlayers(SteamNetworkingService service, CSteamID[] players)
+    {
+        SetField(service, "players", players);
     }
 
     static void SetField(SteamNetworkingService service, string fieldName, object value)
@@ -510,6 +570,23 @@ public class SteamNetworkingServiceLifecycleTests
 
             dict.Add(ValueTuple.Create((ulong)(i + 1000), (ulong)i + 1), unacked);
         }
+    }
+
+    static void AddUnacked(SteamNetworkingService service, CSteamID target, ulong messageId)
+    {
+        var unackedType = typeof(SteamNetworkingService).GetNestedType("UnackedMessage", BindingFlags.NonPublic)!;
+        var dict = (IDictionary)GetField(service, "unacked")!;
+        var unacked = Activator.CreateInstance(unackedType)!;
+        var framed = new byte[16];
+        framed[0] = 0x10;
+        Array.Copy(BitConverter.GetBytes(messageId), 0, framed, 1, 8);
+
+        unackedType.GetField("Framed", BindingFlags.Instance | BindingFlags.Public)!.SetValue(unacked, framed);
+        unackedType.GetField("Target", BindingFlags.Instance | BindingFlags.Public)!.SetValue(unacked, target);
+        unackedType.GetField("Reliable", BindingFlags.Instance | BindingFlags.Public)!.SetValue(unacked, ReliableType.Reliable);
+        unackedType.GetField("LastSent", BindingFlags.Instance | BindingFlags.Public)!.SetValue(unacked, DateTime.UtcNow);
+        unackedType.GetField("Attempts", BindingFlags.Instance | BindingFlags.Public)!.SetValue(unacked, 1);
+        dict[ValueTuple.Create(target.m_SteamID, messageId)] = unacked;
     }
 
     static void SeedLastSeenSequence(SteamNetworkingService service)
@@ -562,6 +639,11 @@ public class SteamNetworkingServiceLifecycleTests
         var method = typeof(SteamNetworkingService).GetMethod(methodName, flags, null, types, null)
             ?? typeof(SteamNetworkingService).GetMethod(methodName, flags)!;
         return method.Invoke(service, args);
+    }
+
+    static byte[] BuildFramedBytesWithMeta(SteamNetworkingService service, Message message, uint modId, ReliableType reliable)
+    {
+        return (byte[])InvokeNonPublic(service, "BuildFramedBytesWithMeta", message, modId, reliable)!;
     }
 
     static void InvokeLobbyEnter(SteamNetworkingService service, ulong lobbyId)

@@ -14,36 +14,45 @@ namespace NetworkingLibrary.Services
         internal static Func<INetworkingService> CreateSteamService = () => new SteamNetworkingService();
         internal static Func<INetworkingService> CreateOfflineService = () => new OfflineNetworkingService();
 #endif
+        static void LogInfo(string message)
+        {
+            try { Net.Logger?.LogInfo(message); } catch { }
+        }
+
+        static void LogError(string message)
+        {
+            try { Net.Logger?.LogError(message); } catch { }
+        }
 
         public static INetworkingService CreateDefaultService()
         {
 #if UNITY_EDITOR
-            Net.Logger.LogInfo("UNITY_EDITOR detected. Creating OfflineNetworkingService.");
+            LogInfo("UNITY_EDITOR detected. Creating OfflineNetworkingService.");
             return new OfflineNetworkingService();
 #else
             try
             {
                 var isSteamClientRunning = IsSteamClientRunning();
-                Net.Logger.LogInfo($"Steam client running: {isSteamClientRunning}.");
+                LogInfo($"Steam client running: {isSteamClientRunning}.");
                 if (!isSteamClientRunning)
                 {
-                    Net.Logger.LogInfo("Falling back to OfflineNetworkingService. Reason: Steam client is not running.");
+                    LogInfo("Falling back to OfflineNetworkingService. Reason: Steam client is not running.");
                     return CreateOfflineService();
                 }
 
                 var isSteamApiInitialized = IsSteamApiInitialized();
-                Net.Logger.LogInfo($"Steam API initialized: {isSteamApiInitialized}.");
+                LogInfo($"Steam API initialized: {isSteamApiInitialized}.");
                 if (isSteamApiInitialized)
                 {
-                    Net.Logger.LogInfo("Steam ready. Creating SteamNetworkingService.");
+                    LogInfo("Steam ready. Creating SteamNetworkingService.");
                     return CreateSteamService();
                 }
 
-                Net.Logger.LogInfo("Falling back to OfflineNetworkingService. Reason: Steam API is not initialized.");
+                LogInfo("Falling back to OfflineNetworkingService. Reason: Steam API is not initialized.");
             }
             catch (Exception exception)
             {
-                Net.Logger.LogError($"Steam readiness probe failed. Falling back to OfflineNetworkingService. Exception: {exception}");
+                LogError($"Steam readiness probe failed. Falling back to OfflineNetworkingService. Exception: {exception}");
             }
 
             return CreateOfflineService();

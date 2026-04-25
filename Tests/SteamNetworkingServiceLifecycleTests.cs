@@ -56,6 +56,15 @@ public class SteamNetworkingServiceLifecycleTests
         }
     }
 
+    sealed class AmbiguousNullReceiver
+    {
+        [CustomRPC]
+        void OnAmbiguous(object value) { }
+
+        [CustomRPC]
+        void OnAmbiguous(string value) { }
+    }
+
     sealed class ConcurrentRpcReceiver
     {
         public int CallCount;
@@ -258,6 +267,27 @@ public class SteamNetworkingServiceLifecycleTests
         await Task.WhenAll(flushTask, retransmitTask);
 
         AssertUnackedCount(service, 0);
+    }
+
+    [Fact]
+    public void BuildMessage_TypedOverload_UsesExplicitTypes_ForAmbiguousNullArguments()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new AmbiguousNullReceiver();
+        service.RegisterNetworkObject(receiver, TestModId);
+
+        var message = (Message?)InvokeNonPublic(
+            service,
+            "BuildMessage",
+            TestModId,
+            "OnAmbiguous",
+            0,
+            new object?[] { null },
+            new[] { typeof(string) });
+
+        Assert.NotNull(message);
+        Assert.Equal((byte)3, message!.ProtocolVersion);
+        Assert.Contains("System.String", message.OverloadKey);
     }
 
     [Fact]

@@ -562,8 +562,31 @@ namespace NetworkingLibrary.Services
                 if (rpcs.TryGetValue(modId, out var methods) && methods.TryGetValue(methodName, out var handlers) && handlers.Count > 0)
                 {
                     MessageHandler chosen = null!;
+                    if (parameterTypes != null)
+                    {
+                        if (parameterTypes.Length != parameters.Length)
+                        {
+                            throw new Exception($"Parameter type count mismatch: expected {parameterTypes.Length}, got {parameters.Length}");
+                        }
+
+                        chosen = handlers.FirstOrDefault(h =>
+                        {
+                            if (h.Mask != mask) return false;
+                            var expected = h.Parameters;
+                            int expectedCount = h.TakesInfo ? expected.Length - 1 : expected.Length;
+                            if (expectedCount != parameterTypes.Length) return false;
+                            for (int i = 0; i < expectedCount; i++)
+                            {
+                                var explicitType = parameterTypes[i] ?? throw new ArgumentException($"Parameter type at index {i} cannot be null.", nameof(parameterTypes));
+                                if (expected[i].ParameterType != explicitType) return false;
+                            }
+                            return true;
+                        });
+                    }
+
                     foreach (var h in handlers)
                     {
+                        if (chosen != null) break;
                         if (h.Mask != mask) continue;
                         var expected = h.Parameters;
                         int expectedCount = h.TakesInfo ? expected.Length - 1 : expected.Length;
@@ -587,6 +610,12 @@ namespace NetworkingLibrary.Services
 
                     if (chosen == null)
                     {
+                        if (parameterTypes != null)
+                        {
+                            LogError($"No RPC overload matched method '{methodName}' for mask {mask} and explicit parameter type list.");
+                            return null;
+                        }
+
                         chosen = handlers.FirstOrDefault(h =>
                         {
                             int expectedCount = h.TakesInfo ? h.Parameters.Length - 1 : h.Parameters.Length;

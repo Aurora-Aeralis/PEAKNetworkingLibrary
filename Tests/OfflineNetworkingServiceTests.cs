@@ -51,6 +51,24 @@ public class OfflineNetworkingServiceTests
         }
     }
 
+    sealed class AmbiguousNullReceiver
+    {
+        public int ObjectOverloadCalls { get; private set; }
+        public int StringOverloadCalls { get; private set; }
+
+        [CustomRPC]
+        void OnAmbiguous(object value)
+        {
+            ObjectOverloadCalls++;
+        }
+
+        [CustomRPC]
+        void OnAmbiguous(string value)
+        {
+            StringOverloadCalls++;
+        }
+    }
+
     sealed class ScopeAction : IDisposable
     {
         Action? onDispose;
@@ -651,5 +669,20 @@ public class OfflineNetworkingServiceTests
 
         var ex = Record.Exception(service.Shutdown);
         Assert.Null(ex);
+    }
+
+    [Fact]
+    public void Rpc_TypedOverload_UsesExplicitTypes_ForAmbiguousNullArguments()
+    {
+        var service = new OfflineNetworkingService();
+        var receiver = new AmbiguousNullReceiver();
+        service.Initialize();
+        service.CreateLobby();
+        service.RegisterNetworkObject(receiver, TestModId);
+
+        service.RPC(TestModId, "OnAmbiguous", ReliableType.Reliable, new[] { typeof(string) }, null);
+
+        Assert.Equal(0, receiver.ObjectOverloadCalls);
+        Assert.Equal(1, receiver.StringOverloadCalls);
     }
 }

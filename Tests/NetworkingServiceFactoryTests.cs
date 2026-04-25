@@ -70,6 +70,28 @@ public class NetworkingServiceFactoryTests
         }
     }
 
+    sealed class ScopeAction : IDisposable
+    {
+        Action? onDispose;
+        public ScopeAction(Action onDispose) { this.onDispose = onDispose; }
+        public void Dispose()
+        {
+            var action = onDispose;
+            if (action == null) return;
+            onDispose = null;
+            action();
+        }
+    }
+
+    static IDisposable WithUnavailableNetLogger()
+    {
+        var loggerField = typeof(Net).GetField("<Logger>k__BackingField", BindingFlags.Static | BindingFlags.NonPublic);
+        if (loggerField == null) return new ScopeAction(() => { });
+        var original = loggerField.GetValue(null);
+        loggerField.SetValue(null, null);
+        return new ScopeAction(() => loggerField.SetValue(null, original));
+    }
+
     [Fact]
     public void CreateDefaultService_ReturnsSteamService_WhenClientRunningAndApiInitialized()
     {
@@ -152,6 +174,26 @@ public class NetworkingServiceFactoryTests
         {
             var service = NetworkingServiceFactory.CreateDefaultService();
             Assert.Same(offline, service);
+        }
+        finally
+        {
+            NetworkingServiceFactory.ResetTestHooks();
+        }
+    }
+
+    [Fact]
+    public void CreateDefaultService_DoesNotThrow_WhenNetLoggerIsUnavailable()
+    {
+        using var _ = WithUnavailableNetLogger();
+        var offline = new FakeService();
+
+        NetworkingServiceFactory.IsSteamClientRunning = () => false;
+        NetworkingServiceFactory.CreateOfflineService = () => offline;
+
+        try
+        {
+            var ex = Record.Exception(() => NetworkingServiceFactory.CreateDefaultService());
+            Assert.Null(ex);
         }
         finally
         {

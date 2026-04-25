@@ -59,7 +59,36 @@ public class MessageSerializerConcurrencyTests
             }
         });
 
-        await Task.WhenAll(registerTask, writeReadTask);
+        var setBytesTask = Task.Run(() =>
+        {
+            try
+            {
+                while (DateTime.UtcNow < until)
+                {
+                    var source = new Message(2u, "setbytes", 1);
+                    source.WriteInt(77);
+                    source.WriteString("cache");
+                    var payload = source.ToArray();
+
+                    var target = new Message(0u, "placeholder", 0);
+                    target.SetBytes(payload);
+
+                    Assert.Equal((byte)2, target.ReadByte());
+                    Assert.Equal(2u, target.ReadUInt());
+                    Assert.Equal("setbytes", target.ReadString());
+                    Assert.Equal(1, target.ReadInt());
+
+                    Assert.Equal(77, target.ReadInt());
+                    Assert.Equal("cache", target.ReadString());
+                }
+            }
+            catch (Exception ex)
+            {
+                errors.Enqueue(ex);
+            }
+        });
+
+        await Task.WhenAll(registerTask, writeReadTask, setBytesTask);
         Assert.Empty(errors);
     }
 

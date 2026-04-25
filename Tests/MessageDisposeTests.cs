@@ -53,4 +53,18 @@ public class MessageDisposeTests
         Assert.Throws<ObjectDisposedException>(() => message.Length());
         Assert.Throws<ObjectDisposedException>(() => message.UnreadLength());
     }
+
+    [Fact]
+    public void ToArray_Returns_Copy_And_Does_Not_Leak_Internal_Buffer()
+    {
+        var message = NewMessage();
+        message.WriteInt(99);
+
+        var bytes = message.ToArray();
+        var original = bytes[bytes.Length - 1];
+        bytes[bytes.Length - 1] = (byte)(original ^ 0xFF);
+
+        var afterMutation = message.ToArray();
+        Assert.Equal(original, afterMutation[afterMutation.Length - 1]);
+    }
 }

@@ -40,6 +40,7 @@ namespace NetworkingLibrary.Modules
         private List<byte> buffer = new();
         internal byte[] readableBuffer = Array.Empty<byte>();
         internal int readPos = 0;
+        private bool readableBufferDirty = true;
         private bool _disposed;
         private bool UsesReferencePresenceFlags => ProtocolVersion >= 2;
 
@@ -98,15 +99,14 @@ namespace NetworkingLibrary.Modules
             }
             buffer.Clear();
             buffer.AddRange(data);
-            readableBuffer = buffer.ToArray();
+            readableBufferDirty = true;
             readPos = 0;
         }
 
         public byte[] ToArray()
         {
             ThrowIfDisposed();
-            readableBuffer = buffer.ToArray();
-            return readableBuffer;
+            return buffer.ToArray();
         }
 
         public int Length()
@@ -128,6 +128,7 @@ namespace NetworkingLibrary.Modules
             {
                 buffer.Clear();
                 readableBuffer = Array.Empty<byte>();
+                readableBufferDirty = true;
                 readPos = 0;
             }
             else
@@ -137,35 +138,41 @@ namespace NetworkingLibrary.Modules
         }
 
         #region Write helpers
-        private static byte[] WriteInt32LE(int value)
+        private void AppendSpan(ReadOnlySpan<byte> bytes)
         {
-            var bytes = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(bytes, value);
-            return bytes;
+            for (int i = 0; i < bytes.Length; i++) buffer.Add(bytes[i]);
+            readableBufferDirty = true;
         }
 
-        private static byte[] WriteUInt32LE(uint value)
+        private void WriteInt32LE(int value)
         {
-            var bytes = new byte[4];
-            BinaryPrimitives.WriteUInt32LittleEndian(bytes, value);
-            return bytes;
+            Span<byte> tmp = stackalloc byte[8];
+            BinaryPrimitives.WriteInt32LittleEndian(tmp, value);
+            AppendSpan(tmp[..4]);
         }
 
-        private static byte[] WriteInt64LE(long value)
+        private void WriteUInt32LE(uint value)
         {
-            var bytes = new byte[8];
-            BinaryPrimitives.WriteInt64LittleEndian(bytes, value);
-            return bytes;
+            Span<byte> tmp = stackalloc byte[8];
+            BinaryPrimitives.WriteUInt32LittleEndian(tmp, value);
+            AppendSpan(tmp[..4]);
         }
 
-        private static byte[] WriteUInt64LE(ulong value)
+        private void WriteInt64LE(long value)
         {
-            var bytes = new byte[8];
-            BinaryPrimitives.WriteUInt64LittleEndian(bytes, value);
-            return bytes;
+            Span<byte> tmp = stackalloc byte[8];
+            BinaryPrimitives.WriteInt64LittleEndian(tmp, value);
+            AppendSpan(tmp);
         }
 
-        private static byte[] WriteSingleLE(float value) => WriteInt32LE(BitConverter.SingleToInt32Bits(value));
+        private void WriteUInt64LE(ulong value)
+        {
+            Span<byte> tmp = stackalloc byte[8];
+            BinaryPrimitives.WriteUInt64LittleEndian(tmp, value);
+            AppendSpan(tmp);
+        }
+
+        private void WriteSingleLE(float value) => WriteInt32LE(BitConverter.SingleToInt32Bits(value));
 
         private static int ReadInt32LE(byte[] bytes, int offset) => BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset, 4));
         private static uint ReadUInt32LE(byte[] bytes, int offset) => BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(offset, 4));
@@ -173,27 +180,29 @@ namespace NetworkingLibrary.Modules
         private static ulong ReadUInt64LE(byte[] bytes, int offset) => BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan(offset, 8));
         private static float ReadSingleLE(byte[] bytes, int offset) => BitConverter.Int32BitsToSingle(ReadInt32LE(bytes, offset));
 
-        public Message WriteByte(byte v) { ThrowIfDisposed(); buffer.Add(v); return this; }
+        public Message WriteByte(byte v) { ThrowIfDisposed(); buffer.Add(v); readableBufferDirty = true; return this; }
         public Message WriteBytes(byte[] v)
         {
             ThrowIfDisposed();
             if (v == null) throw new ArgumentNullException(nameof(v));
             WriteInt(v.Length);
             buffer.AddRange(v);
+            readableBufferDirty = true;
             return this;
         }
-        public Message WriteInt(int v) { ThrowIfDisposed(); buffer.AddRange(WriteInt32LE(v)); return this; }
-        public Message WriteUInt(uint v) { ThrowIfDisposed(); buffer.AddRange(WriteUInt32LE(v)); return this; }
-        public Message WriteLong(long v) { ThrowIfDisposed(); buffer.AddRange(WriteInt64LE(v)); return this; }
-        public Message WriteULong(ulong v) { ThrowIfDisposed(); buffer.AddRange(WriteUInt64LE(v)); return this; }
-        public Message WriteFloat(float v) { ThrowIfDisposed(); buffer.AddRange(WriteSingleLE(v)); return this; }
-        public Message WriteBool(bool v) { ThrowIfDisposed(); buffer.Add(v ? (byte)1 : (byte)0); return this; }
+        public Message WriteInt(int v) { ThrowIfDisposed(); WriteInt32LE(v); return this; }
+        public Message WriteUInt(uint v) { ThrowIfDisposed(); WriteUInt32LE(v); return this; }
+        public Message WriteLong(long v) { ThrowIfDisposed(); WriteInt64LE(v); return this; }
+        public Message WriteULong(ulong v) { ThrowIfDisposed(); WriteUInt64LE(v); return this; }
+        public Message WriteFloat(float v) { ThrowIfDisposed(); WriteSingleLE(v); return this; }
+        public Message WriteBool(bool v) { ThrowIfDisposed(); buffer.Add(v ? (byte)1 : (byte)0); readableBufferDirty = true; return this; }
         public Message WriteString(string v)
         {
             ThrowIfDisposed();
             var bytes = Encoding.UTF8.GetBytes(v ?? "");
             WriteInt(bytes.Length);
             buffer.AddRange(bytes);
+            readableBufferDirty = true;
             return this;
         }
         public Message WriteVector3(Vector3 v) { WriteFloat(v.x); WriteFloat(v.y); WriteFloat(v.z); return this; }
@@ -325,7 +334,7 @@ namespace NetworkingLibrary.Modules
                 if (len == 0) return Array.Empty<byte>();
                 m.EnsureReadable(len, nameof(Byte[]));
                 var arr = new byte[len];
-                Array.Copy(m.readableBuffer, m.readPos, arr, 0, len);
+                m.readableBuffer.AsSpan(m.readPos, len).CopyTo(arr);
                 m.readPos += len;
                 return arr;
             };
@@ -360,10 +369,18 @@ namespace NetworkingLibrary.Modules
         #region Read helpers
         private void EnsureReadable(int count, string opName)
         {
+            EnsureReadableBuffer();
             if (count < 0 || readPos < 0 || readPos + count > readableBuffer.Length)
             {
                 throw new Exception($"{opName} out of range");
             }
+        }
+
+        private void EnsureReadableBuffer()
+        {
+            if (!readableBufferDirty) return;
+            readableBuffer = buffer.ToArray();
+            readableBufferDirty = false;
         }
 
         private int ReadCollectionLength(string opName)
@@ -635,6 +652,7 @@ namespace NetworkingLibrary.Modules
             buffer.Clear();
             buffer = new List<byte>();
             readableBuffer = Array.Empty<byte>();
+            readableBufferDirty = true;
             readPos = 0;
             GC.SuppressFinalize(this);
         }

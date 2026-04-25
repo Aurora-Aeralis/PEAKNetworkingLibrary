@@ -155,10 +155,7 @@ namespace NetworkingLibrary.Services
         public void Initialize()
         {
             if (IsInitialized) return;
-            using var rng = RandomNumberGenerator.Create();
-            var k = new byte[32];
-            rng.GetBytes(k);
-            perPeerSymmetricKey[LocalSteamId] = k;
+            EnsureLocalPeerKey();
             IsInitialized = true;
         }
 
@@ -183,6 +180,13 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void CreateLobby(int maxPlayers = 8)
         {
+            if (!IsInitialized)
+            {
+                LogError("CreateLobby called before OfflineNetworkingService.Initialize.");
+                return;
+            }
+
+            EnsureLocalPeerKey();
             InLobby = true;
             HostSteamId64 = LocalSteamId;
             lobbyData.Clear();
@@ -199,6 +203,13 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void JoinLobby(ulong lobbySteamId64)
         {
+            if (!IsInitialized)
+            {
+                LogError("JoinLobby called before OfflineNetworkingService.Initialize.");
+                return;
+            }
+
+            EnsureLocalPeerKey();
             InLobby = true;
             HostSteamId64 = lobbySteamId64;
             lobbyData.Clear();
@@ -248,9 +259,24 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void InviteToLobby(ulong steamId64)
         {
+            if (!IsInitialized)
+            {
+                LogError("InviteToLobby called before OfflineNetworkingService.Initialize.");
+                return;
+            }
+
             if (!InLobby) return;
             if (!perPlayerData.ContainsKey(steamId64)) perPlayerData[steamId64] = new Dictionary<string, string>();
             PlayerEntered?.Invoke(steamId64);
+        }
+
+        void EnsureLocalPeerKey()
+        {
+            if (perPeerSymmetricKey.ContainsKey(LocalSteamId)) return;
+            using var rng = RandomNumberGenerator.Create();
+            var key = new byte[32];
+            rng.GetBytes(key);
+            perPeerSymmetricKey[LocalSteamId] = key;
         }
 
         /// <summary>

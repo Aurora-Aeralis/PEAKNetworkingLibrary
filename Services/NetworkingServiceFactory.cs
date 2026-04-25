@@ -72,23 +72,45 @@ namespace NetworkingLibrary.Services
 
             try
             {
-                var steamManagerType = Type.GetType("pworld.Scripts.SteamManager, Assembly-CSharp")
-                    ?? Type.GetType("SteamManager, Assembly-CSharp")
-                    ?? Type.GetType("SteamManager");
-                if (steamManagerType == null)
-                    return false;
-
-                var initializedProperty = steamManagerType.GetProperty("Initialized", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
-                if (initializedProperty?.PropertyType != typeof(bool))
-                    return false;
-
-                isInitialized = (bool)(initializedProperty.GetValue(null) ?? false);
-                return true;
+                var candidateTypeNames = new[]
+                {
+                    "pworld.Scripts.SteamManager, Assembly-CSharp",
+                    "SteamManager, Assembly-CSharp",
+                    "SteamManager"
+                };
+                foreach (var candidateTypeName in candidateTypeNames)
+                {
+                    var steamManagerType = Type.GetType(candidateTypeName);
+                    if (steamManagerType == null) continue;
+                    if (TryReadInitializedFromType(steamManagerType, out isInitialized)) return true;
+                }
+                return false;
             }
             catch
             {
                 return false;
             }
+        }
+
+        static bool TryReadInitializedFromType(Type steamManagerType, out bool isInitialized)
+        {
+            isInitialized = false;
+            const System.Reflection.BindingFlags StaticAnyVisibility = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
+            var initializedProperty = steamManagerType.GetProperty("Initialized", StaticAnyVisibility);
+            if (initializedProperty?.PropertyType == typeof(bool))
+            {
+                isInitialized = (bool)(initializedProperty.GetValue(null) ?? false);
+                return true;
+            }
+
+            var initializedField = steamManagerType.GetField("Initialized", StaticAnyVisibility);
+            if (initializedField?.FieldType == typeof(bool))
+            {
+                isInitialized = (bool)(initializedField.GetValue(null) ?? false);
+                return true;
+            }
+
+            return false;
         }
 
         internal static void ResetTestHooks()

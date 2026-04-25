@@ -44,7 +44,7 @@ namespace NetworkingLibrary.Modules
 
         static void QueueCreateRequest()
         {
-            Interlocked.Exchange(ref createRequestQueued, 1);
+            if (Interlocked.Exchange(ref createRequestQueued, 1) == 1) return;
             lock (queue) queue.Enqueue(ProcessPendingMainThreadWork);
         }
 
@@ -166,7 +166,10 @@ namespace NetworkingLibrary.Modules
                     instance = null;
                     createRequestQueued = 0;
                     mainThreadId = -1;
-                    while (queue.Count > 0) queue.Dequeue();
+                    lock (queue)
+                    {
+                        while (queue.Count > 0) queue.Dequeue();
+                    }
                     instanceReady.Reset();
                     CreateInstanceOnMainThreadFactory = CreateOrFindDispatcherOnMainThread;
                 }

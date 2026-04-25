@@ -243,6 +243,22 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
+    public void RegisterModPublicKey_EmptyParameters_ThrowsArgumentException()
+    {
+        var service = new OfflineNetworkingService();
+        Assert.Throws<ArgumentException>(() => service.RegisterModPublicKey(TestModId, new RSAParameters()));
+    }
+
+    [Fact]
+    public void LobbyAndPlayerDataKeys_Reject_Whitespace()
+    {
+        var service = new OfflineNetworkingService();
+
+        Assert.Throws<ArgumentException>(() => service.RegisterLobbyDataKey(" "));
+        Assert.Throws<ArgumentException>(() => service.RegisterPlayerDataKey(""));
+    }
+
+    [Fact]
     public void CreateLobby_RaisesDeterministicEventSequence()
     {
         var service = new OfflineNetworkingService();

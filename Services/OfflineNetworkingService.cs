@@ -122,6 +122,10 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void RegisterModPublicKey(uint modId, RSAParameters pub)
         {
+            if (pub.Modulus == null || pub.Modulus.Length == 0)
+                throw new ArgumentException("RSA public key modulus must not be empty.", nameof(pub));
+            if (pub.Exponent == null || pub.Exponent.Length == 0)
+                throw new ArgumentException("RSA public key exponent must not be empty.", nameof(pub));
             modPublicKeys[modId] = pub;
         }
 
@@ -449,11 +453,16 @@ namespace NetworkingLibrary.Services
 
         /// <summary>
         /// </summary>
-        public void RegisterLobbyDataKey(string key) => lobbyKeys.Add(key);
+        public void RegisterLobbyDataKey(string key)
+        {
+            ValidateDataKey(key, nameof(key));
+            lobbyKeys.Add(key);
+        }
         /// <summary>
         /// </summary>
         public void SetLobbyData(string key, object value)
         {
+            ValidateDataKey(key, nameof(key));
             if (!InLobby) { LogError("Cannot set lobby data when not in lobby."); return; }
             if (!lobbyKeys.Contains(key)) LogWarning($"Accessing unregistered lobby key {key}");
             var serialized = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
@@ -464,6 +473,7 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public T GetLobbyData<T>(string key)
         {
+            ValidateDataKey(key, nameof(key));
             if (!InLobby) { LogError("Cannot get lobby data when not in lobby."); return default!; }
             if (!lobbyKeys.Contains(key)) LogWarning($"Accessing unregistered lobby key {key}");
             if (!lobbyData.TryGetValue(key, out var v)) return default!;
@@ -473,11 +483,16 @@ namespace NetworkingLibrary.Services
 
         /// <summary>
         /// </summary>
-        public void RegisterPlayerDataKey(string key) => playerKeys.Add(key);
+        public void RegisterPlayerDataKey(string key)
+        {
+            ValidateDataKey(key, nameof(key));
+            playerKeys.Add(key);
+        }
         /// <summary>
         /// </summary>
         public void SetPlayerData(string key, object value)
         {
+            ValidateDataKey(key, nameof(key));
             if (!InLobby) { LogError("Cannot set player data when not in lobby."); return; }
             if (!playerKeys.Contains(key)) LogWarning($"Accessing unregistered player key {key}");
             var serialized = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
@@ -493,6 +508,7 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public T GetPlayerData<T>(ulong steamId64, string key)
         {
+            ValidateDataKey(key, nameof(key));
             if (!InLobby) { LogError("Cannot get player data when not in lobby."); return default!; }
             if (!playerKeys.Contains(key)) LogWarning($"Accessing unregistered player key {key}");
             if (!perPlayerData.TryGetValue(steamId64, out var dict)) return default!;
@@ -506,6 +522,12 @@ namespace NetworkingLibrary.Services
         public void PollReceive()
         {
             // Nothing queued in offline mode.
+        }
+
+        static void ValidateDataKey(string key, string paramName)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                throw new ArgumentException("Data key must be a non-empty string.", paramName);
         }
 
         Message? BuildMessage(uint modId, string methodName, int mask, object?[] parameters, Type[]? parameterTypes)

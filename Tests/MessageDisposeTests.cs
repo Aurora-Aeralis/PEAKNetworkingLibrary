@@ -44,4 +44,13 @@ public class MessageDisposeTests
         message.Dispose();
         Assert.Throws<ObjectDisposedException>(() => message.Reset());
     }
+
+    [Fact]
+    public void Length_And_UnreadLength_Throw_ObjectDisposedException_After_Dispose()
+    {
+        var message = NewMessage();
+        message.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => message.Length());
+        Assert.Throws<ObjectDisposedException>(() => message.UnreadLength());
+    }
 }

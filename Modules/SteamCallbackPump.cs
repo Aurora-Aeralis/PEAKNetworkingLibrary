@@ -2,17 +2,20 @@
 using UnityEngine;
 using Steamworks;
 
-public class SteamCallbackPump : MonoBehaviour
+namespace NetworkingLibrary.Modules
 {
-    void Update()
+    public class SteamCallbackPump : MonoBehaviour
     {
-        try
+        void Update()
         {
-            SteamAPI.RunCallbacks();
-        }
-        catch (Exception ex)
-        {
-            try { NetworkingLibrary.Net.Logger.LogError($"SteamAPI.RunCallbacks error: {ex}"); } catch { }
+            try
+            {
+                SteamAPI.RunCallbacks();
+            }
+            catch (Exception ex)
+            {
+                try { NetworkingLibrary.Net.Logger.LogError($"SteamAPI.RunCallbacks error: {ex}"); } catch { }
+            }
         }
     }
 }

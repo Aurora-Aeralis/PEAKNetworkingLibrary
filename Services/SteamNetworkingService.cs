@@ -239,6 +239,12 @@ namespace NetworkingLibrary.Services
                         go.AddComponent<SteamCallbackPump>();
                         Net.Logger.LogInfo("Created SteamCallbackPump GameObject.");
                     }
+                    else if (go.GetComponent<SteamCallbackPump>() == null)
+                    {
+                        go.AddComponent<SteamCallbackPump>();
+                    }
+
+                    SteamCallbackPump.EnablePumping();
                 }
                 catch (Exception ex)
                 {
@@ -317,6 +323,7 @@ namespace NetworkingLibrary.Services
             LocalRsa = null;
 
             IsInitialized = false;
+            try { SteamCallbackPump.DisableAndDestroyExisting(); } catch { }
             lock (lastSeenSequence) lastSeenSequence.Clear();
             lock (rateLimiters) rateLimiters.Clear();
             lock (outgoingSequencePerMod) outgoingSequencePerMod.Clear();

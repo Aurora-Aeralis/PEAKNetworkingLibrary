@@ -30,8 +30,6 @@ namespace NetworkingLibrary.Modules
         private bool _disposed;
         private bool UsesReferencePresenceFlags => ProtocolVersion >= 2;
 
-        public bool Compressed { get; private set; } = false;
-
         public Message(uint modId, string methodName, int mask) : this(modId, methodName, mask, null)
         {
         }

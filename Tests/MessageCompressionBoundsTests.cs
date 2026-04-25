@@ -59,4 +59,20 @@ public class MessageCompressionBoundsTests
         var decompressed = Message.DecompressPayload(compressed);
         Assert.Equal(source.ToArray(), decompressed);
     }
+
+    [Fact]
+    public void CompressPayload_Is_Stateless_And_Does_Not_Mutate_Message_Data()
+    {
+        using var source = new Message(7u, "compress", 3);
+        source.WriteString("alpha");
+        source.WriteInt(1234);
+        var beforeCompression = source.ToArray();
+
+        var compressed = source.CompressPayload();
+        var afterCompression = source.ToArray();
+        var decompressed = Message.DecompressPayload(compressed);
+
+        Assert.Equal(beforeCompression, afterCompression);
+        Assert.Equal(beforeCompression, decompressed);
+    }
 }

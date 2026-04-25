@@ -140,22 +140,24 @@ namespace NetworkingLibrary.Modules
         #region Write helpers
         private void AppendSpan(ReadOnlySpan<byte> bytes)
         {
-            for (int i = 0; i < bytes.Length; i++) buffer.Add(bytes[i]);
+            if (bytes.Length == 0) return;
+            buffer.EnsureCapacity(buffer.Count + bytes.Length);
+            buffer.AddRange(bytes.ToArray());
             readableBufferDirty = true;
         }
 
         private void WriteInt32LE(int value)
         {
-            Span<byte> tmp = stackalloc byte[8];
+            Span<byte> tmp = stackalloc byte[4];
             BinaryPrimitives.WriteInt32LittleEndian(tmp, value);
-            AppendSpan(tmp[..4]);
+            AppendSpan(tmp);
         }
 
         private void WriteUInt32LE(uint value)
         {
-            Span<byte> tmp = stackalloc byte[8];
+            Span<byte> tmp = stackalloc byte[4];
             BinaryPrimitives.WriteUInt32LittleEndian(tmp, value);
-            AppendSpan(tmp[..4]);
+            AppendSpan(tmp);
         }
 
         private void WriteInt64LE(long value)

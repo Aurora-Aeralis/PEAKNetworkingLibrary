@@ -3,6 +3,8 @@ using NetworkingLibrary.Services;
 using Steamworks;
 using System;
 using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Threading;
@@ -54,6 +56,20 @@ public class SteamNetworkingServiceLifecycleTests
             LastValue = -1;
             CallCount = 0;
         }
+    }
+
+    sealed class VisibilityRpcReceiver
+    {
+        public int PublicCallCount { get; private set; }
+        public int PrivateCallCount { get; private set; }
+
+        [CustomRPC]
+        public void PublicPing(int value) => PublicCallCount += value;
+
+        [CustomRPC]
+        void PrivatePing(int value) => PrivateCallCount += value;
+
+        public void NotRpc(int value) => PublicCallCount += value * 1000;
     }
 
     sealed class ConcurrentRpcReceiver
@@ -313,6 +329,23 @@ public class SteamNetworkingServiceLifecycleTests
 
         var rpcs = (IDictionary)GetField(service, "rpcs")!;
         Assert.Equal(0, rpcs.Count);
+    }
+
+    [Fact]
+    public void RegisterNetworkObject_RegistersOnlyAttributedInstanceMethods_AndDispatchParityHolds()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new VisibilityRpcReceiver();
+        using var _ = service.RegisterNetworkObject(receiver, TestModId, mask: 5);
+
+        Assert.Equal(2, GetRegisteredHandlerCount(service, TestModId));
+
+        DispatchMessage(service, nameof(VisibilityRpcReceiver.PublicPing), 2);
+        DispatchMessage(service, "PrivatePing", 3);
+        DispatchMessage(service, nameof(VisibilityRpcReceiver.NotRpc), 4);
+
+        Assert.Equal(2, receiver.PublicCallCount);
+        Assert.Equal(3, receiver.PrivateCallCount);
     }
 
     [Fact]
@@ -849,6 +882,13 @@ public class SteamNetworkingServiceLifecycleTests
     static IntPtr[] GetInboundBuffer(SteamNetworkingService service)
     {
         return (IntPtr[])GetField(service, "inMessages")!;
+    }
+
+    static int GetRegisteredHandlerCount(SteamNetworkingService service, uint modId)
+    {
+        var rpcs = (Dictionary<uint, Dictionary<string, List<MessageHandler>>>)GetField(service, "rpcs")!;
+        if (!rpcs.TryGetValue(modId, out var methods)) return 0;
+        return methods.Sum(entry => entry.Value.Count);
     }
 
     static byte[] BuildFramed(SteamNetworkingService service, Message message, uint modId, ReliableType reliable)

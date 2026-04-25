@@ -634,23 +634,23 @@ namespace NetworkingLibrary.Services
         public IDisposable RegisterNetworkObject(object instance, uint modId, int mask = 0)
         {
             if (instance == null) throw new ArgumentNullException(nameof(instance));
-            return RegisterNetworkTypeInternal(instance.GetType(), instance, modId, mask);
+            return RegisterNetworkTypeInternal(instance.GetType(), instance, modId, mask, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
         }
         /// <summary>
         /// </summary>
         public IDisposable RegisterNetworkType(Type type, uint modId, int mask = 0)
         {
             if (type == null) throw new ArgumentNullException(nameof(type));
-            return RegisterNetworkTypeInternal(type, null, modId, mask);
+            return RegisterNetworkTypeInternal(type, null, modId, mask, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
         }
-        private IDisposable RegisterNetworkTypeInternal(Type type, object? instance, uint modId, int mask)
+        private IDisposable RegisterNetworkTypeInternal(Type type, object? instance, uint modId, int mask, BindingFlags methodBindingFlags)
         {
             int registered = 0;
             var registeredHandlers = new List<HandlerRegistration>();
 
             lock (rpcLock)
             {
-                var methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                var methods = type.GetMethods(methodBindingFlags);
                 foreach (var method in methods)
                 {
                     var attrs = method.GetCustomAttributes(false).OfType<CustomRPCAttribute>().ToArray();
@@ -661,7 +661,7 @@ namespace NetworkingLibrary.Services
 
                     var mh = new MessageHandler
                     {
-                        Target = method.IsStatic ? null! : instance!,
+                        Target = instance!,
                         Method = method,
                         Parameters = method.GetParameters(),
                         TakesInfo = method.GetParameters().Length > 0 && method.GetParameters().Last().ParameterType.Name == "RPCInfo",

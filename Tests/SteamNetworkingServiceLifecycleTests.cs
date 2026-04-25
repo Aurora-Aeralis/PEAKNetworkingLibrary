@@ -26,6 +26,26 @@ public class SteamNetworkingServiceLifecycleTests
         }
     }
 
+    sealed class MixedRpcReceiver
+    {
+        public static int StaticCallCount { get; private set; }
+        public int InstanceCallCount { get; private set; }
+
+        [CustomRPC]
+        static void OnPing(int _)
+        {
+            StaticCallCount++;
+        }
+
+        [CustomRPC]
+        void OnMixed(int _)
+        {
+            InstanceCallCount++;
+        }
+
+        public static void ResetStaticCallCount() => StaticCallCount = 0;
+    }
+
     [Fact]
     public void LeaveAndShutdown_ClearOutboundQueues()
     {
@@ -187,6 +207,24 @@ public class SteamNetworkingServiceLifecycleTests
         second.Dispose();
         DispatchPing(service, 3);
         Assert.Equal(3, receiver.CallCount);
+    }
+
+    [Fact]
+    public void RegisterNetworkObject_MultipleInstances_DoesNotRegisterStaticRpcMultipleTimes()
+    {
+        var service = new SteamNetworkingService();
+        var first = new MixedRpcReceiver();
+        var second = new MixedRpcReceiver();
+        MixedRpcReceiver.ResetStaticCallCount();
+
+        service.RegisterNetworkObject(first, TestModId);
+        service.RegisterNetworkObject(second, TestModId);
+
+        DispatchPing(service, 1);
+
+        Assert.Equal(0, MixedRpcReceiver.StaticCallCount);
+        Assert.Equal(0, first.InstanceCallCount);
+        Assert.Equal(0, second.InstanceCallCount);
     }
 
     [Fact]

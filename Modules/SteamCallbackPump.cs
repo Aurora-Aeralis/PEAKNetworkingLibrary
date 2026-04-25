@@ -53,6 +53,9 @@ namespace NetworkingLibrary.Modules
 
         static bool ProbeSteamReady()
         {
+#if UNITY_EDITOR
+            return false;
+#else
             try
             {
                 return NetworkingServiceFactory.IsSteamClientRunning() && NetworkingServiceFactory.IsSteamApiInitialized();
@@ -61,6 +64,7 @@ namespace NetworkingLibrary.Modules
             {
                 return false;
             }
+#endif
         }
 
         static bool TryIsSteamReady(out bool isReady)

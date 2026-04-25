@@ -54,10 +54,25 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public Func<Message, ulong, bool>? IncomingValidator { get; set; }
 
+        /// <summary>
+        /// Persistent RPC registration map, not tied to lobby lifetime.
+        /// </summary>
         readonly Dictionary<uint, Dictionary<string, List<MessageHandler>>> rpcs = new();
+        /// <summary>
+        /// Per-lobby shared key/value data; cleared whenever lobby identity changes.
+        /// </summary>
         readonly Dictionary<string, string> lobbyData = new();
+        /// <summary>
+        /// Per-lobby player-scoped key/value data for current lobby membership.
+        /// </summary>
         readonly Dictionary<ulong, Dictionary<string, string>> perPlayerData = new();
+        /// <summary>
+        /// Persistent lobby data key registration.
+        /// </summary>
         readonly HashSet<string> lobbyKeys = new();
+        /// <summary>
+        /// Persistent per-player data key registration.
+        /// </summary>
         readonly HashSet<string> playerKeys = new();
 
         readonly SlidingWindowRateLimiter rateLimiter = new(100, TimeSpan.FromSeconds(1));
@@ -124,6 +139,10 @@ namespace NetworkingLibrary.Services
         public void Shutdown()
         {
             IsInitialized = false;
+            InLobby = false;
+            offlineIsHost = false;
+            HostSteamId64 = LocalSteamId;
+            lobbyData.Clear();
             rpcs.Clear();
             perPeerSymmetricKey.Clear();
             globalHmac?.Dispose(); globalHmac = null;
@@ -135,6 +154,7 @@ namespace NetworkingLibrary.Services
         {
             InLobby = true;
             HostSteamId64 = LocalSteamId;
+            lobbyData.Clear();
             perPlayerData.Clear();
             perPlayerData[LocalSteamId] = new Dictionary<string, string>();
             LobbyCreated?.Invoke();
@@ -148,6 +168,7 @@ namespace NetworkingLibrary.Services
         {
             InLobby = true;
             HostSteamId64 = lobbySteamId64;
+            lobbyData.Clear();
             perPlayerData.Clear();
             perPlayerData[LocalSteamId] = new Dictionary<string, string>();
             LobbyEntered?.Invoke();
@@ -160,6 +181,7 @@ namespace NetworkingLibrary.Services
         public void LeaveLobby()
         {
             InLobby = false;
+            lobbyData.Clear();
             perPlayerData.Clear();
             LobbyLeft?.Invoke();
             offlineIsHost = false;

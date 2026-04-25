@@ -386,6 +386,7 @@ namespace NetworkingLibrary.Services
             ClearOutboundState();
             lock (lastSeenSequence) lastSeenSequence.Clear();
             lock (rateLimiters) rateLimiters.Clear();
+            lock (outgoingSequencePerMod) outgoingSequencePerMod.Clear();
             lock (fragmentLock) fragmentBuffers.Clear();
             lock (cryptoStateLock)
             {

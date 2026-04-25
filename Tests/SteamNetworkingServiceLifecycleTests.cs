@@ -55,9 +55,19 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
-    public void Shutdown_ClearsTransientSequenceAndRateLimiterState()
+    public void LeaveAndShutdown_ClearsTransientSequenceAndRateLimiterState()
     {
         var service = new SteamNetworkingService();
+
+        SeedLastSeenSequence(service);
+        SeedRateLimiters(service);
+        SeedOutgoingSequencePerMod(service);
+
+        InvokeNonPublic(service, "OnLobbyLeftInternal");
+
+        AssertDictionaryCount(service, "lastSeenSequence", 0);
+        AssertDictionaryCount(service, "rateLimiters", 0);
+        AssertDictionaryCount(service, "outgoingSequencePerMod", 0);
 
         SeedLastSeenSequence(service);
         SeedRateLimiters(service);

@@ -12,6 +12,7 @@ public class NetLifecycleTeardownTests
     sealed class FakeNetworkingService : INetworkingService
     {
         public bool ShutdownCalled { get; private set; }
+        public bool ThrowOnShutdown { get; set; }
 
         public bool IsInitialized => true;
         public bool InLobby => false;
@@ -29,7 +30,11 @@ public class NetLifecycleTeardownTests
         public event Action<ulong, string[]>? PlayerDataChanged;
 
         public void Initialize() { }
-        public void Shutdown() => ShutdownCalled = true;
+        public void Shutdown()
+        {
+            ShutdownCalled = true;
+            if (ThrowOnShutdown) throw new InvalidOperationException("shutdown failed");
+        }
         public void CreateLobby(int maxPlayers = 8) { }
         public void JoinLobby(ulong lobbySteamId64) { }
         public void LeaveLobby() { }
@@ -123,6 +128,20 @@ public class NetLifecycleTeardownTests
         {
             harmonyField.SetValue(null, originalHarmony);
         }
+    }
+
+    [Fact]
+    public void OnDestroy_DoesNotThrow_WhenServiceShutdownThrows_AndStillClearsStaticService()
+    {
+        var service = new FakeNetworkingService { ThrowOnShutdown = true };
+        SetService(service);
+
+        var net = (Net)FormatterServices.GetUninitializedObject(typeof(Net));
+        var ex = Record.Exception(() => InvokeOnDestroy(net));
+
+        Assert.Null(ex);
+        Assert.True(service.ShutdownCalled);
+        Assert.Null(GetService());
     }
 
     static Harmony GetHarmony()

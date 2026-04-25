@@ -30,8 +30,18 @@ namespace NetworkingLibrary
 
         private void OnDestroy()
         {
-            Service?.Shutdown();
-            Service = null;
+            try
+            {
+                Service?.Shutdown();
+            }
+            catch (Exception ex)
+            {
+                Logger?.LogWarning($"Failed to shutdown networking service during plugin teardown: {ex.Message}");
+            }
+            finally
+            {
+                Service = null;
+            }
 
             if (Harmony == null)
                 return;

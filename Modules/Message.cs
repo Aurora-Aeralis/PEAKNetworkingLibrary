@@ -14,8 +14,22 @@ namespace NetworkingLibrary.Modules
     public class Message : IDisposable
     {
         public const byte PROTOCOL_VERSION = 3;
-        public static int MaxSize = 64 * 1024;
+        private const int DefaultMaxSize = 64 * 1024;
+        private const int MinMaxSize = 1024;
+        private const int MaxMaxSize = int.MaxValue / 16;
+        // NOTE: this must remain a field (not a property) for runtime ABI compatibility
+        // with precompiled assemblies that reference Message.MaxSize as a field symbol.
+        public static int MaxSize = DefaultMaxSize;
         public static int MaxLogicalSize => MaxSize * 16;
+
+        public static void SetMaxSize(int bytes)
+        {
+            if (bytes < MinMaxSize || bytes > MaxMaxSize)
+            {
+                throw new ArgumentOutOfRangeException(nameof(bytes), bytes, $"Message max size must be between {MinMaxSize} and {MaxMaxSize} bytes.");
+            }
+            MaxSize = bytes;
+        }
 
         public byte ProtocolVersion;
         public uint ModID;

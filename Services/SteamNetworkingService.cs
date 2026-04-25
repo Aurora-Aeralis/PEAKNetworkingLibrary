@@ -205,6 +205,12 @@ namespace NetworkingLibrary.Services
             public Dictionary<int, byte[]> Fragments = new();
         }
 
+        sealed class HandlerRegistration
+        {
+            public string MethodName = string.Empty;
+            public MessageHandler Handler = null!;
+        }
+
         /// <summary>
         /// </summary>
         public void Initialize()
@@ -562,6 +568,7 @@ namespace NetworkingLibrary.Services
         private IDisposable RegisterNetworkTypeInternal(Type type, object? instance, uint modId, int mask)
         {
             int registered = 0;
+            var registeredHandlers = new List<HandlerRegistration>();
 
             lock (rpcLock)
             {
@@ -583,6 +590,7 @@ namespace NetworkingLibrary.Services
                         Mask = mask
                     };
                     rpcs[modId][method.Name].Add(mh);
+                    registeredHandlers.Add(new HandlerRegistration { MethodName = method.Name, Handler = mh });
                     registered++;
                 }
             }
@@ -592,7 +600,7 @@ namespace NetworkingLibrary.Services
             else
                 Net.Logger.LogInfo($"Registered {registered} static RPCs for mod {modId} on type {type.FullName}");
 
-            return new RegistrationToken(this, instance, type, modId, mask);
+            return new RegistrationToken(this, modId, registeredHandlers);
         }
 
         /// <summary>
@@ -652,22 +660,33 @@ namespace NetworkingLibrary.Services
             }
         }
 
+        private void DeregisterHandlers(uint modId, List<HandlerRegistration> handlersToRemove)
+        {
+            lock (rpcLock)
+            {
+                if (!rpcs.TryGetValue(modId, out var methods) || handlersToRemove.Count == 0) return;
+                foreach (var registration in handlersToRemove)
+                {
+                    if (!methods.TryGetValue(registration.MethodName, out var handlers)) continue;
+                    handlers.Remove(registration.Handler);
+                    if (handlers.Count == 0) methods.Remove(registration.MethodName);
+                }
+                if (methods.Count == 0) rpcs.Remove(modId);
+            }
+        }
+
         sealed class RegistrationToken : IDisposable
         {
             private readonly SteamNetworkingService svc;
-            private readonly object? instance;
-            private readonly Type? registeredType;
             private readonly uint modId;
-            private readonly int mask;
+            private readonly List<HandlerRegistration> handlers;
             private bool disposed;
 
-            public RegistrationToken(SteamNetworkingService svc, object? instance, Type? registeredType, uint modId, int mask)
+            public RegistrationToken(SteamNetworkingService svc, uint modId, List<HandlerRegistration> handlers)
             {
                 this.svc = svc;
-                this.instance = instance;
-                this.registeredType = registeredType;
                 this.modId = modId;
-                this.mask = mask;
+                this.handlers = handlers;
                 this.disposed = false;
             }
 
@@ -675,15 +694,7 @@ namespace NetworkingLibrary.Services
             {
                 if (disposed) return;
                 disposed = true;
-
-                if (instance != null)
-                {
-                    svc.DeregisterNetworkObject(instance, modId, mask);
-                }
-                else if (registeredType != null)
-                {
-                    svc.DeregisterNetworkType(registeredType, modId, mask);
-                }
+                svc.DeregisterHandlers(modId, handlers);
             }
         }
 

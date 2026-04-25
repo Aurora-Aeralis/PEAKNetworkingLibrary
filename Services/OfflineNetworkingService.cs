@@ -200,6 +200,11 @@ namespace NetworkingLibrary.Services
                 LogError("CreateLobby called before OfflineNetworkingService.Initialize.");
                 return;
             }
+            if (InLobby)
+            {
+                LogWarning("CreateLobby called while already in a lobby. Leaving current lobby before creating a new one.");
+                LeaveLobby();
+            }
 
             EnsureLocalPeerKey();
             InLobby = true;
@@ -230,6 +235,11 @@ namespace NetworkingLibrary.Services
             {
                 LogWarning("JoinLobby called with invalid lobby id 0.");
                 return;
+            }
+            if (InLobby)
+            {
+                LogWarning("JoinLobby called while already in a lobby. Leaving current lobby before joining a new lobby.");
+                LeaveLobby();
             }
 
             EnsureLocalPeerKey();

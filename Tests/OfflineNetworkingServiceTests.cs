@@ -110,6 +110,42 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
+    public void CreateLobby_WhileInLobby_LeavesExistingLobbyBeforeCreatingNewOne()
+    {
+        var service = new OfflineNetworkingService();
+        var lobbyCreatedCount = 0;
+        var lobbyLeftCount = 0;
+        service.LobbyCreated += () => lobbyCreatedCount++;
+        service.LobbyLeft += () => lobbyLeftCount++;
+
+        service.Initialize();
+        service.CreateLobby();
+        service.CreateLobby();
+
+        Assert.Equal(2, lobbyCreatedCount);
+        Assert.Equal(1, lobbyLeftCount);
+        Assert.True(service.InLobby);
+    }
+
+    [Fact]
+    public void JoinLobby_WhileInLobby_LeavesExistingLobbyBeforeJoining()
+    {
+        var service = new OfflineNetworkingService();
+        var lobbyEnteredCount = 0;
+        var lobbyLeftCount = 0;
+        service.LobbyEntered += () => lobbyEnteredCount++;
+        service.LobbyLeft += () => lobbyLeftCount++;
+
+        service.Initialize();
+        service.CreateLobby();
+        service.JoinLobby(123456UL);
+
+        Assert.Equal(2, lobbyEnteredCount);
+        Assert.Equal(1, lobbyLeftCount);
+        Assert.True(service.InLobby);
+    }
+
+    [Fact]
     public void JoinLobby_RemoteLobbyId_UsesSinglePeerHostSimulation_AndRpcToHostDispatchesToLocalRegisteredHandler()
     {
         var service = new OfflineNetworkingService();

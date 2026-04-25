@@ -70,4 +70,48 @@ public class MessageEndianEncodingTests
         Assert.True(read.ReadBool());
         Assert.False(read.ReadBool());
     }
+
+    [Fact]
+    public void Int32_And_UInt32_Writes_Append_Exactly_Four_Bytes_Each()
+    {
+        var message = NewMessage();
+        var headerLength = message.Length();
+
+        message.WriteInt(123456789);
+        message.WriteUInt(3456789012u);
+
+        Assert.Equal(headerLength + 8, message.Length());
+    }
+
+    [Fact]
+    public void Protocol_Header_Encoding_Remains_Compatible_For_V2_And_V3()
+    {
+        var v2 = new Message(0xA1B2C3D4u, "method", 0x11223344);
+        var v3 = new Message(0xA1B2C3D4u, "method", 0x11223344, "shared(System.Int32)");
+
+        var v2Bytes = v2.ToArray();
+        var v3Bytes = v3.ToArray();
+
+        var sharedPrefix = new byte[]
+        {
+            0x02,
+            0xD4, 0xC3, 0xB2, 0xA1,
+            0x06, 0x00, 0x00, 0x00,
+            0x6D, 0x65, 0x74, 0x68, 0x6F, 0x64,
+            0x44, 0x33, 0x22, 0x11,
+        };
+
+        Assert.Equal(sharedPrefix, v2Bytes);
+        Assert.Equal((byte)0x03, v3Bytes[0]);
+        Assert.Equal(sharedPrefix[1..], v3Bytes[1..sharedPrefix.Length]);
+        Assert.Equal(0x01, v3Bytes[sharedPrefix.Length]);
+
+        var readV2 = new Message(v2Bytes);
+        var readV3 = new Message(v3Bytes);
+
+        Assert.Equal((byte)2, readV2.ProtocolVersion);
+        Assert.Null(readV2.OverloadKey);
+        Assert.Equal((byte)3, readV3.ProtocolVersion);
+        Assert.Equal("shared(System.Int32)", readV3.OverloadKey);
+    }
 }

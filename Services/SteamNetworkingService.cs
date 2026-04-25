@@ -332,16 +332,15 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void LeaveLobby()
         {
-            if (Lobby != CSteamID.Nil)
+            if (!InLobby || Lobby == CSteamID.Nil) return;
+
+            try
             {
-                try
-                {
-                    SteamMatchmaking.LeaveLobby(Lobby);
-                }
-                catch (Exception ex)
-                {
-                    Net.Logger.LogError($"LeaveLobby failed for lobby {Lobby}: {ex}");
-                }
+                SteamMatchmaking.LeaveLobby(Lobby);
+            }
+            catch (Exception ex)
+            {
+                Net.Logger.LogError($"LeaveLobby failed for lobby {Lobby}: {ex}");
             }
 
             OnLobbyLeftInternal();

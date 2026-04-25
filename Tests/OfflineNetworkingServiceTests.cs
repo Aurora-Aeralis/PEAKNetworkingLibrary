@@ -399,7 +399,7 @@ public class OfflineNetworkingServiceTests
 
         Assert.False(service.InLobby);
         Assert.Equal(service.LocalSteamId, service.HostSteamId64);
-        Assert.Equal(new[] { service.LocalSteamId }, service.GetLobbyMemberSteamIds());
+        Assert.Empty(service.GetLobbyMemberSteamIds());
     }
 
     [Fact]

@@ -11,6 +11,19 @@ namespace NetworkingLibrary.Tests;
 
 public class SteamNetworkingServiceLifecycleTests
 {
+    const uint TestModId = 777;
+
+    sealed class RpcReceiver
+    {
+        public int CallCount { get; private set; }
+
+        [CustomRPC]
+        void OnPing(int value)
+        {
+            CallCount++;
+        }
+    }
+
     [Fact]
     public void LeaveAndShutdown_ClearOutboundQueues()
     {
@@ -84,6 +97,27 @@ public class SteamNetworkingServiceLifecycleTests
         AssertUnackedCount(service, 0);
     }
 
+    [Fact]
+    public void RegisterSameObjectTwice_DisposeTokens_RemovesOnlyCapturedHandlers()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new RpcReceiver();
+
+        var first = service.RegisterNetworkObject(receiver, TestModId, mask: 0);
+        var second = service.RegisterNetworkObject(receiver, TestModId, mask: 0);
+
+        DispatchPing(service, 1);
+        Assert.Equal(2, receiver.CallCount);
+
+        first.Dispose();
+        DispatchPing(service, 2);
+        Assert.Equal(3, receiver.CallCount);
+
+        second.Dispose();
+        DispatchPing(service, 3);
+        Assert.Equal(3, receiver.CallCount);
+    }
+
     static void SetInLobby(SteamNetworkingService service, bool value)
     {
         typeof(SteamNetworkingService).GetField("<InLobby>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(service, value);
@@ -149,5 +183,21 @@ public class SteamNetworkingServiceLifecycleTests
         var method = typeof(SteamNetworkingService).GetMethod(methodName, flags, null, types, null)
             ?? typeof(SteamNetworkingService).GetMethod(methodName, flags)!;
         return method.Invoke(service, args);
+    }
+
+    static void DispatchPing(SteamNetworkingService service, int value)
+    {
+        var invokeLocal = typeof(SteamNetworkingService).GetMethod("InvokeLocalMessage", BindingFlags.Instance | BindingFlags.NonPublic);
+        if (invokeLocal != null)
+        {
+            var message = new Message(TestModId, "OnPing", 0);
+            message.WriteObject(typeof(int), value);
+            invokeLocal.Invoke(service, new object[] { message, new CSteamID(1234UL) });
+            return;
+        }
+
+        service.Initialize();
+        service.CreateLobby();
+        service.RPC(TestModId, "OnPing", ReliableType.Reliable, value);
     }
 }

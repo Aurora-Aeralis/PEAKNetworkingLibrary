@@ -117,6 +117,12 @@ namespace NetworkingLibrary.Services
             }
         }
 
+        sealed class HandlerRegistration
+        {
+            public string MethodName = string.Empty;
+            public MessageHandler Handler = null!;
+        }
+
         bool offlineIsHost = false;
         public bool IsHost => offlineIsHost;
 
@@ -225,30 +231,32 @@ namespace NetworkingLibrary.Services
         {
             if (instance == null) throw new ArgumentNullException(nameof(instance));
             var t = instance.GetType();
-            int registered = 0;
+            var registeredHandlers = new List<HandlerRegistration>();
             foreach (var method in t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
             {
                 var attrs = method.GetCustomAttributes(false).OfType<CustomRPCAttribute>().ToArray();
                 if (attrs.Length == 0) continue;
                 if (!rpcs.ContainsKey(modId)) rpcs[modId] = new Dictionary<string, List<MessageHandler>>();
                 if (!rpcs[modId].ContainsKey(method.Name)) rpcs[modId][method.Name] = new List<MessageHandler>();
-                rpcs[modId][method.Name].Add(new MessageHandler
+                var handler = new MessageHandler
                 {
                     Target = instance,
                     Method = method,
                     Parameters = method.GetParameters(),
                     TakesInfo = method.GetParameters().Length > 0 && method.GetParameters().Last().ParameterType.Name == "RPCInfo",
                     Mask = mask
-                });
-                registered++;
+                };
+                rpcs[modId][method.Name].Add(handler);
+                registeredHandlers.Add(new HandlerRegistration { MethodName = method.Name, Handler = handler });
             }
-            return new Token(() => DeregisterNetworkObject(instance, modId, mask));
+            return new Token(() => DeregisterHandlers(modId, registeredHandlers));
         }
         /// <summary>
         /// </summary>
         public IDisposable RegisterNetworkType(Type type, uint modId, int mask = 0)
         {
             if (type == null) throw new ArgumentNullException(nameof(type));
+            var registeredHandlers = new List<HandlerRegistration>();
             foreach (var method in type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
             {
                 var attrs = method.GetCustomAttributes(false).OfType<CustomRPCAttribute>().ToArray();
@@ -257,16 +265,30 @@ namespace NetworkingLibrary.Services
 
                 if (!rpcs.ContainsKey(modId)) rpcs[modId] = new Dictionary<string, List<MessageHandler>>();
                 if (!rpcs[modId].ContainsKey(method.Name)) rpcs[modId][method.Name] = new List<MessageHandler>();
-                rpcs[modId][method.Name].Add(new MessageHandler
+                var handler = new MessageHandler
                 {
                     Target = null!,
                     Method = method,
                     Parameters = method.GetParameters(),
                     TakesInfo = method.GetParameters().Length > 0 && method.GetParameters().Last().ParameterType.Name == "RPCInfo",
                     Mask = mask
-                });
+                };
+                rpcs[modId][method.Name].Add(handler);
+                registeredHandlers.Add(new HandlerRegistration { MethodName = method.Name, Handler = handler });
             }
-            return new Token(() => DeregisterNetworkType(type, modId, mask));
+            return new Token(() => DeregisterHandlers(modId, registeredHandlers));
+        }
+
+        void DeregisterHandlers(uint modId, List<HandlerRegistration> handlersToRemove)
+        {
+            if (!rpcs.TryGetValue(modId, out var methods) || handlersToRemove.Count == 0) return;
+            foreach (var registration in handlersToRemove)
+            {
+                if (!methods.TryGetValue(registration.MethodName, out var handlers)) continue;
+                handlers.Remove(registration.Handler);
+                if (handlers.Count == 0) methods.Remove(registration.MethodName);
+            }
+            if (methods.Count == 0) rpcs.Remove(modId);
         }
 
         /// <summary>

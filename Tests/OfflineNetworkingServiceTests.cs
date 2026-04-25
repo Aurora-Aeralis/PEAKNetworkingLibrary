@@ -11,11 +11,13 @@ public class OfflineNetworkingServiceTests
     sealed class RpcReceiver
     {
         public int LastValue { get; private set; } = -1;
+        public int CallCount { get; private set; }
 
         [CustomRPC]
         void OnPing(int value)
         {
             LastValue = value;
+            CallCount++;
         }
     }
 
@@ -188,5 +190,30 @@ public class OfflineNetworkingServiceTests
                 $"PlayerEntered:{service.LocalSteamId}"
             },
             events);
+    }
+
+    [Fact]
+    public void RegisterSameObjectTwice_DisposeTokens_RemovesOnlyCapturedHandlers()
+    {
+        var service = new OfflineNetworkingService();
+        var receiver = new RpcReceiver();
+
+        service.Initialize();
+        service.CreateLobby();
+
+        var first = service.RegisterNetworkObject(receiver, TestModId, mask: 0);
+        var second = service.RegisterNetworkObject(receiver, TestModId, mask: 0);
+
+        service.RPC(TestModId, "OnPing", ReliableType.Reliable, 1);
+        Assert.Equal(2, receiver.CallCount);
+
+        first.Dispose();
+        service.RPC(TestModId, "OnPing", ReliableType.Reliable, 2);
+        Assert.Equal(3, receiver.CallCount);
+        Assert.Equal(2, receiver.LastValue);
+
+        second.Dispose();
+        service.RPC(TestModId, "OnPing", ReliableType.Reliable, 3);
+        Assert.Equal(3, receiver.CallCount);
     }
 }

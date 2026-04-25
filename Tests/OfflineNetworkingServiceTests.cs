@@ -1,6 +1,7 @@
 using NetworkingLibrary.Modules;
 using NetworkingLibrary.Services;
 using System;
+using System.Reflection;
 using System.Security.Cryptography;
 using Xunit;
 
@@ -48,6 +49,28 @@ public class OfflineNetworkingServiceTests
             LastValue = -1;
             CallCount = 0;
         }
+    }
+
+    sealed class ScopeAction : IDisposable
+    {
+        Action? onDispose;
+        public ScopeAction(Action onDispose) { this.onDispose = onDispose; }
+        public void Dispose()
+        {
+            var action = onDispose;
+            if (action == null) return;
+            onDispose = null;
+            action();
+        }
+    }
+
+    static IDisposable WithUnavailableNetLogger()
+    {
+        var loggerField = typeof(Net).GetField("<Logger>k__BackingField", BindingFlags.Static | BindingFlags.NonPublic);
+        if (loggerField == null) return new ScopeAction(() => { });
+        var original = loggerField.GetValue(null);
+        loggerField.SetValue(null, null);
+        return new ScopeAction(() => loggerField.SetValue(null, original));
     }
 
     [Fact]
@@ -155,6 +178,27 @@ public class OfflineNetworkingServiceTests
 
         Assert.False(service.InLobby);
         Assert.Equal(-1, receiver.LastValue);
+    }
+
+    [Fact]
+    public void RpcPaths_WithoutLobby_DoNotThrow_WhenNetLoggerIsUnavailable()
+    {
+        using var _ = WithUnavailableNetLogger();
+        var service = new OfflineNetworkingService();
+        var receiver = new RpcReceiver();
+
+        service.Initialize();
+        service.RegisterNetworkObject(receiver, TestModId);
+
+        var ex = Record.Exception(() =>
+        {
+            service.RPC(TestModId, "OnPing", ReliableType.Reliable, 1);
+            service.RPCTarget(TestModId, "OnPing", service.LocalSteamId, ReliableType.Reliable, 2);
+            service.RPCToHost(TestModId, "OnPing", ReliableType.Reliable, 3);
+        });
+
+        Assert.Null(ex);
+        Assert.Equal(0, receiver.CallCount);
     }
 
     [Fact]

@@ -90,7 +90,7 @@ namespace NetworkingLibrary.Services
             }
             catch (Exception ex)
             {
-                Net.Logger.LogError($"GetLobbyMemberSteamIds error: {ex}");
+                LogError($"GetLobbyMemberSteamIds error: {ex}");
                 return Array.Empty<ulong>();
             }
         }
@@ -188,6 +188,26 @@ namespace NetworkingLibrary.Services
             "NetworkingLibrary.Modules.RPCInfo"
         };
 
+        static void LogError(string message)
+        {
+            try { Net.Logger?.LogError(message); } catch { }
+        }
+
+        static void LogWarning(string message)
+        {
+            try { Net.Logger?.LogWarning(message); } catch { }
+        }
+
+        static void LogInfo(string message)
+        {
+            try { Net.Logger?.LogInfo(message); } catch { }
+        }
+
+        static void LogDebug(string message)
+        {
+            try { Net.Logger?.LogDebug(message); } catch { }
+        }
+
         readonly Dictionary<ulong, HandshakeState> handshakeStates = new();
 
         const byte FRAG_FLAG = 0x1;
@@ -237,12 +257,12 @@ namespace NetworkingLibrary.Services
                         go = new GameObject("SteamCallbackPump");
                         GameObject.DontDestroyOnLoad(go);
                         go.AddComponent<SteamCallbackPump>();
-                        Net.Logger.LogInfo("Created SteamCallbackPump GameObject.");
+                        LogInfo("Created SteamCallbackPump GameObject.");
                     }
                 }
                 catch (Exception ex)
                 {
-                    Net.Logger.LogError($"Failed to create SteamCallbackPump: {ex}");
+                    LogError($"Failed to create SteamCallbackPump: {ex}");
                 }
             }
 
@@ -259,7 +279,7 @@ namespace NetworkingLibrary.Services
             }
 
             IsInitialized = true;
-            Net.Logger.LogInfo("SteamNetworkingService initialized");
+            LogInfo("SteamNetworkingService initialized");
         }
 
         private bool TryInitializeSteamCallbacksAndCrypto()
@@ -275,7 +295,7 @@ namespace NetworkingLibrary.Services
             }
             catch (Exception ex)
             {
-                Net.Logger.LogError($"Failed to initialize Steam callbacks and crypto: {ex}");
+                LogError($"Failed to initialize Steam callbacks and crypto: {ex}");
                 cbLobbyEnter = null;
                 cbLobbyCreated = null;
                 cbLobbyChatUpdate = null;
@@ -321,7 +341,7 @@ namespace NetworkingLibrary.Services
             lock (rateLimiters) rateLimiters.Clear();
             lock (outgoingSequencePerMod) outgoingSequencePerMod.Clear();
             lock (fragmentLock) fragmentBuffers.Clear();
-            Net.Logger.LogInfo("SteamNetworkingService shutdown");
+            LogInfo("SteamNetworkingService shutdown");
         }
 
         /// <summary>
@@ -336,12 +356,12 @@ namespace NetworkingLibrary.Services
 
             if (maxPlayers <= 0)
             {
-                Net.Logger.LogWarning($"CreateLobby maxPlayers {maxPlayers} is invalid. Clamping to 1.");
+                LogWarning($"CreateLobby maxPlayers {maxPlayers} is invalid. Clamping to 1.");
                 maxPlayers = 1;
             }
 
             try { SteamMatchmaking.CreateLobby(ELobbyType.k_ELobbyTypePrivate, maxPlayers); }
-            catch (Exception ex) { Net.Logger.LogError($"CreateLobby failed: {ex}"); }
+            catch (Exception ex) { LogError($"CreateLobby failed: {ex}"); }
         }
         /// <summary>
         /// </summary>
@@ -355,12 +375,12 @@ namespace NetworkingLibrary.Services
 
             if (lobbySteamId64 == 0UL)
             {
-                Net.Logger.LogWarning("JoinLobby called with invalid lobby id 0.");
+                LogWarning("JoinLobby called with invalid lobby id 0.");
                 return;
             }
 
             try { SteamMatchmaking.JoinLobby(new CSteamID(lobbySteamId64)); }
-            catch (Exception ex) { Net.Logger.LogError($"JoinLobby failed for lobby {lobbySteamId64}: {ex}"); }
+            catch (Exception ex) { LogError($"JoinLobby failed for lobby {lobbySteamId64}: {ex}"); }
         }
         /// <summary>
         /// </summary>
@@ -374,7 +394,7 @@ namespace NetworkingLibrary.Services
             }
             catch (Exception ex)
             {
-                Net.Logger.LogError($"LeaveLobby failed for lobby {Lobby}: {ex}");
+                LogError($"LeaveLobby failed for lobby {Lobby}: {ex}");
             }
 
             OnLobbyLeftInternal();
@@ -391,23 +411,23 @@ namespace NetworkingLibrary.Services
 
             if (!InLobby || Lobby == CSteamID.Nil)
             {
-                Net.Logger.LogWarning("InviteToLobby called while not in a lobby.");
+                LogWarning("InviteToLobby called while not in a lobby.");
                 return;
             }
 
             if (steamId64 == 0UL)
             {
-                Net.Logger.LogWarning("InviteToLobby called with invalid target Steam64 id 0.");
+                LogWarning("InviteToLobby called with invalid target Steam64 id 0.");
                 return;
             }
 
             try { SteamMatchmaking.InviteUserToLobby(Lobby, new CSteamID(steamId64)); }
-            catch (Exception ex) { Net.Logger.LogError($"InviteToLobby failed for target {steamId64}: {ex}"); }
+            catch (Exception ex) { LogError($"InviteToLobby failed for target {steamId64}: {ex}"); }
         }
 
         void OnLobbyEnter(LobbyEnter_t param)
         {
-            Net.Logger.LogDebug($"LobbyEnter {param.m_ulSteamIDLobby}");
+            LogDebug($"LobbyEnter {param.m_ulSteamIDLobby}");
             Lobby = new CSteamID(param.m_ulSteamIDLobby);
             InLobby = true;
             RefreshPlayerList();
@@ -416,7 +436,7 @@ namespace NetworkingLibrary.Services
 
         void OnLobbyCreated(LobbyCreated_t param)
         {
-            Net.Logger.LogDebug($"LobbyCreated: {param.m_eResult}");
+            LogDebug($"LobbyCreated: {param.m_eResult}");
             if (param.m_eResult == EResult.k_EResultOK)
             {
                 Lobby = new CSteamID(param.m_ulSteamIDLobby);
@@ -426,7 +446,7 @@ namespace NetworkingLibrary.Services
             }
             else
             {
-                Net.Logger.LogError($"Lobby creation failed: {param.m_eResult}");
+                LogError($"Lobby creation failed: {param.m_eResult}");
             }
         }
 
@@ -440,7 +460,7 @@ namespace NetworkingLibrary.Services
 
                 if ((change & EChatMemberStateChange.k_EChatMemberStateChangeEntered) != 0)
                 {
-                    //Net.Logger.LogInfo($"OnLobbyChatUpdate: Entered -> {player}");
+                    //LogInfo($"OnLobbyChatUpdate: Entered -> {player}");
                     PlayerEntered?.Invoke(player.m_SteamID);
                 }
 
@@ -452,13 +472,13 @@ namespace NetworkingLibrary.Services
 
                 if ((change & leftMask) != 0)
                 {
-                    //Net.Logger.LogInfo($"OnLobbyChatUpdate: Left/Disconnected/Kicked/Banned -> {player}");
+                    //LogInfo($"OnLobbyChatUpdate: Left/Disconnected/Kicked/Banned -> {player}");
                     PlayerLeft?.Invoke(player.m_SteamID);
                 }
             }
             catch (Exception ex)
             {
-                Net.Logger.LogError($"OnLobbyChatUpdate error: {ex}");
+                LogError($"OnLobbyChatUpdate error: {ex}");
             }
         }
 
@@ -538,29 +558,29 @@ namespace NetworkingLibrary.Services
         {
             try
             {
-                //Net.Logger.LogInfo($"RefreshPlayerList: Lobby={Lobby} Owner={SteamMatchmaking.GetLobbyOwner(Lobby)} Local={SteamUser.GetSteamID()} InLobby={InLobby}");
+                //LogInfo($"RefreshPlayerList: Lobby={Lobby} Owner={SteamMatchmaking.GetLobbyOwner(Lobby)} Local={SteamUser.GetSteamID()} InLobby={InLobby}");
 
                 if (Lobby == null || Lobby == CSteamID.Nil)
                 {
-                    //Net.Logger.LogWarning("RefreshPlayerList: Lobby is Nil; cannot query members.");
+                    //LogWarning("RefreshPlayerList: Lobby is Nil; cannot query members.");
                     players = Array.Empty<CSteamID>();
                     return;
                 }
 
                 int count = SteamMatchmaking.GetNumLobbyMembers(Lobby);
-                //Net.Logger.LogInfo($"RefreshPlayerList: SteamMatchmaking.GetNumLobbyMembers returned {count}");
+                //LogInfo($"RefreshPlayerList: SteamMatchmaking.GetNumLobbyMembers returned {count}");
                 players = new CSteamID[count];
 
                 for (int i = 0; i < players.Length; i++)
                 {
                     players[i] = SteamMatchmaking.GetLobbyMemberByIndex(Lobby, i);
-                    //Net.Logger.LogInfo($"RefreshPlayerList: member[{i}] = {players[i]}");
+                    //LogInfo($"RefreshPlayerList: member[{i}] = {players[i]}");
                 }
-                Net.Logger.LogDebug($"RefreshPlayerList: total members = {players.Length}");
+                LogDebug($"RefreshPlayerList: total members = {players.Length}");
             }
             catch (Exception ex)
             {
-                Net.Logger.LogError($"RefreshPlayerList error: {ex}");
+                LogError($"RefreshPlayerList error: {ex}");
                 players = Array.Empty<CSteamID>();
             }
         }
@@ -606,7 +626,7 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void RegisterLobbyDataKey(string key)
         {
-            if (lobbyDataKeys.Contains(key)) Net.Logger.LogWarning($"Lobby key {key} already registered");
+            if (lobbyDataKeys.Contains(key)) LogWarning($"Lobby key {key} already registered");
             else lobbyDataKeys.Add(key);
         }
 
@@ -614,8 +634,8 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void SetLobbyData(string key, object value)
         {
-            if (!InLobby) { Net.Logger.LogError("Cannot set lobby data when not in lobby."); return; }
-            if (!lobbyDataKeys.Contains(key)) Net.Logger.LogWarning($"Accessing unregistered lobby key '{key}'.");
+            if (!InLobby) { LogError("Cannot set lobby data when not in lobby."); return; }
+            if (!lobbyDataKeys.Contains(key)) LogWarning($"Accessing unregistered lobby key '{key}'.");
             var serialized = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
             SteamMatchmaking.SetLobbyData(Lobby, key, serialized);
         }
@@ -624,19 +644,19 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public T GetLobbyData<T>(string key)
         {
-            if (!InLobby) { Net.Logger.LogError("Cannot get lobby data when not in lobby."); return default(T)!; }
-            if (!lobbyDataKeys.Contains(key)) Net.Logger.LogWarning($"Accessing unregistered lobby key '{key}'.");
+            if (!InLobby) { LogError("Cannot get lobby data when not in lobby."); return default(T)!; }
+            if (!lobbyDataKeys.Contains(key)) LogWarning($"Accessing unregistered lobby key '{key}'.");
             string v = SteamMatchmaking.GetLobbyData(Lobby, key);
             if (string.IsNullOrEmpty(v)) return default(T)!;
             try { return (T)Convert.ChangeType(v, typeof(T), System.Globalization.CultureInfo.InvariantCulture); }
-            catch { Net.Logger.LogError($"Could not parse lobby data [{key},{v}] as {typeof(T).Name}"); return default(T)!; }
+            catch { LogError($"Could not parse lobby data [{key},{v}] as {typeof(T).Name}"); return default(T)!; }
         }
 
         /// <summary>
         /// </summary>
         public void RegisterPlayerDataKey(string key)
         {
-            if (playerDataKeys.Contains(key)) Net.Logger.LogWarning($"Player key {key} already registered");
+            if (playerDataKeys.Contains(key)) LogWarning($"Player key {key} already registered");
             else playerDataKeys.Add(key);
         }
 
@@ -644,8 +664,8 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void SetPlayerData(string key, object value)
         {
-            if (!InLobby) { Net.Logger.LogError("Cannot set player data when not in lobby."); return; }
-            if (!playerDataKeys.Contains(key)) Net.Logger.LogWarning($"Accessing unregistered player key '{key}'.");
+            if (!InLobby) { LogError("Cannot set player data when not in lobby."); return; }
+            if (!playerDataKeys.Contains(key)) LogWarning($"Accessing unregistered player key '{key}'.");
             var serialized = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
             SteamMatchmaking.SetLobbyMemberData(Lobby, key, serialized);
         }
@@ -654,13 +674,13 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public T GetPlayerData<T>(ulong steamId64, string key)
         {
-            if (!InLobby) { Net.Logger.LogError("Cannot get player data when not in lobby."); return default(T)!; }
-            if (!playerDataKeys.Contains(key)) Net.Logger.LogWarning($"Accessing unregistered player key '{key}'.");
+            if (!InLobby) { LogError("Cannot get player data when not in lobby."); return default(T)!; }
+            if (!playerDataKeys.Contains(key)) LogWarning($"Accessing unregistered player key '{key}'.");
             var player = new CSteamID(steamId64);
             string v = SteamMatchmaking.GetLobbyMemberData(Lobby, player, key);
             if (string.IsNullOrEmpty(v)) return default(T)!;
             try { return (T)Convert.ChangeType(v, typeof(T), System.Globalization.CultureInfo.InvariantCulture); }
-            catch { Net.Logger.LogError($"Could not parse player data [{key},{v}] as {typeof(T).Name}"); return default(T)!; }
+            catch { LogError($"Could not parse player data [{key},{v}] as {typeof(T).Name}"); return default(T)!; }
         }
 
         /// <summary>
@@ -726,9 +746,9 @@ namespace NetworkingLibrary.Services
             }
 
             if (instance != null)
-                Net.Logger.LogInfo($"Registered {registered} RPCs for mod {modId} on {instance} ({instance.GetType().FullName})");
+                LogInfo($"Registered {registered} RPCs for mod {modId} on {instance} ({instance.GetType().FullName})");
             else
-                Net.Logger.LogInfo($"Registered {registered} static RPCs for mod {modId} on type {type.FullName}");
+                LogInfo($"Registered {registered} static RPCs for mod {modId} on type {type.FullName}");
 
             return new RegistrationToken(this, modId, registeredHandlers);
         }
@@ -753,7 +773,7 @@ namespace NetworkingLibrary.Services
             {
                 if (!rpcs.TryGetValue(modId, out var methods))
                 {
-                    Net.Logger.LogWarning($"No RPCs for mod {modId}");
+                    LogWarning($"No RPCs for mod {modId}");
                     return;
                 }
 
@@ -786,7 +806,7 @@ namespace NetworkingLibrary.Services
 
                 if (methods.Count == 0) rpcs.Remove(modId);
 
-                Net.Logger.LogInfo($"Deregistered {removed} RPCs for mod {modId} (type/instance {type.FullName})");
+                LogInfo($"Deregistered {removed} RPCs for mod {modId} (type/instance {type.FullName})");
             }
         }
 
@@ -832,21 +852,21 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void RPC(uint modId, string methodName, ReliableType reliable, params object[] parameters)
         {
-            if (!InLobby) { Net.Logger.LogError("RPC called while not in lobby"); return; }
+            if (!InLobby) { LogError("RPC called while not in lobby"); return; }
             var msg = BuildMessage(modId, methodName, 0, parameters, null);
             if (msg == null) return;
 
-            //Net.Logger.LogError($"{players}");
+            //LogError($"{players}");
             foreach (var p in players)
             {
-                //Net.Logger.LogError($"{p}");
+                //LogError($"{p}");
                 if (p == SteamUser.GetSteamID())
                 {
-                    //Net.Logger.LogError($"{SteamUser.GetSteamID()} == {p}");
+                    //LogError($"{SteamUser.GetSteamID()} == {p}");
                     continue;
                 }
                 EnqueueOrSend(BuildFramedBytesWithMeta(msg, modId, reliable), p, reliable, DeterminePriority(modId, methodName));
-                //Net.Logger.LogError($"Fired to user: {p}");
+                //LogError($"Fired to user: {p}");
             }
 
             InvokeLocalMessage(new Message(msg.ToArray()), SteamUser.GetSteamID());
@@ -854,21 +874,21 @@ namespace NetworkingLibrary.Services
 
         public void RPC(uint modId, string methodName, ReliableType reliable, Type[] parameterTypes, params object?[] parameters)
         {
-            if (!InLobby) { Net.Logger.LogError("RPC called while not in lobby"); return; }
+            if (!InLobby) { LogError("RPC called while not in lobby"); return; }
             var msg = BuildMessage(modId, methodName, 0, parameters, parameterTypes);
             if (msg == null) return;
 
-            //Net.Logger.LogError($"{players}");
+            //LogError($"{players}");
             foreach (var p in players)
             {
-                //Net.Logger.LogError($"{p}");
+                //LogError($"{p}");
                 if (p == SteamUser.GetSteamID())
                 {
-                    //Net.Logger.LogError($"{SteamUser.GetSteamID()} == {p}");
+                    //LogError($"{SteamUser.GetSteamID()} == {p}");
                     continue;
                 }
                 EnqueueOrSend(BuildFramedBytesWithMeta(msg, modId, reliable), p, reliable, DeterminePriority(modId, methodName));
-                //Net.Logger.LogError($"Fired to user: {p}");
+                //LogError($"Fired to user: {p}");
             }
 
             InvokeLocalMessage(new Message(msg.ToArray()), SteamUser.GetSteamID());
@@ -885,7 +905,7 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void RPCTarget(uint modId, string methodName, CSteamID target, ReliableType reliable, params object[] parameters)
         {
-            if (!InLobby) { Net.Logger.LogError("Cannot RPC target when not in lobby"); return; }
+            if (!InLobby) { LogError("Cannot RPC target when not in lobby"); return; }
             var msg = BuildMessage(modId, methodName, 0, parameters, null);
             if (msg == null) return;
             if (target == SteamUser.GetSteamID())
@@ -899,7 +919,7 @@ namespace NetworkingLibrary.Services
 
         public void RPCTarget(uint modId, string methodName, CSteamID target, ReliableType reliable, Type[] parameterTypes, params object?[] parameters)
         {
-            if (!InLobby) { Net.Logger.LogError("Cannot RPC target when not in lobby"); return; }
+            if (!InLobby) { LogError("Cannot RPC target when not in lobby"); return; }
             var msg = BuildMessage(modId, methodName, 0, parameters, parameterTypes);
             if (msg == null) return;
             if (target == SteamUser.GetSteamID())
@@ -915,9 +935,9 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void RPCToHost(uint modId, string methodName, ReliableType reliable, params object[] parameters)
         {
-            if (!InLobby) { Net.Logger.LogError("Not in lobby"); return; }
+            if (!InLobby) { LogError("Not in lobby"); return; }
             var host = SteamMatchmaking.GetLobbyOwner(Lobby);
-            if (host == CSteamID.Nil) { Net.Logger.LogError("No host set"); return; }
+            if (host == CSteamID.Nil) { LogError("No host set"); return; }
             RPCTarget(modId, methodName, host, reliable, parameters);
         }
 
@@ -933,7 +953,7 @@ namespace NetworkingLibrary.Services
             var rl = GetOrCreateRateLimiter(target.m_SteamID);
             if (!rl.Allowed())
             {
-                //Net.Logger.LogWarning($"Rate limit: dropping send to {target}");
+                //LogWarning($"Rate limit: dropping send to {target}");
                 return;
             }
 
@@ -1107,7 +1127,7 @@ namespace NetworkingLibrary.Services
         {
             if (data.Length > Message.MaxSize)
             {
-                Net.Logger.LogError($"Send length {data.Length} exceeds Message.MaxSize {Message.MaxSize}");
+                LogError($"Send length {data.Length} exceeds Message.MaxSize {Message.MaxSize}");
                 return;
             }
 
@@ -1134,15 +1154,15 @@ namespace NetworkingLibrary.Services
                 }
 
                 var res = SteamNetworkingMessages.SendMessageToUser(ref id, p, (uint)data.Length, flags, CHANNEL);
-                //Net.Logger.LogInfo($"SendMessageToUser -> res={res} to={target} framedLen={data.Length}");
+                //LogInfo($"SendMessageToUser -> res={res} to={target} framedLen={data.Length}");
                 if (res != EResult.k_EResultOK)
                 {
-                    Net.Logger.LogError($"SendMessageToUser failed: {res} to {target}");
+                    LogError($"SendMessageToUser failed: {res} to {target}");
                 }
             }
             catch (Exception ex)
             {
-                Net.Logger.LogError($"SendBytes exception: {ex}");
+                LogError($"SendBytes exception: {ex}");
             }
             finally
             {
@@ -1174,7 +1194,7 @@ namespace NetworkingLibrary.Services
                         if (info.Attempts >= maxRetransmitAttempts)
                         {
                             unacked.Remove(key);
-                            //Net.Logger.LogDebug($"RetransmitUnacked: Message {key.msgId} to {key.target} dropped after {info.Attempts} attempts. framedLen={info.Framed?.Length ?? 0}");
+                            //LogDebug($"RetransmitUnacked: Message {key.msgId} to {key.target} dropped after {info.Attempts} attempts. framedLen={info.Framed?.Length ?? 0}");
                         }
                         else
                         {
@@ -1182,7 +1202,7 @@ namespace NetworkingLibrary.Services
                             info.LastSent = now;
                             unacked[key] = info;
                             toRetransmit.Add(info);
-                            //Net.Logger.LogDebug($"RetransmitUnacked: scheduling retransmit attempt {info.Attempts} for msg {key.msgId} to {key.target}");
+                            //LogDebug($"RetransmitUnacked: scheduling retransmit attempt {info.Attempts} for msg {key.msgId} to {key.target}");
                         }
                     }
                 }
@@ -1196,7 +1216,7 @@ namespace NetworkingLibrary.Services
                 }
                 catch (Exception ex)
                 {
-                    Net.Logger.LogError($"RetransmitUnacked: retransmit SendBytes exception: {ex}");
+                    LogError($"RetransmitUnacked: retransmit SendBytes exception: {ex}");
                 }
             }
         }
@@ -1206,7 +1226,7 @@ namespace NetworkingLibrary.Services
             try
             {
                 int count = SteamNetworkingMessages.ReceiveMessagesOnChannel(CHANNEL, inMessages, MAX_IN_MESSAGES);
-                //if (count > 0) Net.Logger.LogInfo($"ReceiveMessages: count={count} (channel {CHANNEL})");
+                //if (count > 0) LogInfo($"ReceiveMessages: count={count} (channel {CHANNEL})");
                 if (count <= 0) return;
 
                 for (int i = 0; i < count; i++)
@@ -1215,18 +1235,18 @@ namespace NetworkingLibrary.Services
                     SteamNetworkingMessage_t steamMsg = Marshal.PtrToStructure<SteamNetworkingMessage_t>(outPtr);
                     int size = (int)steamMsg.m_cbSize;
 
-                    //Net.Logger.LogInfo($"ReceiveMessages: rawMsg[{i}] size={size} ptr={outPtr}");
+                    //LogInfo($"ReceiveMessages: rawMsg[{i}] size={size} ptr={outPtr}");
 
                     if (size <= 0)
                     {
-                        //Net.Logger.LogWarning("ReceiveMessages: msg size <= 0, releasing.");
+                        //LogWarning("ReceiveMessages: msg size <= 0, releasing.");
                         SteamNetworkingMessage_t.Release(outPtr);
                         continue;
                     }
 
                     if (size > Message.MaxSize)
                     {
-                        //Net.Logger.LogError($"Incoming message size {size} > max {Message.MaxSize} (dropping)");
+                        //LogError($"Incoming message size {size} > max {Message.MaxSize} (dropping)");
                         SteamNetworkingMessage_t.Release(outPtr);
                         continue;
                     }
@@ -1234,7 +1254,7 @@ namespace NetworkingLibrary.Services
                     CSteamID sender = steamMsg.m_identityPeer.GetSteamID();
                     if (sender == CSteamID.Nil)
                     {
-                        //Net.Logger.LogWarning("ReceiveMessages: sender is Nil - skipping");
+                        //LogWarning("ReceiveMessages: sender is Nil - skipping");
                         SteamNetworkingMessage_t.Release(outPtr);
                         continue;
                     }
@@ -1245,14 +1265,14 @@ namespace NetworkingLibrary.Services
                     /*int dumpLen = Math.Min(32, bytes.Length);
                     var sb = new System.Text.StringBuilder();
                     for (int b = 0; b < dumpLen; b++) sb.AppendFormat("{0:X2} ", bytes[b]);
-                    Net.Logger.LogInfo($"ReceiveMessages: from={sender} size={size} preview={sb}");*/
+                    LogInfo($"ReceiveMessages: from={sender} size={size} preview={sb}");*/
                     try
                     {
                         ProcessIncomingFrame(bytes, sender);
                     }
                     catch (Exception ex)
                     {
-                        Net.Logger.LogError($"ProcessIncomingFrame exception: {ex}");
+                        LogError($"ProcessIncomingFrame exception: {ex}");
                     }
 
                     SteamNetworkingMessage_t.Release(outPtr);
@@ -1260,13 +1280,13 @@ namespace NetworkingLibrary.Services
             }
             catch (Exception ex)
             {
-                Net.Logger.LogError($"ReceiveMessages outer exception: {ex}");
+                LogError($"ReceiveMessages outer exception: {ex}");
             }
         }
 
         void ProcessIncomingFrame(byte[] frame, CSteamID sender)
         {
-            //Net.Logger.LogInfo($"ProcessIncomingFrame: from={sender} bytes={frame.Length}");
+            //LogInfo($"ProcessIncomingFrame: from={sender} bytes={frame.Length}");
             // Expected frame layout mirrors BuildFramedBytesWithMeta.
             // MAC verification always runs against canonical scope [flags..payload/signature], before any payload mutation/stripping.
 
@@ -1286,7 +1306,7 @@ namespace NetworkingLibrary.Services
             flags = msHeader.ReadByte();
             if (flags < 0)
             {
-                //Net.Logger.LogWarning("ProcessIncomingFrame: flags read < 0");
+                //LogWarning("ProcessIncomingFrame: flags read < 0");
                 return;
             }
 
@@ -1299,16 +1319,16 @@ namespace NetworkingLibrary.Services
 
                 if (total < 1 || index < 0 || index >= total)
                 {
-                    Net.Logger.LogWarning($"ProcessIncomingFrame: malformed fragment header total={total} index={index} from {sender}");
+                    LogWarning($"ProcessIncomingFrame: malformed fragment header total={total} index={index} from {sender}");
                     return;
                 }
 
-                //Net.Logger.LogInfo($"ProcessIncomingFrame: header flags=0x{flags:X2} msgId={msgId} seq={seq} total={total} idx={index}");
+                //LogInfo($"ProcessIncomingFrame: header flags=0x{flags:X2} msgId={msgId} seq={seq} total={total} idx={index}");
 
                 int remainingHeader = (int)(msHeader.Length - msHeader.Position);
                 if (remainingHeader <= 0)
                 {
-                    //Net.Logger.LogWarning("ProcessIncomingFrame: Empty payload received (remainingHeader<=0)");
+                    //LogWarning("ProcessIncomingFrame: Empty payload received (remainingHeader<=0)");
                     return;
                 }
 
@@ -1329,19 +1349,19 @@ namespace NetworkingLibrary.Services
                         }
 
                         fb.Fragments[index] = payloadFragment;
-                        //Net.Logger.LogInfo($"ProcessIncomingFrame: stored fragment {index}/{total - 1} for key {sender}:{msgId} (fragments={fb.Fragments.Count})");
+                        //LogInfo($"ProcessIncomingFrame: stored fragment {index}/{total - 1} for key {sender}:{msgId} (fragments={fb.Fragments.Count})");
 
                         var stale = fragmentBuffers.Where(kv => DateTime.UtcNow - kv.Value.FirstSeen > FragmentTimeout)
                                                   .Select(kv => kv.Key).ToList();
                         foreach (var k in stale)
                         {
-                            //Net.Logger.LogWarning($"ProcessIncomingFrame: removing stale fragment buffer for key {k}");
+                            //LogWarning($"ProcessIncomingFrame: removing stale fragment buffer for key {k}");
                             fragmentBuffers.Remove(k);
                         }
 
                         if (fb.Fragments.Count != fb.Total)
                         {
-                            //Net.Logger.LogInfo($"ProcessIncomingFrame: waiting for more fragments ({fb.Fragments.Count}/{fb.Total})");
+                            //LogInfo($"ProcessIncomingFrame: waiting for more fragments ({fb.Fragments.Count}/{fb.Total})");
                             return;
                         }
 
@@ -1350,7 +1370,7 @@ namespace NetworkingLibrary.Services
                         {
                             if (!fb.Fragments.TryGetValue(i, out var part))
                             {
-                                //Net.Logger.LogWarning($"ProcessIncomingFrame: missing fragment {i}; discarding buffer for key {key}");
+                                //LogWarning($"ProcessIncomingFrame: missing fragment {i}; discarding buffer for key {key}");
                                 fragmentBuffers.Remove(key);
                                 return;
                             }
@@ -1358,7 +1378,7 @@ namespace NetworkingLibrary.Services
                         }
                         assembledPayload = outMs.ToArray();
                         fragmentBuffers.Remove(key);
-                        //Net.Logger.LogInfo($"ProcessIncomingFrame: reassembled payload len={assembledPayload.Length} for key {sender}:{msgId}");
+                        //LogInfo($"ProcessIncomingFrame: reassembled payload len={assembledPayload.Length} for key {sender}:{msgId}");
                     }
                 }
                 else
@@ -1373,13 +1393,13 @@ namespace NetworkingLibrary.Services
                 {
                     if (payloadToProcess.Length < 5)
                     {
-                        //Net.Logger.LogWarning("ProcessIncomingFrame: Signed payload too small");
+                        //LogWarning("ProcessIncomingFrame: Signed payload too small");
                         return;
                     }
 
                     if (payloadToProcess.Length < 1 + 4)
                     {
-                        //Net.Logger.LogWarning("ProcessIncomingFrame: Signed payload too small to contain ModID");
+                        //LogWarning("ProcessIncomingFrame: Signed payload too small to contain ModID");
                         return;
                     }
 
@@ -1389,7 +1409,7 @@ namespace NetworkingLibrary.Services
                     {
                         if (!modPublicKeys.TryGetValue(modId, out rsaParams))
                         {
-                            //Net.Logger.LogWarning($"ProcessIncomingFrame: No public key registered for mod {modId}; dropping signed msg");
+                            //LogWarning($"ProcessIncomingFrame: No public key registered for mod {modId}; dropping signed msg");
                             return;
                         }
                     }
@@ -1397,21 +1417,21 @@ namespace NetworkingLibrary.Services
                     int expectedSigLen = rsaParams.Modulus?.Length ?? 0;
                     if (expectedSigLen <= 0 || payloadToProcess.Length < expectedSigLen + 2)
                     {
-                        //Net.Logger.LogWarning("ProcessIncomingFrame: Signed payload too small for expected signature length");
+                        //LogWarning("ProcessIncomingFrame: Signed payload too small for expected signature length");
                         return;
                     }
 
                     int sigSectionStart = payloadToProcess.Length - expectedSigLen - 2;
                     if (sigSectionStart < 0)
                     {
-                        //Net.Logger.LogWarning("ProcessIncomingFrame: Signature section invalid");
+                        //LogWarning("ProcessIncomingFrame: Signature section invalid");
                         return;
                     }
 
                     ushort declaredLen = BinaryPrimitives.ReadUInt16LittleEndian(payloadToProcess.AsSpan(sigSectionStart, 2));
                     if (declaredLen != expectedSigLen)
                     {
-                        //Net.Logger.LogWarning($"ProcessIncomingFrame: Signature length mismatch (declared={declaredLen}, expected={expectedSigLen}); dropping");
+                        //LogWarning($"ProcessIncomingFrame: Signature length mismatch (declared={declaredLen}, expected={expectedSigLen}); dropping");
                         return;
                     }
 
@@ -1427,14 +1447,14 @@ namespace NetworkingLibrary.Services
                         var ok = rsa.VerifyData(dataOnly, CryptoConfig.MapNameToOID("SHA256"), signature);
                         if (!ok)
                         {
-                            //Net.Logger.LogWarning("ProcessIncomingFrame: Signature verification failed; dropping");
+                            //LogWarning("ProcessIncomingFrame: Signature verification failed; dropping");
                             return;
                         }
                         payloadToProcess = dataOnly;
                     }
                     catch (Exception ex)
                     {
-                        Net.Logger.LogError($"ProcessIncomingFrame: Signature verification error: {ex}");
+                        LogError($"ProcessIncomingFrame: Signature verification error: {ex}");
                         return;
                     }
                 }
@@ -1447,7 +1467,7 @@ namespace NetworkingLibrary.Services
                     }
                     catch (Exception ex)
                     {
-                        Net.Logger.LogError($"ProcessIncomingFrame: Decompression failed: {ex}");
+                        LogError($"ProcessIncomingFrame: Decompression failed: {ex}");
                         return;
                     }
                 }
@@ -1456,11 +1476,11 @@ namespace NetworkingLibrary.Services
 
                 if (message.ModID == 0)
                 {
-                    //Net.Logger.LogInfo($"ProcessIncomingFrame: internal message {message.MethodName}");
+                    //LogInfo($"ProcessIncomingFrame: internal message {message.MethodName}");
                     HandleInternalMessage(message, sender, msgId, seq, requiresAck);
                     if (requiresAck && message.MethodName != "NETWORK_INTERNAL_ACK")
                     {
-                        //Net.Logger.LogInfo($"ProcessIncomingFrame: sending ACK for msgId={msgId} to {sender}");
+                        //LogInfo($"ProcessIncomingFrame: sending ACK for msgId={msgId} to {sender}");
                         SendAckToSender(sender, msgId);
                     }
                     return;
@@ -1470,25 +1490,25 @@ namespace NetworkingLibrary.Services
                 var rl = GetOrCreateRateLimiter(sender64);
                 if (!rl.IncomingAllowed())
                 {
-                    //Net.Logger.LogWarning($"ProcessIncomingFrame: Rate limit: dropping incoming from {sender64}");
+                    //LogWarning($"ProcessIncomingFrame: Rate limit: dropping incoming from {sender64}");
                     return;
                 }
 
                 if (!CheckAndUpdateSequence(sender64, message.ModID, seq))
                 {
-                    //Net.Logger.LogDebug($"ProcessIncomingFrame: Dropped replay/out-of-order seq {seq} from {sender64} for mod {message.ModID}");
+                    //LogDebug($"ProcessIncomingFrame: Dropped replay/out-of-order seq {seq} from {sender64} for mod {message.ModID}");
                     return;
                 }
 
                 if (requiresAck)
                 {
-                    //Net.Logger.LogInfo($"ProcessIncomingFrame: will send ACK for msgId={msgId} to {sender}");
+                    //LogInfo($"ProcessIncomingFrame: will send ACK for msgId={msgId} to {sender}");
                     SendAckToSender(sender, msgId);
                 }
 
                 if (IncomingValidator != null && !IncomingValidator(message, sender64))
                 {
-                    //Net.Logger.LogDebug($"ProcessIncomingFrame: Incoming message from {sender64} rejected by validator");
+                    //LogDebug($"ProcessIncomingFrame: Incoming message from {sender64} rejected by validator");
                     return;
                 }
 
@@ -1496,11 +1516,11 @@ namespace NetworkingLibrary.Services
             }
             catch (EndOfStreamException ex)
             {
-                Net.Logger.LogWarning($"ProcessIncomingFrame: malformed frame from {sender}, dropping. {ex.Message}");
+                LogWarning($"ProcessIncomingFrame: malformed frame from {sender}, dropping. {ex.Message}");
             }
             catch (Exception ex)
             {
-                Net.Logger.LogError($"ProcessIncomingFrame top-level exception: {ex}");
+                LogError($"ProcessIncomingFrame top-level exception: {ex}");
             }
         }
 
@@ -1602,7 +1622,7 @@ namespace NetworkingLibrary.Services
 
         void SendAckToSender(CSteamID sender, ulong msgId)
         {
-            //Net.Logger.LogInfo($"SendAckToSender: to={sender} ackId={msgId}");
+            //LogInfo($"SendAckToSender: to={sender} ackId={msgId}");
             var ackMsg = new Message(0u, "NETWORK_INTERNAL_ACK", 0);
             ackMsg.WriteULong(msgId);
             // Transport ACK frames reliably so a dropped ACK does not stall sender-side retransmit logic.
@@ -1650,13 +1670,13 @@ namespace NetworkingLibrary.Services
                             break;
                         }
                     default:
-                        Net.Logger.LogWarning($"Unknown internal method {message.MethodName}");
+                        LogWarning($"Unknown internal method {message.MethodName}");
                         break;
                 }
             }
             catch (Exception ex)
             {
-                Net.Logger.LogError($"HandleInternalMessage error: {ex}");
+                LogError($"HandleInternalMessage error: {ex}");
             }
         }
 
@@ -1679,12 +1699,12 @@ namespace NetworkingLibrary.Services
             {
                 if (!rpcs.TryGetValue(message.ModID, out var methods))
                 {
-                    Net.Logger.LogWarning($"Dropping message for unknown mod {message.ModID}");
+                    LogWarning($"Dropping message for unknown mod {message.ModID}");
                     return;
                 }
                 if (!methods.TryGetValue(message.MethodName, out var handlers))
                 {
-                    Net.Logger.LogWarning($"Dropping message for method {message.MethodName} not registered for {message.ModID}");
+                    LogWarning($"Dropping message for method {message.MethodName} not registered for {message.ModID}");
                     return;
                 }
                 handlersSnapshot = handlers.ToArray();
@@ -1726,7 +1746,7 @@ namespace NetworkingLibrary.Services
 
             if (chosenHandler == null || chosenParams == null)
             {
-                Net.Logger.LogWarning($"No handler matched for {message.ModID}:{message.MethodName} mask={message.Mask}");
+                LogWarning($"No handler matched for {message.ModID}:{message.MethodName} mask={message.Mask}");
                 return;
             }
 
@@ -1736,7 +1756,7 @@ namespace NetworkingLibrary.Services
             }
             catch (Exception ex)
             {
-                Net.Logger.LogError($"Invoke RPC error: {ex}");
+                LogError($"Invoke RPC error: {ex}");
             }
         }
 
@@ -1918,7 +1938,7 @@ namespace NetworkingLibrary.Services
             }
             catch (Exception ex)
             {
-                Net.Logger.LogWarning($"Handshake reply rejected invalid peer RSA key from {sender}: {ex.Message}");
+                LogWarning($"Handshake reply rejected invalid peer RSA key from {sender}: {ex.Message}");
                 CryptographicOperations.ZeroMemory(sym);
                 return;
             }
@@ -1961,7 +1981,7 @@ namespace NetworkingLibrary.Services
                 var framed = BuildFramedBytesWithMeta(m, 0, ReliableType.Reliable);
                 SendBytes(framed, sender, ReliableType.Reliable);
             }
-            catch (Exception ex) { Net.Logger.LogError($"Handshake decryption error: {ex}"); }
+            catch (Exception ex) { LogError($"Handshake decryption error: {ex}"); }
         }
 
         void CompleteHandshakeInitiator(CSteamID sender, string initiatorNonce, byte[] confirmHmac)
@@ -1975,14 +1995,14 @@ namespace NetworkingLibrary.Services
             }
             if (state == null || sym == null)
             {
-                Net.Logger.LogWarning("Handshake confirm received but no state");
+                LogWarning("Handshake confirm received but no state");
                 return;
             }
 
             var expected = HmacSha256Raw(sym, Encoding.UTF8.GetBytes(initiatorNonce));
             if (!expected.SequenceEqual(confirmHmac))
             {
-                Net.Logger.LogWarning("Handshake confirm HMAC mismatch");
+                LogWarning("Handshake confirm HMAC mismatch");
                 return;
             }
 
@@ -1991,7 +2011,7 @@ namespace NetworkingLibrary.Services
                 if (!handshakeStates.TryGetValue(sender.m_SteamID, out var current) || current.Sym == null) return;
                 if (!current.Sym.SequenceEqual(sym))
                 {
-                    Net.Logger.LogWarning("Handshake state changed before confirm commit; discarding stale confirmation");
+                    LogWarning("Handshake state changed before confirm commit; discarding stale confirmation");
                     return;
                 }
                 current.Completed = true;
@@ -2104,7 +2124,7 @@ namespace NetworkingLibrary.Services
 
             if (deserialized.Count == 0)
             {
-                Net.Logger.LogWarning($"No handler matched for local {message.ModID}:{message.MethodName} mask={message.Mask}");
+                LogWarning($"No handler matched for local {message.ModID}:{message.MethodName} mask={message.Mask}");
                 return;
             }
 
@@ -2122,12 +2142,12 @@ namespace NetworkingLibrary.Services
                 }
                 catch (Exception ex)
                 {
-                    Net.Logger.LogError($"Local invoke error: {ex}");
+                    LogError($"Local invoke error: {ex}");
                 }
             }
 
             if (!invokedAny)
-                Net.Logger.LogWarning($"No handler matched for local {message.ModID}:{message.MethodName} mask={message.Mask}");
+                LogWarning($"No handler matched for local {message.ModID}:{message.MethodName} mask={message.Mask}");
         }
 
         bool TryDeserializeForHandler(Message source, MessageHandler handler, CSteamID sender, out object[] callParams, out int unread)
@@ -2205,7 +2225,7 @@ namespace NetworkingLibrary.Services
 
                     if (chosen == null)
                     {
-                        Net.Logger.LogError($"No RPC overload matched method '{methodName}' for mask {mask} and parameter list.");
+                        LogError($"No RPC overload matched method '{methodName}' for mask {mask} and parameter list.");
                         return null;
                     }
 
@@ -2262,7 +2282,7 @@ namespace NetworkingLibrary.Services
 
                 if (msg.Length() > Message.MaxLogicalSize)
                 {
-                    Net.Logger.LogError("Message exceeds maximum allowed overall size.");
+                    LogError("Message exceeds maximum allowed overall size.");
                     return null;
                 }
 
@@ -2270,7 +2290,7 @@ namespace NetworkingLibrary.Services
             }
             catch (Exception ex)
             {
-                Net.Logger.LogError($"BuildMessage failed: {ex}");
+                LogError($"BuildMessage failed: {ex}");
                 return null;
             }
         }

@@ -101,9 +101,8 @@ namespace NetworkingLibrary.Services
         public void Initialize()
         {
             if (IsInitialized) return;
-            var rng = RandomNumberGenerator.Create();
             var k = new byte[32];
-            rng.GetBytes(k);
+            using (var rng = RandomNumberGenerator.Create()) rng.GetBytes(k);
             perPeerSymmetricKey[LocalSteamId] = k;
             IsInitialized = true;
         }
@@ -113,7 +112,12 @@ namespace NetworkingLibrary.Services
         public void Shutdown()
         {
             IsInitialized = false;
+            InLobby = false;
+            offlineIsHost = false;
+            HostSteamId64 = 0;
             rpcs.Clear();
+            lobbyData.Clear();
+            perPlayerData.Clear();
             perPeerSymmetricKey.Clear();
             globalHmac?.Dispose(); globalHmac = null;
         }
@@ -128,6 +132,7 @@ namespace NetworkingLibrary.Services
             perPlayerData[LocalSteamId] = new Dictionary<string, string>();
             LobbyCreated?.Invoke();
             LobbyEntered?.Invoke();
+            PlayerEntered?.Invoke(LocalSteamId);
             offlineIsHost = true;
         }
 
@@ -149,7 +154,9 @@ namespace NetworkingLibrary.Services
         public void LeaveLobby()
         {
             InLobby = false;
+            HostSteamId64 = 0;
             perPlayerData.Clear();
+            lobbyData.Clear();
             LobbyLeft?.Invoke();
             offlineIsHost = false;
         }

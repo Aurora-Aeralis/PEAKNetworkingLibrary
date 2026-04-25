@@ -1,11 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Text;
+﻿using System.IO;
 using BepInEx.Configuration;
 using BepInEx;
-using UnityEngine;
-using UnityEngine.Analytics;
 
 namespace NetworkingLibrary.Features
 {

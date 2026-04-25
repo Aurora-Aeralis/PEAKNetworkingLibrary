@@ -2,18 +2,11 @@ using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HarmonyLib;
-using System;
 using System.IO;
 using UnityEngine;
-using Mono.Cecil.Cil;
-using System.Reflection;
-using System.Linq;
 
 using NetworkingLibrary.Services;
-using NetworkingLibrary.Patches;
-using NetworkingLibrary.Modules;
 using NetworkingLibrary.Features;
-using System.Xml.Linq;
 
 namespace NetworkingLibrary
 {

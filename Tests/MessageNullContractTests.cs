@@ -9,9 +9,22 @@ namespace NetworkingLibrary.Tests;
 
 public class MessageNullContractTests
 {
+    private interface IList<T>
+    {
+    }
+
     private sealed class UnsupportedRef
     {
         public int Value { get; set; }
+    }
+
+    private sealed class MultiInterfaceIntCollection : Collection<int>, IList<int>
+    {
+    }
+
+    private sealed class CustomNamedIListCarrier<T> : IList<T>, IComparable<CustomNamedIListCarrier<T>>
+    {
+        public int CompareTo(CustomNamedIListCarrier<T>? other) => 0;
     }
 
     private static Message NewMessage() => new(1u, "method", 0);
@@ -64,6 +77,28 @@ public class MessageNullContractTests
         var read = Roundtrip(write);
         Assert.Null(read.ReadObject(typeof(Collection<int>)));
         Assert.Equal(new[] { 13, 21, 34 }, ((Collection<int>)read.ReadObject(typeof(Collection<int>))).ToArray());
+    }
+
+    [Fact]
+    public void MultiInterfaceListLikeType_RoundTrips_ConcreteType()
+    {
+        var write = NewMessage();
+        write.WriteObject(typeof(MultiInterfaceIntCollection), new MultiInterfaceIntCollection { 2, 4, 6 });
+
+        var read = Roundtrip(write);
+        var result = Assert.IsType<MultiInterfaceIntCollection>(read.ReadObject(typeof(MultiInterfaceIntCollection)));
+        Assert.Equal(new[] { 2, 4, 6 }, result.ToArray());
+    }
+
+    [Fact]
+    public void CustomNamedIListInterface_IsNotTreated_As_GenericListLike()
+    {
+        var write = NewMessage();
+        write.WriteBool(true);
+
+        var read = Roundtrip(write);
+        var ex = Assert.Throws<Exception>(() => read.ReadObject(typeof(CustomNamedIListCarrier<int>)));
+        Assert.Contains("Unsupported read type", ex.Message);
     }
 
     [Fact]

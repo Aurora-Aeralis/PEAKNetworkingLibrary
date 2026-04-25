@@ -577,8 +577,7 @@ namespace NetworkingLibrary.Modules
                 }
 
                 var elemType = TryGetGenericListElementType(type);
-                bool isListLike = typeof(IList).IsAssignableFrom(type) || type.GetInterface(typeof(IList<>).Name) != null;
-                if (elemType != null && isListLike)
+                if (elemType != null)
                 {
                     int len = ReadCollectionLength(type.FullName ?? "List");
                     var tempListType = typeof(List<>).MakeGenericType(elemType);

@@ -477,6 +477,38 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
+    public void Rpc_TypedOverload_IsAvailableThroughInterfaceReference()
+    {
+        var concrete = new OfflineNetworkingService();
+        var receiver = new RpcReceiver();
+        INetworkingService service = concrete;
+
+        service.Initialize();
+        service.CreateLobby();
+        service.RegisterNetworkObject(receiver, TestModId);
+        service.RPC(TestModId, "OnPing", ReliableType.Reliable, new[] { typeof(int) }, 31337);
+
+        Assert.Equal(31337, receiver.LastValue);
+        Assert.Equal(1, receiver.CallCount);
+    }
+
+    [Fact]
+    public void RpcTarget_TypedOverload_IsAvailableThroughInterfaceReference()
+    {
+        var concrete = new OfflineNetworkingService();
+        var receiver = new RpcReceiver();
+        INetworkingService service = concrete;
+
+        service.Initialize();
+        service.CreateLobby();
+        service.RegisterNetworkObject(receiver, TestModId);
+        service.RPCTarget(TestModId, "OnPing", concrete.LocalSteamId, ReliableType.Reliable, new[] { typeof(int) }, 777);
+
+        Assert.Equal(777, receiver.LastValue);
+        Assert.Equal(1, receiver.CallCount);
+    }
+
+    [Fact]
     public void RegisterModSigner_RejectsNullDelegate()
     {
         var service = new OfflineNetworkingService();

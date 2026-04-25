@@ -75,7 +75,15 @@ namespace NetworkingLibrary.Services
 
         /// <summary>
         /// </summary>
+        void RPC(uint modId, string methodName, ReliableType reliable, Type[] parameterTypes, params object?[] parameters);
+
+        /// <summary>
+        /// </summary>
         void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, params object[] parameters);
+
+        /// <summary>
+        /// </summary>
+        void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, Type[] parameterTypes, params object?[] parameters);
 
         /// <summary>
         /// </summary>

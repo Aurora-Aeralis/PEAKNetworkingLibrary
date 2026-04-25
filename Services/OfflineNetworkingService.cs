@@ -304,7 +304,9 @@ namespace NetworkingLibrary.Services
                 if (!methods.TryGetValue(method.Name, out var handlers)) continue;
                 for (int i = handlers.Count - 1; i >= 0; i--)
                     if (handlers[i].Target == instance && handlers[i].Mask == mask) handlers.RemoveAt(i);
+                if (handlers.Count == 0) methods.Remove(method.Name);
             }
+            if (methods.Count == 0) rpcs.Remove(modId);
         }
         /// <summary>
         /// </summary>

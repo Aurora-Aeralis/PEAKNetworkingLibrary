@@ -15,6 +15,7 @@ namespace NetworkingLibrary.Modules
     {
         public const byte PROTOCOL_VERSION = 2;
         public static int MaxSize = 64 * 1024;
+        public static int MaxLogicalSize => MaxSize * 16;
 
         public byte ProtocolVersion;
         public uint ModID;
@@ -53,9 +54,9 @@ namespace NetworkingLibrary.Modules
         public void SetBytes(byte[] data)
         {
             if (data == null) throw new ArgumentNullException(nameof(data));
-            if (data.Length > MaxSize * 16)
+            if (data.Length > MaxLogicalSize)
             {
-                throw new Exception($"Message payload exceeds max allowed size {MaxSize * 16}");
+                throw new Exception($"Message payload exceeds max allowed size {MaxLogicalSize}");
             }
             buffer.Clear();
             buffer.AddRange(data);

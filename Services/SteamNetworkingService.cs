@@ -232,6 +232,8 @@ namespace NetworkingLibrary.Services
         readonly Dictionary<(ulong sender, ulong msgId), FragmentBuffer> fragmentBuffers = new();
         readonly object fragmentLock = new();
         readonly TimeSpan FragmentTimeout = TimeSpan.FromSeconds(30);
+        readonly TimeSpan FragmentCleanupInterval = TimeSpan.FromSeconds(5);
+        DateTime nextFragmentCleanupAt = DateTime.MinValue;
 
         class FragmentBuffer
         {
@@ -1411,24 +1413,39 @@ namespace NetworkingLibrary.Services
                 if (total > 1)
                 {
                     var key = (sender.m_SteamID, msgId);
-                    FragmentBuffer fb;
+                    FragmentBuffer completedBuffer;
+                    var nowUtc = DateTime.UtcNow;
+
                     lock (fragmentLock)
                     {
-                        if (!fragmentBuffers.TryGetValue(key, out fb))
+                        if (!fragmentBuffers.TryGetValue(key, out var fb))
                         {
-                            fb = new FragmentBuffer { Total = total, FirstSeen = DateTime.UtcNow };
+                            fb = new FragmentBuffer { Total = total, FirstSeen = nowUtc };
                             fragmentBuffers[key] = fb;
                         }
 
                         fb.Fragments[index] = payloadFragment;
                         //LogInfo($"ProcessIncomingFrame: stored fragment {index}/{total - 1} for key {sender}:{msgId} (fragments={fb.Fragments.Count})");
 
-                        var stale = fragmentBuffers.Where(kv => DateTime.UtcNow - kv.Value.FirstSeen > FragmentTimeout)
-                                                  .Select(kv => kv.Key).ToList();
-                        foreach (var k in stale)
+                        if (nowUtc >= nextFragmentCleanupAt)
                         {
-                            //LogWarning($"ProcessIncomingFrame: removing stale fragment buffer for key {k}");
-                            fragmentBuffers.Remove(k);
+                            nextFragmentCleanupAt = nowUtc + FragmentCleanupInterval;
+                            List<(ulong sender, ulong msgId)>? staleKeys = null;
+                            foreach (var entry in fragmentBuffers)
+                            {
+                                if (nowUtc - entry.Value.FirstSeen <= FragmentTimeout) continue;
+                                staleKeys ??= new List<(ulong sender, ulong msgId)>();
+                                staleKeys.Add(entry.Key);
+                            }
+
+                            if (staleKeys != null)
+                            {
+                                foreach (var staleKey in staleKeys)
+                                {
+                                    //LogWarning($"ProcessIncomingFrame: removing stale fragment buffer for key {staleKey}");
+                                    fragmentBuffers.Remove(staleKey);
+                                }
+                            }
                         }
 
                         if (fb.Fragments.Count != fb.Total)
@@ -1437,21 +1454,24 @@ namespace NetworkingLibrary.Services
                             return;
                         }
 
-                        using var outMs = new MemoryStream();
-                        for (int i = 0; i < fb.Total; i++)
-                        {
-                            if (!fb.Fragments.TryGetValue(i, out var part))
-                            {
-                                //LogWarning($"ProcessIncomingFrame: missing fragment {i}; discarding buffer for key {key}");
-                                fragmentBuffers.Remove(key);
-                                return;
-                            }
-                            outMs.Write(part, 0, part.Length);
-                        }
-                        assembledPayload = outMs.ToArray();
+                        completedBuffer = fb;
                         fragmentBuffers.Remove(key);
-                        //LogInfo($"ProcessIncomingFrame: reassembled payload len={assembledPayload.Length} for key {sender}:{msgId}");
                     }
+
+                    using var outMs = new MemoryStream();
+                    for (int i = 0; i < completedBuffer.Total; i++)
+                    {
+                        if (!completedBuffer.Fragments.TryGetValue(i, out var part))
+                        {
+                            //LogWarning($"ProcessIncomingFrame: missing fragment {i}; discarding buffer for key {key}");
+                            return;
+                        }
+
+                        outMs.Write(part, 0, part.Length);
+                    }
+
+                    assembledPayload = outMs.ToArray();
+                    //LogInfo($"ProcessIncomingFrame: reassembled payload len={assembledPayload.Length} for key {sender}:{msgId}");
                 }
                 else
                 {

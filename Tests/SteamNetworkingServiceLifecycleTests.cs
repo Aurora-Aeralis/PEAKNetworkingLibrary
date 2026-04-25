@@ -586,6 +586,48 @@ public class SteamNetworkingServiceLifecycleTests
         Assert.Equal(0, receiver.CallCount);
     }
 
+
+    [Fact]
+    public void ProcessIncomingFrame_FragmentCleanupGate_DefersStaleSweepUntilInterval()
+    {
+        var service = new SteamNetworkingService();
+        var sender = new CSteamID(404UL);
+        var staleKey = ValueTuple.Create(sender.m_SteamID, 77UL);
+
+        SeedFragmentBuffer(service, staleKey, total: 2, DateTime.UtcNow - TimeSpan.FromMinutes(2), new byte[] { 9, 9 }, index: 0);
+        SetField(service, "nextFragmentCleanupAt", DateTime.UtcNow + TimeSpan.FromMinutes(1));
+
+        InvokeNonPublic(service, "ProcessIncomingFrame", BuildFragmentFrame(1001UL, total: 2, index: 0, new byte[] { 1 }), sender);
+        Assert.True(FragmentBuffers(service).Contains(staleKey));
+
+        SetField(service, "nextFragmentCleanupAt", DateTime.UtcNow - TimeSpan.FromSeconds(1));
+        InvokeNonPublic(service, "ProcessIncomingFrame", BuildFragmentFrame(1002UL, total: 2, index: 0, new byte[] { 2 }), sender);
+
+        Assert.False(FragmentBuffers(service).Contains(staleKey));
+    }
+
+    [Fact]
+    public void ProcessIncomingFrame_HighFragmentLoad_CleansExpiredBuffersWhenGateOpens()
+    {
+        var service = new SteamNetworkingService();
+        var sender = new CSteamID(505UL);
+
+        SetField(service, "nextFragmentCleanupAt", DateTime.UtcNow + TimeSpan.FromMinutes(5));
+        const int workCount = 600;
+        for (var i = 0; i < workCount; i++)
+        {
+            InvokeNonPublic(service, "ProcessIncomingFrame", BuildFragmentFrame((ulong)(10000 + i), total: 3, index: 0, new byte[] { 1, 2, 3, 4 }), sender);
+        }
+
+        Assert.Equal(workCount, FragmentBuffers(service).Count);
+
+        AgeAllFragmentBuffers(service, DateTime.UtcNow - TimeSpan.FromMinutes(2));
+        SetField(service, "nextFragmentCleanupAt", DateTime.UtcNow - TimeSpan.FromSeconds(1));
+        InvokeNonPublic(service, "ProcessIncomingFrame", BuildFragmentFrame(999999UL, total: 3, index: 0, new byte[] { 7, 7, 7 }), sender);
+
+        Assert.Equal(1, FragmentBuffers(service).Count);
+    }
+
     static void SetInLobby(SteamNetworkingService service, bool value)
     {
         typeof(SteamNetworkingService).GetField("<InLobby>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(service, value);
@@ -678,6 +720,44 @@ public class SteamNetworkingServiceLifecycleTests
     {
         var dict = (ICollection)GetField(service, "unacked")!;
         Assert.Equal(expected, dict.Count);
+    }
+
+
+    static IDictionary FragmentBuffers(SteamNetworkingService service)
+    {
+        return (IDictionary)GetField(service, "fragmentBuffers")!;
+    }
+
+    static void SeedFragmentBuffer(SteamNetworkingService service, (ulong sender, ulong msgId) key, int total, DateTime firstSeen, byte[] fragment, int index)
+    {
+        var bufferType = typeof(SteamNetworkingService).GetNestedType("FragmentBuffer", BindingFlags.NonPublic)!;
+        var buffer = Activator.CreateInstance(bufferType)!;
+        bufferType.GetField("Total", BindingFlags.Instance | BindingFlags.Public)!.SetValue(buffer, total);
+        bufferType.GetField("FirstSeen", BindingFlags.Instance | BindingFlags.Public)!.SetValue(buffer, firstSeen);
+
+        var fragments = (IDictionary)bufferType.GetField("Fragments", BindingFlags.Instance | BindingFlags.Public)!.GetValue(buffer)!;
+        fragments[index] = fragment;
+
+        FragmentBuffers(service)[key] = buffer;
+    }
+
+    static void AgeAllFragmentBuffers(SteamNetworkingService service, DateTime firstSeen)
+    {
+        var bufferType = typeof(SteamNetworkingService).GetNestedType("FragmentBuffer", BindingFlags.NonPublic)!;
+        var firstSeenField = bufferType.GetField("FirstSeen", BindingFlags.Instance | BindingFlags.Public)!;
+        foreach (DictionaryEntry entry in FragmentBuffers(service)) firstSeenField.SetValue(entry.Value, firstSeen);
+    }
+
+    static byte[] BuildFragmentFrame(ulong msgId, int total, int index, byte[] payload)
+    {
+        var frame = new byte[25 + payload.Length];
+        frame[0] = 0x01;
+        BitConverter.GetBytes(msgId).CopyTo(frame, 1);
+        BitConverter.GetBytes(0UL).CopyTo(frame, 9);
+        BitConverter.GetBytes(total).CopyTo(frame, 17);
+        BitConverter.GetBytes(index).CopyTo(frame, 21);
+        Buffer.BlockCopy(payload, 0, frame, 25, payload.Length);
+        return frame;
     }
 
     static object? GetField(SteamNetworkingService service, string fieldName)

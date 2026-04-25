@@ -27,7 +27,7 @@ namespace NetworkingLibrary.Features
             MigrateConfigIfNeeded(Net.Instance.config, MyPluginInfo.PLUGIN_VERSION);
 
             DefineConfig();
-            Net.Logger.LogWarning($"< Config initialized >");
+            Net.Logger.LogInfo("Config initialized.");
         }
 
         internal static void DefineConfig()

@@ -1645,8 +1645,13 @@ namespace NetworkingLibrary.Services
                 var rng = RandomNumberGenerator.Create();
                 var sym = new byte[32]; rng.GetBytes(sym);
 
+                if (!TryDeserializeRsaPublicKey(state.PeerPub!, out var rsaParams))
+                {
+                    Net.Logger.LogWarning($"Handshake aborted for {sender.m_SteamID}: invalid peer RSA public key input.");
+                    return;
+                }
+
                 var rsaPeer = new RSACryptoServiceProvider();
-                var rsaParams = DeserializeRsaPublicKey(state.PeerPub!);
                 rsaPeer.ImportParameters(rsaParams);
                 var enc = rsaPeer.Encrypt(sym, false);
 
@@ -1716,12 +1721,34 @@ namespace NetworkingLibrary.Services
             return $"{mod}:{exp}";
         }
 
-        static RSAParameters DeserializeRsaPublicKey(string s)
+        static bool TryDeserializeRsaPublicKey(string s, out RSAParameters key)
         {
+            key = default;
+            if (string.IsNullOrWhiteSpace(s))
+                return false;
+
             var parts = s.Split(':');
-            var mod = Convert.FromBase64String(parts[0]);
-            var exp = Convert.FromBase64String(parts[1]);
-            return new RSAParameters { Modulus = mod, Exponent = exp };
+            if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[0]) || string.IsNullOrWhiteSpace(parts[1]))
+                return false;
+
+            try
+            {
+                var mod = Convert.FromBase64String(parts[0]);
+                var exp = Convert.FromBase64String(parts[1]);
+                if (mod.Length == 0 || exp.Length == 0)
+                    return false;
+
+                key = new RSAParameters { Modulus = mod, Exponent = exp };
+                return true;
+            }
+            catch (FormatException)
+            {
+                return false;
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
         }
 
         /// <summary>

@@ -13,6 +13,8 @@ public class NetLifecycleTeardownTests
     {
         public bool ShutdownCalled { get; private set; }
         public bool ThrowOnShutdown { get; set; }
+        public bool ThrowOnInitialize { get; set; }
+        public bool InitializeCalled { get; private set; }
 
         public bool IsInitialized => true;
         public bool InLobby => false;
@@ -29,7 +31,11 @@ public class NetLifecycleTeardownTests
         public event Action<string[]>? LobbyDataChanged;
         public event Action<ulong, string[]>? PlayerDataChanged;
 
-        public void Initialize() { }
+        public void Initialize()
+        {
+            InitializeCalled = true;
+            if (ThrowOnInitialize) throw new InvalidOperationException("initialize failed");
+        }
         public void Shutdown()
         {
             ShutdownCalled = true;
@@ -142,6 +148,54 @@ public class NetLifecycleTeardownTests
         Assert.Null(ex);
         Assert.True(service.ShutdownCalled);
         Assert.Null(GetService());
+    }
+
+    [Fact]
+    public void TryInitializeNetworkingService_UsesOfflineFallback_WhenDefaultServiceInitializeThrows()
+    {
+        var defaultService = new FakeNetworkingService { ThrowOnInitialize = true };
+        var fallbackService = new FakeNetworkingService();
+
+        Net.CreateDefaultNetworkingService = () => defaultService;
+        Net.CreateOfflineNetworkingService = () => fallbackService;
+
+        try
+        {
+            var initialized = Net.TryInitializeNetworkingService(null, out var service);
+
+            Assert.True(initialized);
+            Assert.Same(fallbackService, service);
+            Assert.True(defaultService.InitializeCalled);
+            Assert.True(fallbackService.InitializeCalled);
+        }
+        finally
+        {
+            Net.ResetNetworkingStartupHooks();
+        }
+    }
+
+    [Fact]
+    public void TryInitializeNetworkingService_ReturnsFalseAndNullService_WhenFallbackAlsoFails()
+    {
+        var defaultService = new FakeNetworkingService { ThrowOnInitialize = true };
+        var fallbackService = new FakeNetworkingService { ThrowOnInitialize = true };
+
+        Net.CreateDefaultNetworkingService = () => defaultService;
+        Net.CreateOfflineNetworkingService = () => fallbackService;
+
+        try
+        {
+            var initialized = Net.TryInitializeNetworkingService(null, out var service);
+
+            Assert.False(initialized);
+            Assert.Null(service);
+            Assert.True(defaultService.InitializeCalled);
+            Assert.True(fallbackService.InitializeCalled);
+        }
+        finally
+        {
+            Net.ResetNetworkingStartupHooks();
+        }
     }
 
     static Harmony GetHarmony()

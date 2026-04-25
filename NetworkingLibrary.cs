@@ -47,16 +47,21 @@ namespace NetworkingLibrary
             var pollerName = $"{MyPluginInfo.PLUGIN_NAME}.Poller";
             var existingPoller = FindObjectsOfType<NetworkingPoller>(true).FirstOrDefault();
             var go = existingPoller != null ? existingPoller.gameObject : GameObject.Find(pollerName);
+            var foundExistingObject = go != null;
             if (go == null)
             {
                 go = new GameObject(pollerName);
                 go.AddComponent<NetworkingPoller>().hideFlags = HideFlags.HideAndDontSave;
-                DontDestroyOnLoad(go);
             }
             else if (go.GetComponent<NetworkingPoller>() == null)
             {
                 go.AddComponent<NetworkingPoller>().hideFlags = HideFlags.HideAndDontSave;
             }
+            
+            // Persist the poller object across scene loads so networking lifecycle remains stable.
+            if (foundExistingObject && go.scene.IsValid() && go.scene.name != "DontDestroyOnLoad")
+                Logger.LogDebug($"Promoting existing poller object '{go.name}' from scene '{go.scene.name}' to DontDestroyOnLoad lifecycle.");
+            DontDestroyOnLoad(go);
 
             Logger.LogInfo($"{MyPluginInfo.PLUGIN_NAME} v{MyPluginInfo.PLUGIN_VERSION} has fully loaded!");
         }

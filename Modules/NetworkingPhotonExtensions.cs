@@ -23,6 +23,8 @@ namespace NetworkingLibrary.Modules
             var lobbyIds = svc.GetLobbyMemberSteamIds();
             if (lobbyIds == null || lobbyIds.Length == 0) return map;
             if (!PhotonNetwork.InRoom) return map;
+            var room = PhotonNetwork.CurrentRoom;
+            if (room == null) return map;
 
             var lobbyIdSet = new HashSet<ulong>(lobbyIds);
             var personaByName = new Dictionary<string, List<ulong>>(StringComparer.Ordinal);
@@ -38,7 +40,7 @@ namespace NetworkingLibrary.Modules
                 catch { }
             }
 
-            foreach (var kv in PhotonNetwork.CurrentRoom.Players)
+            foreach (var kv in room.Players)
             {
                 int actor = kv.Key;
                 var player = kv.Value;

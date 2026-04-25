@@ -75,6 +75,29 @@ public class RpcNullParameterSerializationTests
         }
     }
 
+    sealed class PartialReadDispatchReceiver
+    {
+        public string? LastOverload;
+        public int? SingleValue;
+        public int? PairFirst;
+        public int? PairSecond;
+
+        [CustomRPC]
+        void Shared(int value)
+        {
+            LastOverload = "single";
+            SingleValue = value;
+        }
+
+        [CustomRPC]
+        void Shared(int first, int second)
+        {
+            LastOverload = "pair";
+            PairFirst = first;
+            PairSecond = second;
+        }
+    }
+
     sealed class MaskedReceiver
     {
         public int Calls;
@@ -278,6 +301,43 @@ public class RpcNullParameterSerializationTests
         Assert.Equal("bool", receiver.LastOverload);
         Assert.True(receiver.LastBoolValue);
         Assert.Null(receiver.LastByteValue);
+    }
+
+    [Fact]
+    public void SteamDispatchIncoming_PrefersExactConsumption_OverPartialReadFallback()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new PartialReadDispatchReceiver();
+        using var token = service.RegisterNetworkObject(receiver, TestModId);
+
+        var msg = (Message?)SteamBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { 7, 11 }, null });
+        Assert.NotNull(msg);
+        msg!.OverloadKey = null;
+
+        SteamDispatchIncoming.Invoke(service, new object?[] { msg, new CSteamID(42UL) });
+
+        Assert.Equal("pair", receiver.LastOverload);
+        Assert.Null(receiver.SingleValue);
+        Assert.Equal(7, receiver.PairFirst);
+        Assert.Equal(11, receiver.PairSecond);
+    }
+
+    [Fact]
+    public void SteamDispatchIncoming_UsesFallback_WhenNoHandlerConsumesEntirePayload()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new PartialReadDispatchReceiver();
+        using var token = service.RegisterNetworkObject(receiver, TestModId);
+
+        var msg = (Message?)SteamBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { 5, 6, 9 }, new[] { typeof(int), typeof(int), typeof(int) } });
+        Assert.NotNull(msg);
+
+        SteamDispatchIncoming.Invoke(service, new object?[] { msg!, new CSteamID(42UL) });
+
+        Assert.Equal("pair", receiver.LastOverload);
+        Assert.Null(receiver.SingleValue);
+        Assert.Equal(5, receiver.PairFirst);
+        Assert.Equal(6, receiver.PairSecond);
     }
 
     [Fact]

@@ -296,6 +296,11 @@ namespace NetworkingLibrary.Services
                 LogWarning("InviteToLobby called with invalid target Steam64 id 0.");
                 return;
             }
+            if (steamId64 != LocalSteamId)
+            {
+                LogWarning($"Offline mode supports strict local loopback only; invite target {steamId64} is ignored.");
+                return;
+            }
             if (perPlayerData.ContainsKey(steamId64)) return;
             perPlayerData[steamId64] = new Dictionary<string, string>();
             PlayerEntered?.Invoke(steamId64);

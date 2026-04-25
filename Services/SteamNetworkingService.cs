@@ -230,20 +230,64 @@ namespace NetworkingLibrary.Services
         public SteamNetworkingService() { }
 
         readonly Dictionary<(ulong sender, ulong msgId), FragmentBuffer> fragmentBuffers = new();
+        readonly LinkedList<(ulong sender, ulong msgId)> fragmentOrderByFirstSeen = new();
         readonly object fragmentLock = new();
         readonly TimeSpan FragmentTimeout = TimeSpan.FromSeconds(30);
+        TimeSpan fragmentSweepInterval = TimeSpan.FromSeconds(2);
+        DateTime nextFragmentSweepUtc = DateTime.MinValue;
+        Func<DateTime> fragmentUtcNow = () => DateTime.UtcNow;
+        int fragmentSweepRunCount = 0;
 
         class FragmentBuffer
         {
             public int Total;
             public DateTime FirstSeen = DateTime.UtcNow;
             public Dictionary<int, byte[]> Fragments = new();
+            public LinkedListNode<(ulong sender, ulong msgId)>? SweepNode;
         }
 
         sealed class HandlerRegistration
         {
             public string MethodName = string.Empty;
             public MessageHandler Handler = null!;
+        }
+
+        void ClearFragmentState_NoLock()
+        {
+            fragmentBuffers.Clear();
+            fragmentOrderByFirstSeen.Clear();
+            nextFragmentSweepUtc = DateTime.MinValue;
+        }
+
+        void RemoveFragmentBuffer_NoLock((ulong sender, ulong msgId) key, FragmentBuffer buffer)
+        {
+            fragmentBuffers.Remove(key);
+            if (buffer.SweepNode == null) return;
+            fragmentOrderByFirstSeen.Remove(buffer.SweepNode);
+            buffer.SweepNode = null;
+        }
+
+        void SweepStaleFragmentBuffersIfDue(DateTime nowUtc)
+        {
+            lock (fragmentLock)
+            {
+                if (nowUtc < nextFragmentSweepUtc) return;
+                nextFragmentSweepUtc = nowUtc + fragmentSweepInterval;
+                fragmentSweepRunCount++;
+
+                while (fragmentOrderByFirstSeen.First != null)
+                {
+                    var key = fragmentOrderByFirstSeen.First.Value;
+                    if (!fragmentBuffers.TryGetValue(key, out var buffer))
+                    {
+                        fragmentOrderByFirstSeen.RemoveFirst();
+                        continue;
+                    }
+
+                    if (nowUtc - buffer.FirstSeen <= FragmentTimeout) break;
+                    RemoveFragmentBuffer_NoLock(key, buffer);
+                }
+            }
         }
 
         /// <summary>
@@ -364,7 +408,7 @@ namespace NetworkingLibrary.Services
             lock (lastSeenSequence) lastSeenSequence.Clear();
             lock (rateLimiters) rateLimiters.Clear();
             lock (outgoingSequencePerMod) outgoingSequencePerMod.Clear();
-            lock (fragmentLock) fragmentBuffers.Clear();
+            lock (fragmentLock) ClearFragmentState_NoLock();
             LogInfo("SteamNetworkingService shutdown");
         }
 
@@ -517,7 +561,7 @@ namespace NetworkingLibrary.Services
             ClearOutboundState();
             lock (lastSeenSequence) lastSeenSequence.Clear();
             lock (rateLimiters) rateLimiters.Clear();
-            lock (fragmentLock) fragmentBuffers.Clear();
+            lock (fragmentLock) ClearFragmentState_NoLock();
             lock (cryptoStateLock)
             {
                 handshakeStates.Clear();
@@ -1410,26 +1454,26 @@ namespace NetworkingLibrary.Services
                 byte[] assembledPayload;
                 if (total > 1)
                 {
+                    var nowUtc = fragmentUtcNow();
+                    SweepStaleFragmentBuffersIfDue(nowUtc);
                     var key = (sender.m_SteamID, msgId);
-                    FragmentBuffer fb;
+                    byte[][]? parts = null;
                     lock (fragmentLock)
                     {
-                        if (!fragmentBuffers.TryGetValue(key, out fb))
+                        if (!fragmentBuffers.TryGetValue(key, out var fb))
                         {
-                            fb = new FragmentBuffer { Total = total, FirstSeen = DateTime.UtcNow };
+                            fb = new FragmentBuffer { Total = total, FirstSeen = nowUtc };
                             fragmentBuffers[key] = fb;
+                            fb.SweepNode = fragmentOrderByFirstSeen.AddLast(key);
+                        }
+                        else if (fb.Total != total)
+                        {
+                            RemoveFragmentBuffer_NoLock(key, fb);
+                            return;
                         }
 
                         fb.Fragments[index] = payloadFragment;
                         //LogInfo($"ProcessIncomingFrame: stored fragment {index}/{total - 1} for key {sender}:{msgId} (fragments={fb.Fragments.Count})");
-
-                        var stale = fragmentBuffers.Where(kv => DateTime.UtcNow - kv.Value.FirstSeen > FragmentTimeout)
-                                                  .Select(kv => kv.Key).ToList();
-                        foreach (var k in stale)
-                        {
-                            //LogWarning($"ProcessIncomingFrame: removing stale fragment buffer for key {k}");
-                            fragmentBuffers.Remove(k);
-                        }
 
                         if (fb.Fragments.Count != fb.Total)
                         {
@@ -1437,21 +1481,24 @@ namespace NetworkingLibrary.Services
                             return;
                         }
 
-                        using var outMs = new MemoryStream();
+                        parts = new byte[fb.Total][];
                         for (int i = 0; i < fb.Total; i++)
                         {
                             if (!fb.Fragments.TryGetValue(i, out var part))
                             {
                                 //LogWarning($"ProcessIncomingFrame: missing fragment {i}; discarding buffer for key {key}");
-                                fragmentBuffers.Remove(key);
+                                RemoveFragmentBuffer_NoLock(key, fb);
                                 return;
                             }
-                            outMs.Write(part, 0, part.Length);
+                            parts[i] = part;
                         }
-                        assembledPayload = outMs.ToArray();
-                        fragmentBuffers.Remove(key);
+                        RemoveFragmentBuffer_NoLock(key, fb);
                         //LogInfo($"ProcessIncomingFrame: reassembled payload len={assembledPayload.Length} for key {sender}:{msgId}");
                     }
+
+                    using var outMs = new MemoryStream();
+                    for (int i = 0; i < parts!.Length; i++) outMs.Write(parts[i], 0, parts[i].Length);
+                    assembledPayload = outMs.ToArray();
                 }
                 else
                 {

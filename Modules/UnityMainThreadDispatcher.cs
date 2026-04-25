@@ -21,7 +21,7 @@ namespace NetworkingLibrary.Modules
         {
             if (instance != null) return instance;
 
-            if (IsMainThread() || mainThreadId == -1)
+            if (IsMainThread() || CanCaptureMainThreadFromCurrentContext())
             {
                 CaptureMainThreadIfUnknown();
                 return EnsureInstanceOnMainThread();
@@ -32,6 +32,14 @@ namespace NetworkingLibrary.Modules
             if (instance != null) return instance;
 
             throw new InvalidOperationException("UnityMainThreadDispatcher.Instance() was called from a non-main thread before the main thread could create the dispatcher.");
+        }
+
+        static bool CanCaptureMainThreadFromCurrentContext()
+        {
+            if (Volatile.Read(ref mainThreadId) != -1) return false;
+
+            var context = SynchronizationContext.Current;
+            return string.Equals(context?.GetType().FullName, "UnityEngine.UnitySynchronizationContext", StringComparison.Ordinal);
         }
 
         static void QueueCreateRequest()
@@ -83,8 +91,12 @@ namespace NetworkingLibrary.Modules
 
         internal static void ProcessPendingMainThreadWork()
         {
-            CaptureMainThreadIfUnknown();
-            if (!IsMainThread()) return;
+            if (!IsMainThread())
+            {
+                if (!CanCaptureMainThreadFromCurrentContext()) return;
+                CaptureMainThreadIfUnknown();
+                if (!IsMainThread()) return;
+            }
 
             if (Volatile.Read(ref createRequestQueued) == 1)
             {

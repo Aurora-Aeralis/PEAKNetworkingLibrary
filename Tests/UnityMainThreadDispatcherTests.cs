@@ -37,6 +37,18 @@ public class UnityMainThreadDispatcherTests : IDisposable
     }
 
     [Fact]
+    public void Instance_FromWorkerThread_WhenMainThreadUnknown_DoesNotCaptureWorkerThread()
+    {
+        UnityMainThreadDispatcher.TestHooks.ResetForTests();
+
+        var error = Record.Exception(() => Task.Run(() => UnityMainThreadDispatcher.Instance()).GetAwaiter().GetResult());
+
+        Assert.IsType<InvalidOperationException>(error);
+        Assert.Equal(-1, UnityMainThreadDispatcher.TestHooks.CurrentMainThreadIdForTests);
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.CreateRequestQueuedForTests);
+    }
+
+    [Fact]
     public async Task Instance_ConcurrentCalls_CreateOnlyOnceOnMainThread()
     {
         var createCalls = 0;

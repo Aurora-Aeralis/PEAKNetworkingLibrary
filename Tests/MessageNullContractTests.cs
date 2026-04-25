@@ -118,6 +118,30 @@ public class MessageNullContractTests
         Assert.Equal(new List<int> { 10, 11, 12 }, (List<int>)read.ReadObject(typeof(List<int>)));
     }
 
+    [Fact]
+    public void ReadObject_ByteArray_Rejects_Negative_Length()
+    {
+        var read = new Message(BuildRawPayload((m) => m.WriteInt(-1)));
+        var ex = Assert.Throws<Exception>(() => read.ReadObject(typeof(byte[])));
+        Assert.Contains("cannot be negative", ex.Message);
+    }
+
+    [Fact]
+    public void ReadObject_Array_Rejects_Oversized_Length()
+    {
+        var read = new Message(BuildRawPayload((m) => m.WriteInt(Message.MaxSize + 1)));
+        var ex = Assert.Throws<Exception>(() => read.ReadObject(typeof(int[])));
+        Assert.Contains("exceeds MaxSize", ex.Message);
+    }
+
+    [Fact]
+    public void ReadObject_List_Rejects_Negative_Length()
+    {
+        var read = new Message(BuildRawPayload((m) => m.WriteInt(-3)));
+        var ex = Assert.Throws<Exception>(() => read.ReadObject(typeof(List<int>)));
+        Assert.Contains("cannot be negative", ex.Message);
+    }
+
     private static byte[] BuildLegacyMessageData(Action<Message> writePayload)
     {
         var legacy = NewMessage();
@@ -125,5 +149,12 @@ public class MessageNullContractTests
         var bytes = legacy.ToArray();
         bytes[0] = 1; // simulate older sender protocol that did not include reference presence flags.
         return bytes;
+    }
+
+    private static byte[] BuildRawPayload(Action<Message> writePayload)
+    {
+        var message = NewMessage();
+        writePayload(message);
+        return message.ToArray();
     }
 }

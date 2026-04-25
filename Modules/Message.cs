@@ -218,7 +218,16 @@ namespace NetworkingLibrary.Modules
             };
 
             readCasters[typeof(byte)] = (m) => m.ReadByte();
-            readCasters[typeof(byte[])] = (m) => { int l = m.ReadInt(); if (l == 0) return new byte[0]; var arr = new byte[l]; Array.Copy(m.readableBuffer, m.readPos, arr, 0, l); m.readPos += l; return arr; };
+            readCasters[typeof(byte[])] = (m) =>
+            {
+                int len = m.ReadCollectionLength("byte[]");
+                if (len == 0) return Array.Empty<byte>();
+                m.EnsureReadable(len, "byte[] payload");
+                var arr = new byte[len];
+                Array.Copy(m.readableBuffer, m.readPos, arr, 0, len);
+                m.readPos += len;
+                return arr;
+            };
             readCasters[typeof(int)] = (m) => m.ReadInt();
             readCasters[typeof(uint)] = (m) => m.ReadUInt();
             readCasters[typeof(long)] = (m) => m.ReadLong();
@@ -305,6 +314,21 @@ namespace NetworkingLibrary.Modules
             readPos += 1;
             return v;
         }
+        private int ReadCollectionLength(string typeName)
+        {
+            int len = ReadInt();
+            if (len < 0)
+            {
+                throw new Exception($"{typeName} length cannot be negative");
+            }
+
+            if (len > MaxSize)
+            {
+                throw new Exception($"{typeName} length {len} exceeds MaxSize {MaxSize}");
+            }
+
+            return len;
+        }
         public string ReadString()
         {
             int len = ReadInt();
@@ -353,7 +377,7 @@ namespace NetworkingLibrary.Modules
             if (type.IsArray)
             {
                 var elemType = type.GetElementType()!;
-                int len = ReadInt();
+                int len = ReadCollectionLength($"{type.Name} array");
                 var arr = Array.CreateInstance(elemType, len);
                 for (int i = 0; i < len; i++)
                 {
@@ -369,7 +393,7 @@ namespace NetworkingLibrary.Modules
                 if (genDef == typeof(List<>) || genDef == typeof(IList<>))
                 {
                     var elemType = type.GetGenericArguments()[0];
-                    int len = ReadInt();
+                    int len = ReadCollectionLength($"{type.Name} list");
                     var listType = typeof(List<>).MakeGenericType(elemType);
                     var list = (IList)Activator.CreateInstance(listType)!;
                     for (int i = 0; i < len; i++)

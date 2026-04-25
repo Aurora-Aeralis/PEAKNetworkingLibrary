@@ -241,52 +241,75 @@ namespace NetworkingLibrary.Modules
         #endregion
 
         #region Read helpers
+        private void EnsureReadable(int count, string opName)
+        {
+            if (count < 0 || readPos < 0 || readPos + count > readableBuffer.Length)
+            {
+                throw new Exception($"{opName} out of range");
+            }
+        }
+
         public byte ReadByte()
         {
-            if (buffer.Count > readPos) { byte v = readableBuffer[readPos]; readPos++; return v; }
-            throw new Exception("ReadByte out of range");
+            EnsureReadable(1, nameof(ReadByte));
+            byte v = readableBuffer[readPos];
+            readPos++;
+            return v;
         }
         public int ReadInt()
         {
-            if (buffer.Count > readPos) { int v = BitConverter.ToInt32(readableBuffer, readPos); readPos += 4; return v; }
-            throw new Exception("ReadInt out of range");
+            EnsureReadable(4, nameof(ReadInt));
+            int v = BitConverter.ToInt32(readableBuffer, readPos);
+            readPos += 4;
+            return v;
         }
         public uint ReadUInt()
         {
-            if (buffer.Count > readPos) { uint v = BitConverter.ToUInt32(readableBuffer, readPos); readPos += 4; return v; }
-            throw new Exception("ReadUInt out of range");
+            EnsureReadable(4, nameof(ReadUInt));
+            uint v = BitConverter.ToUInt32(readableBuffer, readPos);
+            readPos += 4;
+            return v;
         }
         public long ReadLong()
         {
-            if (buffer.Count > readPos) { long v = BitConverter.ToInt64(readableBuffer, readPos); readPos += 8; return v; }
-            throw new Exception("ReadLong out of range");
+            EnsureReadable(8, nameof(ReadLong));
+            long v = BitConverter.ToInt64(readableBuffer, readPos);
+            readPos += 8;
+            return v;
         }
         public ulong ReadULong()
         {
-            if (buffer.Count > readPos) { ulong v = BitConverter.ToUInt64(readableBuffer, readPos); readPos += 8; return v; }
-            throw new Exception("ReadULong out of range");
+            EnsureReadable(8, nameof(ReadULong));
+            ulong v = BitConverter.ToUInt64(readableBuffer, readPos);
+            readPos += 8;
+            return v;
         }
         public float ReadFloat()
         {
-            if (buffer.Count > readPos) { float v = BitConverter.ToSingle(readableBuffer, readPos); readPos += 4; return v; }
-            throw new Exception("ReadFloat out of range");
+            EnsureReadable(4, nameof(ReadFloat));
+            float v = BitConverter.ToSingle(readableBuffer, readPos);
+            readPos += 4;
+            return v;
         }
         public bool ReadBool()
         {
-            if (buffer.Count > readPos) { bool v = BitConverter.ToBoolean(readableBuffer, readPos); readPos += 1; return v; }
-            throw new Exception("ReadBool out of range");
+            EnsureReadable(1, nameof(ReadBool));
+            bool v = BitConverter.ToBoolean(readableBuffer, readPos);
+            readPos += 1;
+            return v;
         }
         public string ReadString()
         {
             int len = ReadInt();
-            if (len == 0) return string.Empty;
-            if (buffer.Count > readPos)
+            if (len < 0)
             {
-                string s = Encoding.UTF8.GetString(readableBuffer, readPos, len);
-                readPos += len;
-                return s;
+                throw new Exception("ReadString out of range");
             }
-            throw new Exception("ReadString out of range");
+            if (len == 0) return string.Empty;
+            EnsureReadable(len, nameof(ReadString));
+            string s = Encoding.UTF8.GetString(readableBuffer, readPos, len);
+            readPos += len;
+            return s;
         }
         public Vector3 ReadVector3() => new Vector3(ReadFloat(), ReadFloat(), ReadFloat());
         public Quaternion ReadQuaternion() => new Quaternion(ReadFloat(), ReadFloat(), ReadFloat(), ReadFloat());

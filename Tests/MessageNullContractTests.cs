@@ -121,7 +121,7 @@ public class MessageNullContractTests
     [Fact]
     public void ReadObject_ByteArray_Rejects_Negative_Length()
     {
-        var read = new Message(BuildRawPayload((m) => m.WriteInt(-1)));
+        var read = new Message(BuildRawPayloadWithReferencePayload((m) => m.WriteInt(-1)));
         var ex = Assert.Throws<Exception>(() => read.ReadObject(typeof(byte[])));
         Assert.Contains("cannot be negative", ex.Message);
     }
@@ -129,7 +129,7 @@ public class MessageNullContractTests
     [Fact]
     public void ReadObject_Array_Rejects_Oversized_Length()
     {
-        var read = new Message(BuildRawPayload((m) => m.WriteInt(Message.MaxSize + 1)));
+        var read = new Message(BuildRawPayloadWithReferencePayload((m) => m.WriteInt(Message.MaxSize + 1)));
         var ex = Assert.Throws<Exception>(() => read.ReadObject(typeof(int[])));
         Assert.Contains("exceeds MaxSize", ex.Message);
     }
@@ -137,7 +137,7 @@ public class MessageNullContractTests
     [Fact]
     public void ReadObject_List_Rejects_Negative_Length()
     {
-        var read = new Message(BuildRawPayload((m) => m.WriteInt(-3)));
+        var read = new Message(BuildRawPayloadWithReferencePayload((m) => m.WriteInt(-3)));
         var ex = Assert.Throws<Exception>(() => read.ReadObject(typeof(List<int>)));
         Assert.Contains("cannot be negative", ex.Message);
     }
@@ -156,5 +156,14 @@ public class MessageNullContractTests
         var message = NewMessage();
         writePayload(message);
         return message.ToArray();
+    }
+
+    private static byte[] BuildRawPayloadWithReferencePayload(Action<Message> writePayload)
+    {
+        return BuildRawPayload((message) =>
+        {
+            message.WriteBool(true);
+            writePayload(message);
+        });
     }
 }

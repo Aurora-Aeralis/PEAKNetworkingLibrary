@@ -240,15 +240,15 @@ namespace NetworkingLibrary.Modules
             readCasters[typeof(CSteamID)] = (m) => new CSteamID(m.ReadULong());
 
             readCasters[typeof(int[])] = (m) => {
-                int len = m.ReadInt();
-                if (len == 0) return new int[0];
+                int len = m.ReadCollectionLength("Int32[] array");
+                if (len == 0) return Array.Empty<int>();
                 var a = new int[len];
                 for (int i = 0; i < len; i++) a[i] = m.ReadInt();
                 return a;
             };
             readCasters[typeof(string[])] = (m) => {
-                int len = m.ReadInt();
-                if (len == 0) return new string[0];
+                int len = m.ReadCollectionLength("String[] array");
+                if (len == 0) return Array.Empty<string>();
                 var a = new string[len];
                 for (int i = 0; i < len; i++) a[i] = m.ReadString();
                 return a;

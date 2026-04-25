@@ -640,11 +640,75 @@ namespace NetworkingLibrary.Services
                 var ci = infoType.GetConstructor(new[] { typeof(ulong) });
                 if (ci != null) return ci.Invoke(new object[] { from });
                 var p = Activator.CreateInstance(infoType);
-                var field = infoType.GetField("SenderSteamID", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (field != null) field.SetValue(p, from);
-                return p!;
+                if (p == null) return null!;
+
+                AssignRpcIdentityMembers(p, infoType, from);
+                return p;
             }
             catch { return null!; }
+        }
+
+        static void AssignRpcIdentityMembers(object instance, Type infoType, ulong steamId64)
+        {
+            var steamIdString = steamId64.ToString();
+            AssignRpcIdentityMember(instance, infoType, "SenderSteamID", steamId64, steamIdString);
+            AssignRpcIdentityMember(instance, infoType, "Sender", steamId64, steamIdString);
+            AssignRpcIdentityMember(instance, infoType, "SteamId64", steamId64, steamIdString);
+            AssignRpcIdentityMember(instance, infoType, "SteamIdString", steamId64, steamIdString);
+        }
+
+        static void AssignRpcIdentityMember(object instance, Type infoType, string memberName, ulong steamId64, string steamIdString)
+        {
+            var field = infoType.GetField(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (field != null)
+            {
+                TryAssignMemberValue(field.FieldType, value => field.SetValue(instance, value), steamId64, steamIdString);
+                return;
+            }
+
+            var property = infoType.GetProperty(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (property == null || !property.CanWrite) return;
+            TryAssignMemberValue(property.PropertyType, value => property.SetValue(instance, value), steamId64, steamIdString);
+        }
+
+        static void TryAssignMemberValue(Type memberType, Action<object> assign, ulong steamId64, string steamIdString)
+        {
+            var t = Nullable.GetUnderlyingType(memberType) ?? memberType;
+            if (t == typeof(string))
+            {
+                assign(steamIdString);
+                return;
+            }
+            if (!IsCompatibleIntegralType(t)) return;
+            assign(ConvertIntegral(steamId64, t));
+        }
+
+        static bool IsCompatibleIntegralType(Type t)
+        {
+            return t == typeof(ulong)
+                || t == typeof(long)
+                || t == typeof(uint)
+                || t == typeof(int)
+                || t == typeof(ushort)
+                || t == typeof(short)
+                || t == typeof(byte)
+                || t == typeof(sbyte);
+        }
+
+        static object ConvertIntegral(ulong value, Type targetType)
+        {
+            if (targetType == typeof(ulong)) return value;
+            checked
+            {
+                if (targetType == typeof(long)) return (long)value;
+                if (targetType == typeof(uint)) return (uint)value;
+                if (targetType == typeof(int)) return (int)value;
+                if (targetType == typeof(ushort)) return (ushort)value;
+                if (targetType == typeof(short)) return (short)value;
+                if (targetType == typeof(byte)) return (byte)value;
+                if (targetType == typeof(sbyte)) return (sbyte)value;
+            }
+            throw new InvalidCastException($"Unsupported integral conversion to {targetType}.");
         }
 
         static string BuildOverloadKey(MessageHandler handler)

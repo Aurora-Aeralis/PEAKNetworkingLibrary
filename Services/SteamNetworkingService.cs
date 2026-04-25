@@ -1619,27 +1619,54 @@ namespace NetworkingLibrary.Services
                 if (paramless != null)
                 {
                     var obj = paramless.Invoke(null);
-                    var f = infoType.GetField("SenderSteamID", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (f != null)
-                    {
-                        var ft = Nullable.GetUnderlyingType(f.FieldType) ?? f.FieldType;
-                        if (ft == typeof(CSteamID)) f.SetValue(obj, sender);
-                        else if (ft == typeof(string)) f.SetValue(obj, sender.ToString());
-                        else if (IsCompatibleIntegralType(ft)) f.SetValue(obj, ConvertIntegral(sender.m_SteamID, ft));
-                    }
-                    var f2 = infoType.GetField("Sender", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (f2 != null)
-                    {
-                        var ft = Nullable.GetUnderlyingType(f2.FieldType) ?? f2.FieldType;
-                        if (ft == typeof(CSteamID)) f2.SetValue(obj, sender);
-                        else if (ft == typeof(string)) f2.SetValue(obj, sender.ToString());
-                        else if (IsCompatibleIntegralType(ft)) f2.SetValue(obj, ConvertIntegral(sender.m_SteamID, ft));
-                    }
+                    AssignRpcIdentityMembers(obj, infoType, sender);
                     return obj;
                 }
             }
             catch { }
             return null!;
+        }
+
+        static void AssignRpcIdentityMembers(object instance, Type infoType, CSteamID sender)
+        {
+            var steamId64 = sender.m_SteamID;
+            var steamIdString = sender.ToString();
+
+            AssignRpcIdentityMember(instance, infoType, "SenderSteamID", sender, steamId64, steamIdString);
+            AssignRpcIdentityMember(instance, infoType, "Sender", sender, steamId64, steamIdString);
+            AssignRpcIdentityMember(instance, infoType, "SteamId64", sender, steamId64, steamIdString);
+            AssignRpcIdentityMember(instance, infoType, "SteamIdString", sender, steamId64, steamIdString);
+        }
+
+        static void AssignRpcIdentityMember(object instance, Type infoType, string memberName, CSteamID sender, ulong steamId64, string steamIdString)
+        {
+            var field = infoType.GetField(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (field != null)
+            {
+                TryAssignMemberValue(field.FieldType, value => field.SetValue(instance, value), sender, steamId64, steamIdString);
+                return;
+            }
+
+            var property = infoType.GetProperty(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (property == null || !property.CanWrite) return;
+            TryAssignMemberValue(property.PropertyType, value => property.SetValue(instance, value), sender, steamId64, steamIdString);
+        }
+
+        static void TryAssignMemberValue(Type memberType, Action<object> assign, CSteamID sender, ulong steamId64, string steamIdString)
+        {
+            var t = Nullable.GetUnderlyingType(memberType) ?? memberType;
+            if (t == typeof(CSteamID))
+            {
+                assign(sender);
+                return;
+            }
+            if (t == typeof(string))
+            {
+                assign(steamIdString);
+                return;
+            }
+            if (!IsCompatibleIntegralType(t)) return;
+            assign(ConvertIntegral(steamId64, t));
         }
 
         static bool IsCompatibleIntegralType(Type t)

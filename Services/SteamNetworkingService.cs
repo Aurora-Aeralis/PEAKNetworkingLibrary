@@ -961,6 +961,11 @@ namespace NetworkingLibrary.Services
             EnqueueOrSend(framed, target, reliable, DeterminePriority(modId, methodName));
         }
 
+        public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, Type[] parameterTypes, params object?[] parameters)
+        {
+            RPCTarget(modId, methodName, new CSteamID(targetSteamId64), reliable, parameterTypes, parameters);
+        }
+
         public void RPCTarget(uint modId, string methodName, CSteamID target, ReliableType reliable, Type[] parameterTypes, params object?[] parameters)
         {
             if (!InLobby) { LogError("Cannot RPC target when not in lobby"); return; }
@@ -2483,7 +2488,9 @@ namespace NetworkingLibrary.Services
         public void DeregisterNetworkObject(object instance, uint modId, int mask = 0) => offline.DeregisterNetworkObject(instance, modId, mask);
         public void DeregisterNetworkType(Type type, uint modId, int mask = 0) => offline.DeregisterNetworkType(type, modId, mask);
         public void RPC(uint modId, string methodName, ReliableType reliable, params object[] parameters) => offline.RPC(modId, methodName, reliable, parameters);
+        public void RPC(uint modId, string methodName, ReliableType reliable, Type[] parameterTypes, params object?[] parameters) => offline.RPC(modId, methodName, reliable, parameterTypes, parameters);
         public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, params object[] parameters) => offline.RPCTarget(modId, methodName, targetSteamId64, reliable, parameters);
+        public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, Type[] parameterTypes, params object?[] parameters) => offline.RPCTarget(modId, methodName, targetSteamId64, reliable, parameterTypes, parameters);
         public void RPCToHost(uint modId, string methodName, ReliableType reliable, params object[] parameters) => offline.RPCToHost(modId, methodName, reliable, parameters);
         public void RegisterLobbyDataKey(string key) => offline.RegisterLobbyDataKey(key);
         public void SetLobbyData(string key, object value) => offline.SetLobbyData(key, value);

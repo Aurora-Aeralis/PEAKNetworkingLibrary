@@ -13,7 +13,7 @@ namespace NetworkingLibrary.Services
             }
             catch (Exception ex)
             {
-                Net.Logger.LogError($"NetworkingPollerDebug PollReceive error: {ex}");
+                Net.Logger?.LogError($"NetworkingPollerDebug PollReceive error: {ex}");
             }
             /*
             if (Time.unscaledTime - lastLog > 1f)

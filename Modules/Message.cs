@@ -94,8 +94,17 @@ namespace NetworkingLibrary.Modules
             return readableBuffer;
         }
 
-        public int Length() => buffer.Count;
-        public int UnreadLength() => Length() - readPos;
+        public int Length()
+        {
+            ThrowIfDisposed();
+            return buffer.Count;
+        }
+
+        public int UnreadLength()
+        {
+            ThrowIfDisposed();
+            return Length() - readPos;
+        }
 
         public void Reset(bool zero = true)
         {

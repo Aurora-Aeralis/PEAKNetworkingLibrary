@@ -144,7 +144,8 @@ namespace NetworkingLibrary.Services
             HostSteamId64 = LocalSteamId;
             lobbyData.Clear();
             perPlayerData.Clear();
-            perPeerSymmetricKey.Clear();
+            ClearPerPeerSymmetricKeys();
+            ClearGlobalSharedSecret();
             globalHmac?.Dispose(); globalHmac = null;
         }
 
@@ -187,8 +188,28 @@ namespace NetworkingLibrary.Services
             HostSteamId64 = LocalSteamId;
             lobbyData.Clear();
             perPlayerData.Clear();
+            ClearPerPeerSymmetricKeys();
+            ClearGlobalSharedSecret();
+            globalHmac?.Dispose(); globalHmac = null;
             LobbyLeft?.Invoke();
             offlineIsHost = false;
+        }
+
+        void ClearPerPeerSymmetricKeys()
+        {
+            foreach (var key in perPeerSymmetricKey.Values)
+            {
+                if (key == null) continue;
+                CryptographicOperations.ZeroMemory(key);
+            }
+            perPeerSymmetricKey.Clear();
+        }
+
+        void ClearGlobalSharedSecret()
+        {
+            if (globalSharedSecret == null) return;
+            CryptographicOperations.ZeroMemory(globalSharedSecret);
+            globalSharedSecret = null;
         }
 
         /// <summary>

@@ -75,16 +75,17 @@ namespace NetworkingLibrary.Services
 
             try
             {
-                int count = SteamMatchmaking.GetNumLobbyMembers(Lobby);
+                int count = getNumLobbyMembers(Lobby);
                 if (count <= 0) return Array.Empty<ulong>();
 
-                var outArr = new ulong[count];
+                var memberIds = new List<ulong>(count);
                 for (int i = 0; i < count; i++)
                 {
-                    var member = SteamMatchmaking.GetLobbyMemberByIndex(Lobby, i);
-                    outArr[i] = member == CSteamID.Nil ? 0UL : member.m_SteamID;
+                    var member = getLobbyMemberByIndex(Lobby, i);
+                    if (member == CSteamID.Nil) continue;
+                    memberIds.Add(member.m_SteamID);
                 }
-                return outArr;
+                return memberIds.Count == 0 ? Array.Empty<ulong>() : memberIds.ToArray();
             }
             catch (Exception ex)
             {
@@ -148,6 +149,8 @@ namespace NetworkingLibrary.Services
         private readonly List<string> playerDataKeys = new();
         private readonly Dictionary<CSteamID, Dictionary<string, string>> lastPlayerData = new();
         private readonly Dictionary<string, string> lastLobbyData = new();
+        private Func<CSteamID, int> getNumLobbyMembers = SteamMatchmaking.GetNumLobbyMembers;
+        private Func<CSteamID, int, CSteamID> getLobbyMemberByIndex = SteamMatchmaking.GetLobbyMemberByIndex;
 
         Callback<LobbyEnter_t>? cbLobbyEnter;
         Callback<LobbyCreated_t>? cbLobbyCreated;

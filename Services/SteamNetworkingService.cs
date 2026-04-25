@@ -1223,7 +1223,7 @@ namespace NetworkingLibrary.Services
                 {
                     try
                     {
-                        payloadToProcess = Message.DecompressPayload(payloadToProcess);
+                        payloadToProcess = Message.DecompressPayload(payloadToProcess, Message.MaxSize);
                     }
                     catch (Exception ex)
                     {

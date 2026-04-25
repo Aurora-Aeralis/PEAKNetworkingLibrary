@@ -1111,6 +1111,7 @@ namespace NetworkingLibrary.Services
                 using var ms = new MemoryStream();
                 // Frame layout:
                 // [flags:1][msgId:8][seq:8][total:4][index:4][payload...][optional signature len:2 + signature...][optional global mac:32]
+                // Signature scope is canonical on-the-wire bytes [flags..payload], regardless of payload compression.
                 // Canonical MAC scope is every byte from flags through payload/signature (everything except the trailing MAC that is being appended).
                 ms.WriteByte(flags);
                 WriteU64LE(ms, msgId);
@@ -1495,7 +1496,30 @@ namespace NetworkingLibrary.Services
                         return;
                     }
 
-                    uint modId = BinaryPrimitives.ReadUInt32LittleEndian(payloadToProcess.AsSpan(1, 4));
+                    uint modId;
+                    if (compressed)
+                    {
+                        byte[] probePayload;
+                        try
+                        {
+                            probePayload = Message.DecompressPayload(payloadToProcess, Message.MaxLogicalSize);
+                        }
+                        catch
+                        {
+                            return;
+                        }
+
+                        if (probePayload.Length < 5)
+                        {
+                            return;
+                        }
+
+                        modId = BinaryPrimitives.ReadUInt32LittleEndian(probePayload.AsSpan(1, 4));
+                    }
+                    else
+                    {
+                        modId = BinaryPrimitives.ReadUInt32LittleEndian(payloadToProcess.AsSpan(1, 4));
+                    }
                     RSAParameters rsaParams;
                     lock (cryptoStateLock)
                     {

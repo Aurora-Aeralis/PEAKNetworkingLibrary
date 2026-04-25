@@ -96,6 +96,34 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void CreateJoinInvite_BeforeInitialize_AreNoOps_AndDoNotThrow()
+    {
+        var service = new SteamNetworkingService();
+        var ex = Record.Exception(() =>
+        {
+            service.CreateLobby();
+            service.JoinLobby(9001UL);
+            service.InviteToLobby(42UL);
+        });
+
+        Assert.Null(ex);
+        Assert.False(service.IsInitialized);
+        Assert.False(service.InLobby);
+    }
+
+    [Fact]
+    public void JoinLobby_WithInvalidLobbyId_DoesNotThrow_AndDoesNotEnterLobby()
+    {
+        var service = new SteamNetworkingService();
+        SetInitialized(service, true);
+
+        var ex = Record.Exception(() => service.JoinLobby(0UL));
+
+        Assert.Null(ex);
+        Assert.False(service.InLobby);
+    }
+
+    [Fact]
     public async Task Shutdown_RacingWithRetransmitAndFlush_DoesNotThrow()
     {
         var service = new SteamNetworkingService();
@@ -168,6 +196,11 @@ public class SteamNetworkingServiceLifecycleTests
     static void SetInLobby(SteamNetworkingService service, bool value)
     {
         typeof(SteamNetworkingService).GetField("<InLobby>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(service, value);
+    }
+
+    static void SetInitialized(SteamNetworkingService service, bool value)
+    {
+        typeof(SteamNetworkingService).GetField("<IsInitialized>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(service, value);
     }
 
     static void EnqueueTo(SteamNetworkingService service, string queueFieldName)

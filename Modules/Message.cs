@@ -109,7 +109,13 @@ namespace NetworkingLibrary.Modules
 
         #region Write helpers
         public Message WriteByte(byte v) { buffer.Add(v); return this; }
-        public Message WriteBytes(byte[] v) { WriteInt(v.Length); buffer.AddRange(v); return this; }
+        public Message WriteBytes(byte[] v)
+        {
+            if (v == null) throw new ArgumentNullException(nameof(v));
+            WriteInt(v.Length);
+            buffer.AddRange(v);
+            return this;
+        }
         public Message WriteInt(int v) { buffer.AddRange(BitConverter.GetBytes(v)); return this; }
         public Message WriteUInt(uint v) { buffer.AddRange(BitConverter.GetBytes(v)); return this; }
         public Message WriteLong(long v) { buffer.AddRange(BitConverter.GetBytes(v)); return this; }

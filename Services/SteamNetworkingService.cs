@@ -1546,14 +1546,54 @@ namespace NetworkingLibrary.Services
                 {
                     var obj = paramless.Invoke(null);
                     var f = infoType.GetField("SenderSteamID", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (f != null) f.SetValue(obj, sender);
+                    if (f != null)
+                    {
+                        var ft = Nullable.GetUnderlyingType(f.FieldType) ?? f.FieldType;
+                        if (ft == typeof(CSteamID)) f.SetValue(obj, sender);
+                        else if (ft == typeof(string)) f.SetValue(obj, sender.ToString());
+                        else if (IsCompatibleIntegralType(ft)) f.SetValue(obj, ConvertIntegral(sender.m_SteamID, ft));
+                    }
                     var f2 = infoType.GetField("Sender", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (f2 != null) f2.SetValue(obj, sender);
+                    if (f2 != null)
+                    {
+                        var ft = Nullable.GetUnderlyingType(f2.FieldType) ?? f2.FieldType;
+                        if (ft == typeof(CSteamID)) f2.SetValue(obj, sender);
+                        else if (ft == typeof(string)) f2.SetValue(obj, sender.ToString());
+                        else if (IsCompatibleIntegralType(ft)) f2.SetValue(obj, ConvertIntegral(sender.m_SteamID, ft));
+                    }
                     return obj;
                 }
             }
             catch { }
             return null!;
+        }
+
+        static bool IsCompatibleIntegralType(Type t)
+        {
+            return t == typeof(ulong)
+                || t == typeof(long)
+                || t == typeof(uint)
+                || t == typeof(int)
+                || t == typeof(ushort)
+                || t == typeof(short)
+                || t == typeof(byte)
+                || t == typeof(sbyte);
+        }
+
+        static object ConvertIntegral(ulong value, Type targetType)
+        {
+            if (targetType == typeof(ulong)) return value;
+            checked
+            {
+                if (targetType == typeof(long)) return (long)value;
+                if (targetType == typeof(uint)) return (uint)value;
+                if (targetType == typeof(int)) return (int)value;
+                if (targetType == typeof(ushort)) return (ushort)value;
+                if (targetType == typeof(short)) return (short)value;
+                if (targetType == typeof(byte)) return (byte)value;
+                if (targetType == typeof(sbyte)) return (sbyte)value;
+            }
+            throw new InvalidCastException($"Unsupported integral conversion to {targetType}.");
         }
 
         class HandshakeState { public string? PeerPub; public string LocalNonce = string.Empty; public byte[]? Sym; public bool Completed = false; }

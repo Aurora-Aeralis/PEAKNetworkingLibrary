@@ -14,6 +14,7 @@ public class RpcNullParameterSerializationTests
     static readonly MethodInfo OfflineBuildMessage = typeof(OfflineNetworkingService).GetMethod("BuildMessage", BindingFlags.Instance | BindingFlags.NonPublic)!;
     static readonly MethodInfo SteamBuildMessage = typeof(SteamNetworkingService).GetMethod("BuildMessage", BindingFlags.Instance | BindingFlags.NonPublic)!;
     static readonly MethodInfo SteamDispatchIncoming = typeof(SteamNetworkingService).GetMethod("DispatchIncoming", BindingFlags.Instance | BindingFlags.NonPublic)!;
+    static readonly MethodInfo SteamCreateRpcInfoInstance = typeof(SteamNetworkingService).GetMethod("CreateRpcInfoInstance", BindingFlags.Instance | BindingFlags.NonPublic)!;
 
     sealed class NullReceiver
     {
@@ -117,6 +118,16 @@ public class RpcNullParameterSerializationTests
             BoolCalls++;
             LastBoolValue = value;
         }
+    }
+
+    sealed class ParamlessRpcInfoWithUlongSenderSteamID
+    {
+        public ulong SenderSteamID;
+    }
+
+    sealed class ParamlessRpcInfoWithCSteamIDSender
+    {
+        public CSteamID Sender;
     }
 
     [Fact]
@@ -278,6 +289,30 @@ public class RpcNullParameterSerializationTests
         Assert.Equal("bool", receiver.LastOverload);
         Assert.True(receiver.LastBoolValue);
         Assert.Null(receiver.LastByteValue);
+    }
+
+    [Fact]
+    public void SteamCreateRpcInfoInstance_ParamlessFallback_AssignsSenderSteamIDAsUlong_WhenFieldIsUlong()
+    {
+        var service = new SteamNetworkingService();
+        var sender = new CSteamID(42UL);
+
+        var obj = SteamCreateRpcInfoInstance.Invoke(service, new object?[] { typeof(ParamlessRpcInfoWithUlongSenderSteamID), sender });
+
+        var info = Assert.IsType<ParamlessRpcInfoWithUlongSenderSteamID>(obj);
+        Assert.Equal(sender.m_SteamID, info.SenderSteamID);
+    }
+
+    [Fact]
+    public void SteamCreateRpcInfoInstance_ParamlessFallback_AssignsSenderAsCSteamID_WhenFieldIsCSteamID()
+    {
+        var service = new SteamNetworkingService();
+        var sender = new CSteamID(77UL);
+
+        var obj = SteamCreateRpcInfoInstance.Invoke(service, new object?[] { typeof(ParamlessRpcInfoWithCSteamIDSender), sender });
+
+        var info = Assert.IsType<ParamlessRpcInfoWithCSteamIDSender>(obj);
+        Assert.Equal(sender, info.Sender);
     }
 
     [Fact]

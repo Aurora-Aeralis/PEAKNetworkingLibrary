@@ -52,6 +52,20 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
+    public void RpcToHost_WithoutLobby_DoesNotDispatchToLocalHandler()
+    {
+        var service = new OfflineNetworkingService();
+        var receiver = new RpcReceiver();
+
+        service.Initialize();
+        service.RegisterNetworkObject(receiver, TestModId);
+        service.RPCToHost(TestModId, "OnPing", ReliableType.Reliable, 55);
+
+        Assert.False(service.InLobby);
+        Assert.Equal(-1, receiver.LastValue);
+    }
+
+    [Fact]
     public void Shutdown_ResetsLobbyScopedState()
     {
         var service = new OfflineNetworkingService();

@@ -315,6 +315,11 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void RPCToHost(uint modId, string methodName, ReliableType reliable, params object[] parameters)
         {
+            if (!InLobby)
+            {
+                Net.Logger.LogError("Not in lobby");
+                return;
+            }
             RPCTarget(modId, methodName, HostSteamId64, reliable, parameters);
         }
 

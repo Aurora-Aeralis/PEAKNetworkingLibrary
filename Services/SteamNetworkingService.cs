@@ -1484,8 +1484,8 @@ namespace NetworkingLibrary.Services
             IEnumerable<MessageHandler> candidates = handlers.Where(h => h.Mask == message.Mask);
             if (!string.IsNullOrEmpty(message.OverloadKey))
             {
-                var keyed = candidates.Where(h => BuildOverloadKey(h) == message.OverloadKey).ToArray();
-                if (keyed.Length > 0) candidates = keyed.Concat(candidates.Where(h => BuildOverloadKey(h) != message.OverloadKey));
+                var keyed = candidates.Where(h => OverloadKeyMatches(h, message.OverloadKey!)).ToArray();
+                if (keyed.Length > 0) candidates = keyed.Concat(candidates.Where(h => !OverloadKeyMatches(h, message.OverloadKey!)));
             }
 
             foreach (var handler in candidates)
@@ -1711,8 +1711,8 @@ namespace NetworkingLibrary.Services
             IEnumerable<MessageHandler> candidates = handlers.Where(h => h.Mask == message.Mask);
             if (!string.IsNullOrEmpty(message.OverloadKey))
             {
-                var keyed = candidates.Where(h => BuildOverloadKey(h) == message.OverloadKey).ToArray();
-                if (keyed.Length > 0) candidates = keyed.Concat(candidates.Where(h => BuildOverloadKey(h) != message.OverloadKey));
+                var keyed = candidates.Where(h => OverloadKeyMatches(h, message.OverloadKey!)).ToArray();
+                if (keyed.Length > 0) candidates = keyed.Concat(candidates.Where(h => !OverloadKeyMatches(h, message.OverloadKey!)));
             }
 
             var deserialized = new List<(MessageHandler Handler, object[] CallParams, int Unread, string OverloadKey)>();
@@ -1897,6 +1897,20 @@ namespace NetworkingLibrary.Services
             int parameterCount = handler.TakesInfo ? pi.Length - 1 : pi.Length;
             if (parameterCount <= 0) return string.Empty;
             return string.Join("|", pi.Take(parameterCount).Select(p => CanonicalTypeName.For(p.ParameterType)));
+        }
+
+        static string BuildLegacyOverloadKey(MessageHandler handler)
+        {
+            var pi = handler.Parameters;
+            int parameterCount = handler.TakesInfo ? pi.Length - 1 : pi.Length;
+            if (parameterCount <= 0) return string.Empty;
+            return string.Join("|", pi.Take(parameterCount).Select(p => p.ParameterType.AssemblyQualifiedName ?? p.ParameterType.FullName ?? p.ParameterType.Name));
+        }
+
+        static bool OverloadKeyMatches(MessageHandler handler, string incomingOverloadKey)
+        {
+            if (BuildOverloadKey(handler) == incomingOverloadKey) return true;
+            return BuildLegacyOverloadKey(handler) == incomingOverloadKey;
         }
 
         SlidingWindowRateLimiter GetOrCreateRateLimiter(ulong steam64)

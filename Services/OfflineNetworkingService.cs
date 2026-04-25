@@ -547,8 +547,8 @@ namespace NetworkingLibrary.Services
             IEnumerable<MessageHandler> dispatchOrder = handlers.Where(h => h.Mask == message.Mask);
             if (!string.IsNullOrEmpty(message.OverloadKey))
             {
-                var keyed = dispatchOrder.Where(h => BuildOverloadKey(h) == message.OverloadKey).ToArray();
-                if (keyed.Length > 0) dispatchOrder = keyed.Concat(dispatchOrder.Where(h => BuildOverloadKey(h) != message.OverloadKey));
+                var keyed = dispatchOrder.Where(h => OverloadKeyMatches(h, message.OverloadKey!)).ToArray();
+                if (keyed.Length > 0) dispatchOrder = keyed.Concat(dispatchOrder.Where(h => !OverloadKeyMatches(h, message.OverloadKey!)));
             }
 
             foreach (var handler in dispatchOrder)
@@ -628,6 +628,20 @@ namespace NetworkingLibrary.Services
             int parameterCount = handler.TakesInfo ? pi.Length - 1 : pi.Length;
             if (parameterCount <= 0) return string.Empty;
             return string.Join("|", pi.Take(parameterCount).Select(p => CanonicalTypeName.For(p.ParameterType)));
+        }
+
+        static string BuildLegacyOverloadKey(MessageHandler handler)
+        {
+            var pi = handler.Parameters;
+            int parameterCount = handler.TakesInfo ? pi.Length - 1 : pi.Length;
+            if (parameterCount <= 0) return string.Empty;
+            return string.Join("|", pi.Take(parameterCount).Select(p => p.ParameterType.AssemblyQualifiedName ?? p.ParameterType.FullName ?? p.ParameterType.Name));
+        }
+
+        static bool OverloadKeyMatches(MessageHandler handler, string incomingOverloadKey)
+        {
+            if (BuildOverloadKey(handler) == incomingOverloadKey) return true;
+            return BuildLegacyOverloadKey(handler) == incomingOverloadKey;
         }
 
         class SlidingWindowRateLimiter

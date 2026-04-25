@@ -13,6 +13,7 @@ public class RpcNullParameterSerializationTests
 {
     const uint TestModId = 9090;
     static readonly MethodInfo OfflineBuildMessage = typeof(OfflineNetworkingService).GetMethod("BuildMessage", BindingFlags.Instance | BindingFlags.NonPublic)!;
+    static readonly MethodInfo OfflineDispatchIncoming = typeof(OfflineNetworkingService).GetMethod("DispatchIncoming", BindingFlags.Instance | BindingFlags.NonPublic)!;
     static readonly MethodInfo SteamBuildMessage = typeof(SteamNetworkingService).GetMethod("BuildMessage", BindingFlags.Instance | BindingFlags.NonPublic)!;
     static readonly MethodInfo SteamDispatchIncoming = typeof(SteamNetworkingService).GetMethod("DispatchIncoming", BindingFlags.Instance | BindingFlags.NonPublic)!;
     static readonly MethodInfo OfflineBuildOverloadKey = typeof(OfflineNetworkingService).GetMethod("BuildOverloadKey", BindingFlags.Static | BindingFlags.NonPublic)!;
@@ -226,6 +227,24 @@ public class RpcNullParameterSerializationTests
     }
 
     [Fact]
+    public void OfflineDispatchIncoming_LegacyOverloadKey_StillMatchesCanonicalHandler()
+    {
+        var service = new OfflineNetworkingService();
+        var receiver = new ByteBoolDispatchReceiver();
+        using var token = service.RegisterNetworkObject(receiver, TestModId);
+
+        var msg = (Message?)OfflineBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { true }, null });
+        Assert.NotNull(msg);
+
+        msg!.OverloadKey = BuildLegacyAssemblyQualifiedKey(typeof(bool));
+        OfflineDispatchIncoming.Invoke(service, new object?[] { msg, 42UL });
+
+        Assert.Equal("bool", receiver.LastOverload);
+        Assert.True(receiver.LastBoolValue);
+        Assert.Null(receiver.LastByteValue);
+    }
+
+    [Fact]
     public void OfflineBuildMessage_ReturnsNull_WhenOnlyDifferentMaskHandlersExist()
     {
         var service = new OfflineNetworkingService();
@@ -288,6 +307,24 @@ public class RpcNullParameterSerializationTests
         Assert.NotNull(msg);
 
         SteamDispatchIncoming.Invoke(service, new object?[] { msg!, new CSteamID(42UL) });
+
+        Assert.Equal("bool", receiver.LastOverload);
+        Assert.True(receiver.LastBoolValue);
+        Assert.Null(receiver.LastByteValue);
+    }
+
+    [Fact]
+    public void SteamDispatchIncoming_LegacyOverloadKey_StillMatchesCanonicalHandler()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new ByteBoolDispatchReceiver();
+        using var token = service.RegisterNetworkObject(receiver, TestModId);
+
+        var msg = (Message?)SteamBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { true }, null });
+        Assert.NotNull(msg);
+
+        msg!.OverloadKey = BuildLegacyAssemblyQualifiedKey(typeof(bool));
+        SteamDispatchIncoming.Invoke(service, new object?[] { msg, new CSteamID(42UL) });
 
         Assert.Equal("bool", receiver.LastOverload);
         Assert.True(receiver.LastBoolValue);
@@ -470,5 +507,10 @@ public class RpcNullParameterSerializationTests
             var commaIndex = simulatedLegacy.IndexOf(',');
             return commaIndex >= 0 ? simulatedLegacy.Substring(0, commaIndex) : simulatedLegacy;
         }));
+    }
+
+    static string BuildLegacyAssemblyQualifiedKey(params Type[] types)
+    {
+        return string.Join("|", types.Select(type => type.AssemblyQualifiedName ?? type.FullName ?? type.Name));
     }
 }

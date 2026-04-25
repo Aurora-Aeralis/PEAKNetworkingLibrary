@@ -83,6 +83,42 @@ public class RpcNullParameterSerializationTests
         void Shared(string value) => Calls++;
     }
 
+
+    sealed class SteamLocalDuplicateListenerReceiver
+    {
+        public int Calls;
+        public bool LastValue;
+
+        [CustomRPC]
+        void Shared(bool value)
+        {
+            Calls++;
+            LastValue = value;
+        }
+    }
+
+    sealed class SteamLocalWireCompatibleOverloadReceiver
+    {
+        public int BoolCalls;
+        public int ByteCalls;
+        public bool LastBoolValue;
+        public byte LastByteValue;
+
+        [CustomRPC]
+        void Shared(byte value)
+        {
+            ByteCalls++;
+            LastByteValue = value;
+        }
+
+        [CustomRPC]
+        void Shared(bool value)
+        {
+            BoolCalls++;
+            LastBoolValue = value;
+        }
+    }
+
     [Fact]
     public void OfflineBuildMessage_AllowsNull_ForReferenceParameters_FromHandlerSignature()
     {
@@ -271,6 +307,44 @@ public class RpcNullParameterSerializationTests
         service.RPCTarget(TestModId, nameof(CounterReceiver.Increment), SteamUser.GetSteamID(), ReliableType.Reliable, new[] { typeof(int) }, 5);
 
         Assert.Equal(5, receiver.Total);
+        AssertQueueCount(service, "normalQueue", 0);
+        AssertQueueCount(service, "lowQueue", 0);
+        AssertQueueCount(service, "highQueue", 0);
+    }
+
+    [Fact]
+    public void SteamRPCTarget_SelfTarget_OverloadKey_ChoosesSingleMatchingOverload_WithoutReaderCorruption()
+    {
+        var service = new SteamNetworkingService();
+        SetInLobby(service, true);
+        var receiver = new SteamLocalWireCompatibleOverloadReceiver();
+        using var token = service.RegisterNetworkObject(receiver, TestModId);
+
+        service.RPCTarget(TestModId, "Shared", SteamUser.GetSteamID(), ReliableType.Reliable, new[] { typeof(bool) }, true);
+
+        Assert.Equal(1, receiver.BoolCalls);
+        Assert.Equal(0, receiver.ByteCalls);
+        Assert.True(receiver.LastBoolValue);
+        Assert.Equal((byte)0, receiver.LastByteValue);
+        AssertQueueCount(service, "normalQueue", 0);
+        AssertQueueCount(service, "lowQueue", 0);
+        AssertQueueCount(service, "highQueue", 0);
+    }
+
+
+    [Fact]
+    public void SteamRPCTarget_SelfTarget_OverloadKey_InvokesAllMatchingLocalRegistrations()
+    {
+        var service = new SteamNetworkingService();
+        SetInLobby(service, true);
+        var receiver = new SteamLocalDuplicateListenerReceiver();
+        using var first = service.RegisterNetworkObject(receiver, TestModId);
+        using var second = service.RegisterNetworkObject(receiver, TestModId);
+
+        service.RPCTarget(TestModId, "Shared", SteamUser.GetSteamID(), ReliableType.Reliable, new[] { typeof(bool) }, true);
+
+        Assert.Equal(2, receiver.Calls);
+        Assert.True(receiver.LastValue);
         AssertQueueCount(service, "normalQueue", 0);
         AssertQueueCount(service, "lowQueue", 0);
         AssertQueueCount(service, "highQueue", 0);

@@ -31,6 +31,20 @@ namespace NetworkingLibrary
         private void OnDestroy()
         {
             Service?.Shutdown();
+            Service = null;
+
+            if (Harmony == null)
+                return;
+
+            try
+            {
+                Harmony.UnpatchSelf();
+                Logger?.LogDebug("Removed Harmony patches during plugin teardown.");
+            }
+            catch (Exception ex)
+            {
+                Logger?.LogWarning($"Failed to unpatch Harmony during plugin teardown: {ex.Message}");
+            }
         }
 
         private void Awake() {

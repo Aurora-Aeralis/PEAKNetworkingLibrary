@@ -222,6 +222,8 @@ namespace NetworkingLibrary.Services
 
             GameObject? createdPumpGameObject = null;
             SteamCallbackPump? createdPumpComponent = null;
+            var pumpingWasEnabledBeforeInitialize = SteamCallbackPump.CallbackPumpingEnabled;
+            var enabledPumpingInThisInitialize = false;
             if (Application.isPlaying)
             {
                 try
@@ -253,6 +255,7 @@ namespace NetworkingLibrary.Services
                     GameObject.DontDestroyOnLoad(go);
 
                     SteamCallbackPump.EnablePumping();
+                    enabledPumpingInThisInitialize = true;
                 }
                 catch (Exception ex)
                 {
@@ -268,7 +271,10 @@ namespace NetworkingLibrary.Services
 
             if (!TryInitializeSteamCallbacksAndCrypto())
             {
-                try { SteamCallbackPump.DisablePumping(); } catch { }
+                if (enabledPumpingInThisInitialize && !pumpingWasEnabledBeforeInitialize)
+                {
+                    try { SteamCallbackPump.DisablePumping(); } catch { }
+                }
                 try
                 {
                     if (createdPumpGameObject != null)

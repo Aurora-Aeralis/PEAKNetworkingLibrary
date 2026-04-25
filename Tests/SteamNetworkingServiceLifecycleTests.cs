@@ -382,7 +382,7 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
-    public void Initialize_WhenCallbackAndCryptoSetupFails_KeepsServiceUninitializedAndClearsPartialState()
+    public void Initialize_WhenCallbackAndCryptoSetupFails_KeepsServiceUninitialized_ClearsPartialState_AndPreservesExistingPumpState()
     {
         var service = new SteamNetworkingService();
         var rsaFactoryField = typeof(SteamNetworkingService).GetField("localRsaFactory", BindingFlags.Instance | BindingFlags.NonPublic)!;
@@ -394,7 +394,7 @@ public class SteamNetworkingServiceLifecycleTests
             service.Initialize();
 
             Assert.False(service.IsInitialized);
-            Assert.False(SteamCallbackPump.CallbackPumpingEnabled);
+            Assert.True(SteamCallbackPump.CallbackPumpingEnabled);
             Assert.Null(GetField(service, "cbLobbyEnter"));
             Assert.Null(GetField(service, "cbLobbyCreated"));
             Assert.Null(GetField(service, "cbLobbyChatUpdate"));

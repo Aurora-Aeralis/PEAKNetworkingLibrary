@@ -76,7 +76,7 @@ namespace NetworkingLibrary.Modules
             }
             else
             {
-                readPos -= 4;
+                readPos = Math.Max(0, readPos - 4);
             }
         }
 

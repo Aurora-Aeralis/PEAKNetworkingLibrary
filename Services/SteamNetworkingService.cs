@@ -24,6 +24,7 @@ namespace NetworkingLibrary.Services
         const int MAX_IN_MESSAGES = 500;
         static IntPtr[] inMessages = new IntPtr[MAX_IN_MESSAGES]; 
         private readonly object rpcLock = new object();
+        private readonly object cryptoStateLock = new();
 
         /// <summary>
         /// </summary>
@@ -270,11 +271,14 @@ namespace NetworkingLibrary.Services
             players = Array.Empty<CSteamID>();
             Lobby = CSteamID.Nil;
             InLobby = false;
-            handshakeStates.Clear();
-            ClearPerPeerSymmetricKeys();
-            ClearGlobalSharedSecret();
-            globalHmac?.Dispose();
-            globalHmac = null;
+            lock (cryptoStateLock)
+            {
+                handshakeStates.Clear();
+                ClearPerPeerSymmetricKeysUnderLock();
+                ClearGlobalSharedSecretUnderLock();
+                globalHmac?.Dispose();
+                globalHmac = null;
+            }
             LocalRsa?.Dispose();
             LocalRsa = null;
 
@@ -383,16 +387,27 @@ namespace NetworkingLibrary.Services
             lock (lastSeenSequence) lastSeenSequence.Clear();
             lock (rateLimiters) rateLimiters.Clear();
             lock (fragmentLock) fragmentBuffers.Clear();
-            handshakeStates.Clear();
-            ClearPerPeerSymmetricKeys();
-            ClearGlobalSharedSecret();
-            globalHmac?.Dispose();
-            globalHmac = null;
+            lock (cryptoStateLock)
+            {
+                handshakeStates.Clear();
+                ClearPerPeerSymmetricKeysUnderLock();
+                ClearGlobalSharedSecretUnderLock();
+                globalHmac?.Dispose();
+                globalHmac = null;
+            }
 
             LobbyLeft?.Invoke();
         }
 
         void ClearPerPeerSymmetricKeys()
+        {
+            lock (cryptoStateLock)
+            {
+                ClearPerPeerSymmetricKeysUnderLock();
+            }
+        }
+
+        void ClearPerPeerSymmetricKeysUnderLock()
         {
             foreach (var key in perPeerSymmetricKey.Values)
             {
@@ -403,6 +418,14 @@ namespace NetworkingLibrary.Services
         }
 
         void ClearGlobalSharedSecret()
+        {
+            lock (cryptoStateLock)
+            {
+                ClearGlobalSharedSecretUnderLock();
+            }
+        }
+
+        void ClearGlobalSharedSecretUnderLock()
         {
             if (globalSharedSecret == null) return;
             CryptographicOperations.ZeroMemory(globalSharedSecret);
@@ -851,7 +874,14 @@ namespace NetworkingLibrary.Services
 
             byte flags = 0;
             if (compress) flags |= COMPRESSED_FLAG;
-            if (globalHmac != null) flags |= HMAC_FLAG;
+            bool hasGlobalHmac;
+            byte[]? globalMacKey;
+            lock (cryptoStateLock)
+            {
+                hasGlobalHmac = globalHmac != null;
+                globalMacKey = globalSharedSecret != null ? (byte[])globalSharedSecret.Clone() : null;
+            }
+            if (hasGlobalHmac) flags |= HMAC_FLAG;
             if (modSigners.ContainsKey(modId)) flags |= SIGN_FLAG;
             if (reliable == ReliableType.Reliable) flags |= ACK_FLAG;
 
@@ -889,9 +919,9 @@ namespace NetworkingLibrary.Services
                 headerAndPayload = ms2.ToArray();
             }
 
-            if (globalHmac != null)
+            if (hasGlobalHmac && globalMacKey != null)
             {
-                var mac = globalHmac!.ComputeHash(headerAndPayload);
+                var mac = HmacSha256RawStatic(globalMacKey, headerAndPayload);
                 using var ms3 = new MemoryStream();
                 ms3.Write(headerAndPayload, 0, headerAndPayload.Length);
                 ms3.Write(mac, 0, mac.Length);
@@ -903,7 +933,12 @@ namespace NetworkingLibrary.Services
 
         void SendWithPossibleAck(byte[] framed, CSteamID target, ReliableType reliable)
         {
-            if (perPeerSymmetricKey.TryGetValue(target.m_SteamID, out var sym))
+            byte[]? sym;
+            lock (cryptoStateLock)
+            {
+                sym = perPeerSymmetricKey.TryGetValue(target.m_SteamID, out var localSym) ? (byte[])localSym.Clone() : null;
+            }
+            if (sym != null)
             {
                 framed[0] = (byte)(framed[0] | HMAC_FLAG);
                 framed = AppendFrameMac(framed, sym);
@@ -1351,8 +1386,15 @@ namespace NetworkingLibrary.Services
         {
             verifiedFrame = Array.Empty<byte>();
 
-            bool hasPeer = perPeerSymmetricKey.TryGetValue(senderSteamId, out var peerSym);
-            bool hasGlobal = globalSharedSecret != null;
+            byte[]? peerSym;
+            byte[]? localGlobalSharedSecret;
+            lock (cryptoStateLock)
+            {
+                peerSym = perPeerSymmetricKey.TryGetValue(senderSteamId, out var peer) ? (byte[])peer.Clone() : null;
+                localGlobalSharedSecret = globalSharedSecret != null ? (byte[])globalSharedSecret.Clone() : null;
+            }
+            bool hasPeer = peerSym != null;
+            bool hasGlobal = localGlobalSharedSecret != null;
             if (!hasPeer && !hasGlobal) return false;
 
             var current = frameWithMacs;
@@ -1363,7 +1405,7 @@ namespace NetworkingLibrary.Services
 
             if (hasGlobal)
             {
-                if (!VerifyAndStripSingleFrameMac(current, globalSharedSecret!, out current)) return false;
+                if (!VerifyAndStripSingleFrameMac(current, localGlobalSharedSecret!, out current)) return false;
             }
 
             verifiedFrame = current;
@@ -1610,7 +1652,10 @@ namespace NetworkingLibrary.Services
             var nonceBytes = new byte[16]; rng.GetBytes(nonceBytes);
             var nonce = Convert.ToBase64String(nonceBytes);
 
-            handshakeStates[target.m_SteamID] = new HandshakeState { PeerPub = null, LocalNonce = nonce, Completed = false };
+            lock (cryptoStateLock)
+            {
+                handshakeStates[target.m_SteamID] = new HandshakeState { PeerPub = null, LocalNonce = nonce, Completed = false };
+            }
 
             var m = new Message(0u, "NETWORK_INTERNAL_HANDSHAKE_PUBKEY", 0);
             m.WriteString(pub);
@@ -1622,41 +1667,63 @@ namespace NetworkingLibrary.Services
         void StartHandshakeReply(CSteamID sender, string peerPubKeySerialized, string peerNonce)
         {
             if (LocalRsa == null) return;
-            var state = handshakeStates.ContainsKey(sender.m_SteamID) ? handshakeStates[sender.m_SteamID] : new HandshakeState();
-            state.PeerPub = peerPubKeySerialized;
-            if (string.IsNullOrEmpty(state.LocalNonce))
-            {
-                var rng = RandomNumberGenerator.Create();
-                var localNonceBytes = new byte[16]; rng.GetBytes(localNonceBytes);
-                state.LocalNonce = Convert.ToBase64String(localNonceBytes);
-                handshakeStates[sender.m_SteamID] = state;
+            var rng = RandomNumberGenerator.Create();
+            var localNonceBytes = new byte[16];
+            rng.GetBytes(localNonceBytes);
+            var generatedLocalNonce = Convert.ToBase64String(localNonceBytes);
 
+            string? localNonceToSend = null;
+            string? peerPubForSecret = null;
+            string? localNonceForSecret = null;
+            lock (cryptoStateLock)
+            {
+                var state = handshakeStates.ContainsKey(sender.m_SteamID) ? handshakeStates[sender.m_SteamID] : new HandshakeState();
+                state.PeerPub = peerPubKeySerialized;
+                if (string.IsNullOrEmpty(state.LocalNonce))
+                {
+                    state.LocalNonce = generatedLocalNonce;
+                    handshakeStates[sender.m_SteamID] = state;
+                    localNonceToSend = state.LocalNonce;
+                }
+                else if (!state.Completed && !string.IsNullOrEmpty(state.PeerPub))
+                {
+                    peerPubForSecret = state.PeerPub;
+                    localNonceForSecret = state.LocalNonce;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(localNonceToSend))
+            {
                 var myPub = SerializeRsaPublicKey(LocalRsa);
                 var m = new Message(0u, "NETWORK_INTERNAL_HANDSHAKE_PUBKEY", 0);
                 m.WriteString(myPub);
-                m.WriteString(state.LocalNonce);
+                m.WriteString(localNonceToSend);
                 var framed = BuildFramedBytesWithMeta(m, 0, ReliableType.Reliable);
                 SendBytes(framed, sender, ReliableType.Reliable);
                 return;
             }
 
-            if (!state.Completed && !string.IsNullOrEmpty(state.LocalNonce) && !string.IsNullOrEmpty(state.PeerPub))
+            if (string.IsNullOrEmpty(peerPubForSecret) || string.IsNullOrEmpty(localNonceForSecret)) return;
+
+            var sym = new byte[32];
+            rng.GetBytes(sym);
+
+            var rsaPeer = new RSACryptoServiceProvider();
+            var rsaParams = DeserializeRsaPublicKey(peerPubForSecret);
+            rsaPeer.ImportParameters(rsaParams);
+            var enc = rsaPeer.Encrypt(sym, false);
+
+            var m2 = new Message(0u, "NETWORK_INTERNAL_HANDSHAKE_SECRET", 0);
+            m2.WriteBytes(enc);
+            m2.WriteString(localNonceForSecret);
+            var framed2 = BuildFramedBytesWithMeta(m2, 0, ReliableType.Reliable);
+            SendBytes(framed2, sender, ReliableType.Reliable);
+
+            lock (cryptoStateLock)
             {
-                var rng = RandomNumberGenerator.Create();
-                var sym = new byte[32]; rng.GetBytes(sym);
-
-                var rsaPeer = new RSACryptoServiceProvider();
-                var rsaParams = DeserializeRsaPublicKey(state.PeerPub!);
-                rsaPeer.ImportParameters(rsaParams);
-                var enc = rsaPeer.Encrypt(sym, false);
-
-                var m2 = new Message(0u, "NETWORK_INTERNAL_HANDSHAKE_SECRET", 0);
-                m2.WriteBytes(enc);
-                m2.WriteString(state.LocalNonce);
-                var framed2 = BuildFramedBytesWithMeta(m2, 0, ReliableType.Reliable);
-                SendBytes(framed2, sender, ReliableType.Reliable);
-
-                state.Sym = sym; state.Completed = true;
+                var state = handshakeStates.ContainsKey(sender.m_SteamID) ? handshakeStates[sender.m_SteamID] : new HandshakeState();
+                state.Sym = sym;
+                state.Completed = true;
                 handshakeStates[sender.m_SteamID] = state;
                 perPeerSymmetricKey[sender.m_SteamID] = sym;
             }
@@ -1668,9 +1735,14 @@ namespace NetworkingLibrary.Services
             try
             {
                 var sym = LocalRsa.Decrypt(encSecret, false);
-                var state = handshakeStates.ContainsKey(sender.m_SteamID) ? handshakeStates[sender.m_SteamID] : new HandshakeState();
-                state.Sym = sym; state.Completed = true; handshakeStates[sender.m_SteamID] = state;
-                perPeerSymmetricKey[sender.m_SteamID] = sym;
+                lock (cryptoStateLock)
+                {
+                    var state = handshakeStates.ContainsKey(sender.m_SteamID) ? handshakeStates[sender.m_SteamID] : new HandshakeState();
+                    state.Sym = sym;
+                    state.Completed = true;
+                    handshakeStates[sender.m_SteamID] = state;
+                    perPeerSymmetricKey[sender.m_SteamID] = sym;
+                }
 
                 var confirm = HmacSha256Raw(sym, Encoding.UTF8.GetBytes(initiatorNonce));
                 var m = new Message(0u, "NETWORK_INTERNAL_HANDSHAKE_CONFIRM", 0);
@@ -1684,22 +1756,33 @@ namespace NetworkingLibrary.Services
 
         void CompleteHandshakeInitiator(CSteamID sender, string initiatorNonce, byte[] confirmHmac)
         {
-            if (!handshakeStates.TryGetValue(sender.m_SteamID, out var state) || state.Sym == null)
+            HandshakeState? state;
+            byte[]? sym;
+            lock (cryptoStateLock)
+            {
+                handshakeStates.TryGetValue(sender.m_SteamID, out state);
+                sym = state?.Sym;
+            }
+            if (state == null || sym == null)
             {
                 Net.Logger.LogWarning("Handshake confirm received but no state");
                 return;
             }
 
-            var expected = HmacSha256Raw(state.Sym, Encoding.UTF8.GetBytes(initiatorNonce));
+            var expected = HmacSha256Raw(sym, Encoding.UTF8.GetBytes(initiatorNonce));
             if (!expected.SequenceEqual(confirmHmac))
             {
                 Net.Logger.LogWarning("Handshake confirm HMAC mismatch");
                 return;
             }
 
-            state.Completed = true;
-            handshakeStates[sender.m_SteamID] = state;
-            perPeerSymmetricKey[sender.m_SteamID] = state.Sym!;
+            lock (cryptoStateLock)
+            {
+                if (!handshakeStates.TryGetValue(sender.m_SteamID, out var current) || current.Sym == null) return;
+                current.Completed = true;
+                handshakeStates[sender.m_SteamID] = current;
+                perPeerSymmetricKey[sender.m_SteamID] = current.Sym;
+            }
         }
 
         static byte[] HmacSha256Raw(byte[] key, byte[] payload)
@@ -1728,11 +1811,19 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void SetSharedSecret(byte[]? secret)
         {
-            ClearGlobalSharedSecret();
-            if (secret == null) { globalHmac?.Dispose(); globalHmac = null; return; }
-            globalSharedSecret = (byte[])secret.Clone();
-            globalHmac?.Dispose();
-            globalHmac = new HMACSHA256(globalSharedSecret);
+            lock (cryptoStateLock)
+            {
+                ClearGlobalSharedSecretUnderLock();
+                if (secret == null)
+                {
+                    globalHmac?.Dispose();
+                    globalHmac = null;
+                    return;
+                }
+                globalSharedSecret = (byte[])secret.Clone();
+                globalHmac?.Dispose();
+                globalHmac = new HMACSHA256(globalSharedSecret);
+            }
         }
 
         /// <summary>

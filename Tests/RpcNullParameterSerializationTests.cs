@@ -136,6 +136,18 @@ public class RpcNullParameterSerializationTests
         public string SteamIdString { get; set; } = string.Empty;
     }
 
+    sealed class TransportRpcInfoReceiver
+    {
+        [CustomRPC]
+        void Shared(string value, RPCInfo info) { }
+    }
+
+    sealed class ForeignRpcInfoReceiver
+    {
+        [CustomRPC]
+        void Shared(string value, Foo.RPCInfo info) { }
+    }
+
     [Fact]
     public void OfflineBuildMessage_AllowsNull_ForReferenceParameters_FromHandlerSignature()
     {
@@ -198,6 +210,30 @@ public class RpcNullParameterSerializationTests
         Assert.NotNull(msg);
         var read = new Message(msg!.ToArray());
         Assert.Null(read.ReadObject(typeof(string)));
+    }
+
+    [Fact]
+    public void OfflineBuildMessage_RecognizesModulesRpcInfo_AsTransportMetadata()
+    {
+        var service = new OfflineNetworkingService();
+        using var token = service.RegisterNetworkObject(new TransportRpcInfoReceiver(), TestModId);
+
+        var msg = (Message?)OfflineBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { "hi" }, null });
+
+        Assert.NotNull(msg);
+    }
+
+    [Fact]
+    public void OfflineBuildMessage_DoesNotTreatForeignRpcInfo_AsTransportMetadata()
+    {
+        var service = new OfflineNetworkingService();
+        using var token = service.RegisterNetworkObject(new ForeignRpcInfoReceiver(), TestModId);
+
+        var missingForeignArg = (Message?)OfflineBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { "hi" }, null });
+        var withForeignArg = (Message?)OfflineBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { "hi", new Foo.RPCInfo() }, null });
+
+        Assert.Null(missingForeignArg);
+        Assert.NotNull(withForeignArg);
     }
 
     [Fact]
@@ -278,6 +314,30 @@ public class RpcNullParameterSerializationTests
 
         Assert.Null(msg);
         Assert.Equal(0, receiver.Calls);
+    }
+
+    [Fact]
+    public void SteamBuildMessage_RecognizesModulesRpcInfo_AsTransportMetadata()
+    {
+        var service = new SteamNetworkingService();
+        using var token = service.RegisterNetworkObject(new TransportRpcInfoReceiver(), TestModId);
+
+        var msg = (Message?)SteamBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { "hi" }, null });
+
+        Assert.NotNull(msg);
+    }
+
+    [Fact]
+    public void SteamBuildMessage_DoesNotTreatForeignRpcInfo_AsTransportMetadata()
+    {
+        var service = new SteamNetworkingService();
+        using var token = service.RegisterNetworkObject(new ForeignRpcInfoReceiver(), TestModId);
+
+        var missingForeignArg = (Message?)SteamBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { "hi" }, null });
+        var withForeignArg = (Message?)SteamBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { "hi", new Foo.RPCInfo() }, null });
+
+        Assert.Null(missingForeignArg);
+        Assert.NotNull(withForeignArg);
     }
 
     [Fact]

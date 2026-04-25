@@ -179,6 +179,10 @@ namespace NetworkingLibrary.Services
 
         readonly Dictionary<uint, Func<byte[], byte[]>> modSigners = new();
         readonly Dictionary<uint, RSAParameters> modPublicKeys = new();
+        static readonly HashSet<string> CompatibleRpcInfoTypeNames = new(StringComparer.Ordinal)
+        {
+            "NetworkingLibrary.Modules.RPCInfo"
+        };
 
         readonly Dictionary<ulong, HandshakeState> handshakeStates = new();
 
@@ -698,7 +702,7 @@ namespace NetworkingLibrary.Services
                         Target = method.IsStatic ? null! : instance!,
                         Method = method,
                         Parameters = method.GetParameters(),
-                        TakesInfo = method.GetParameters().Length > 0 && method.GetParameters().Last().ParameterType.Name == "RPCInfo",
+                        TakesInfo = method.GetParameters().Length > 0 && IsRpcInfoParameterType(method.GetParameters().Last().ParameterType),
                         Mask = mask
                     };
                     rpcs[modId][method.Name].Add(mh);
@@ -2171,6 +2175,13 @@ namespace NetworkingLibrary.Services
                 Net.Logger.LogError($"BuildMessage failed: {ex}");
                 return null;
             }
+        }
+
+        static bool IsRpcInfoParameterType(Type parameterType)
+        {
+            if (parameterType == typeof(RPCInfo)) return true;
+            var fullName = parameterType.FullName;
+            return fullName != null && CompatibleRpcInfoTypeNames.Contains(fullName);
         }
 
         static string BuildOverloadKey(MessageHandler handler)

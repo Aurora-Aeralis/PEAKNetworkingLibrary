@@ -647,10 +647,21 @@ namespace NetworkingLibrary.Services
         {
             int registered = 0;
             var registeredHandlers = new List<HandlerRegistration>();
+            var registrationFlags = instance == null
+                ? BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic
+                : BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
 
             lock (rpcLock)
             {
-                var methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                if (instance == null)
+                {
+                    var instanceRpc = type
+                        .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                        .FirstOrDefault(method => method.GetCustomAttributes(false).OfType<CustomRPCAttribute>().Any());
+                    if (instanceRpc != null) throw new InvalidOperationException($"Cannot register instance RPC method {type.FullName}.{instanceRpc.Name} without an instance.");
+                }
+
+                var methods = type.GetMethods(registrationFlags);
                 foreach (var method in methods)
                 {
                     var attrs = method.GetCustomAttributes(false).OfType<CustomRPCAttribute>().ToArray();

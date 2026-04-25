@@ -4,6 +4,7 @@ using pworld.Scripts;
 using Steamworks;
 using System;
 using System.Buffers.Binary;
+using System.ComponentModel;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -1152,13 +1153,7 @@ namespace NetworkingLibrary.Services
             {
                 IntPtr p = pinned.AddrOfPinnedObject();
 
-                int flags = Constants.k_nSteamNetworkingSend_AutoRestartBrokenSession;
-                switch (reliable)
-                {
-                    case ReliableType.Unreliable: flags |= Constants.k_nSteamNetworkingSend_Unreliable; break;
-                    case ReliableType.Reliable: flags |= Constants.k_nSteamNetworkingSend_Reliable; break;
-                    case ReliableType.UnreliableNoDelay: flags |= Constants.k_nSteamNetworkingSend_UnreliableNoDelay; break;
-                }
+                int flags = Constants.k_nSteamNetworkingSend_AutoRestartBrokenSession | ResolveSendModeFlag(reliable);
 
                 var res = SteamNetworkingMessages.SendMessageToUser(ref id, p, (uint)data.Length, flags, CHANNEL);
                 //LogInfo($"SendMessageToUser -> res={res} to={target} framedLen={data.Length}");
@@ -1174,6 +1169,24 @@ namespace NetworkingLibrary.Services
             finally
             {
                 if (pinned.IsAllocated) pinned.Free();
+            }
+        }
+
+        static int ResolveSendModeFlag(ReliableType reliable)
+        {
+            switch (reliable)
+            {
+                case ReliableType.Unreliable: return Constants.k_nSteamNetworkingSend_Unreliable;
+                case ReliableType.Reliable: return Constants.k_nSteamNetworkingSend_Reliable;
+                case ReliableType.UnreliableNoDelay: return Constants.k_nSteamNetworkingSend_UnreliableNoDelay;
+                default:
+                    LogWarning($"Unknown {nameof(ReliableType)} value '{reliable}' ({(int)reliable}).");
+#if DEBUG
+                    throw new InvalidEnumArgumentException(nameof(reliable), (int)reliable, typeof(ReliableType));
+#else
+                    LogWarning($"Falling back to {ReliableType.Reliable} send mode.");
+                    return Constants.k_nSteamNetworkingSend_Reliable;
+#endif
             }
         }
 

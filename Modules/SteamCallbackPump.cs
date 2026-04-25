@@ -27,8 +27,28 @@ namespace NetworkingLibrary.Modules
                 var pump = pumps[i];
                 if (pump == null || pump.gameObject == null) continue;
 
-                if (Application.isPlaying) UnityEngine.Object.Destroy(pump.gameObject);
-                else UnityEngine.Object.DestroyImmediate(pump.gameObject);
+                bool canDestroyWholeObject = pump.gameObject.name == "SteamCallbackPump";
+                if (canDestroyWholeObject)
+                {
+                    var components = pump.gameObject.GetComponents<Component>();
+                    for (int componentIndex = 0; componentIndex < components.Length; componentIndex++)
+                    {
+                        var component = components[componentIndex];
+                        if (component == null || component is Transform || component == pump) continue;
+                        canDestroyWholeObject = false;
+                        break;
+                    }
+                }
+
+                if (canDestroyWholeObject)
+                {
+                    if (Application.isPlaying) UnityEngine.Object.Destroy(pump.gameObject);
+                    else UnityEngine.Object.DestroyImmediate(pump.gameObject);
+                    continue;
+                }
+
+                if (Application.isPlaying) UnityEngine.Object.Destroy(pump);
+                else UnityEngine.Object.DestroyImmediate(pump);
             }
         }
 

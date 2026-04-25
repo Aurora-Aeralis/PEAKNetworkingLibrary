@@ -24,7 +24,7 @@ jobs:
         run: dotnet restore NetworkingLibrary.sln
 
       - name: Pack
-        run: dotnet pack NetworkingLibrary.csproj -c Release --no-restore
+        run: dotnet pack NetworkingLibrary.csproj -c Release --no-restore -p:IsPackable=true
 
       - name: Validate NuGet metadata
         shell: bash

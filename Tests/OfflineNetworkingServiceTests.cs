@@ -37,6 +37,7 @@ public class OfflineNetworkingServiceTests
         var service = new OfflineNetworkingService();
         var hostId = 424242UL;
 
+        service.Initialize();
         service.JoinLobby(hostId);
         Assert.True(service.InLobby);
         Assert.Equal(hostId, service.HostSteamId64);
@@ -55,6 +56,7 @@ public class OfflineNetworkingServiceTests
         var lobbyLeftCount = 0;
         service.LobbyLeft += () => lobbyLeftCount++;
 
+        service.Initialize();
         service.CreateLobby();
         service.LeaveLobby();
         service.LeaveLobby();
@@ -214,6 +216,7 @@ public class OfflineNetworkingServiceTests
         service.LobbyEntered += () => events.Add("LobbyEntered");
         service.PlayerEntered += steamId => events.Add($"PlayerEntered:{steamId}");
 
+        service.Initialize();
         service.CreateLobby();
 
         Assert.Equal(
@@ -236,6 +239,7 @@ public class OfflineNetworkingServiceTests
         service.LobbyEntered += () => events.Add("LobbyEntered");
         service.PlayerEntered += steamId => events.Add($"PlayerEntered:{steamId}");
 
+        service.Initialize();
         service.JoinLobby(4242UL);
 
         Assert.Equal(
@@ -314,6 +318,47 @@ public class OfflineNetworkingServiceTests
     {
         var service = new OfflineNetworkingService();
         Assert.Throws<ArgumentNullException>(() => service.RegisterModSigner(TestModId, null!));
+    }
+
+    [Fact]
+    public void LobbyLifecycleMethods_BeforeInitialize_AreNoOps()
+    {
+        var service = new OfflineNetworkingService();
+        var lobbyCreatedCount = 0;
+        var lobbyEnteredCount = 0;
+        var playerEnteredCount = 0;
+
+        service.LobbyCreated += () => lobbyCreatedCount++;
+        service.LobbyEntered += () => lobbyEnteredCount++;
+        service.PlayerEntered += _ => playerEnteredCount++;
+
+        service.CreateLobby();
+        service.JoinLobby(4242UL);
+        service.InviteToLobby(5252UL);
+
+        Assert.False(service.InLobby);
+        Assert.False(service.IsInitialized);
+        Assert.Equal(service.LocalSteamId, service.HostSteamId64);
+        Assert.Empty(service.GetLobbyMemberSteamIds());
+        Assert.Equal(0, lobbyCreatedCount);
+        Assert.Equal(0, lobbyEnteredCount);
+        Assert.Equal(0, playerEnteredCount);
+    }
+
+    [Fact]
+    public void LeaveLobby_ThenCreateLobby_AfterInitialize_KeepsConsistentState()
+    {
+        var service = new OfflineNetworkingService();
+
+        service.Initialize();
+        service.CreateLobby();
+        service.LeaveLobby();
+        service.CreateLobby();
+
+        Assert.True(service.IsInitialized);
+        Assert.True(service.InLobby);
+        Assert.Equal(service.LocalSteamId, service.HostSteamId64);
+        Assert.Equal(new[] { service.LocalSteamId }, service.GetLobbyMemberSteamIds());
     }
 
     [Fact]

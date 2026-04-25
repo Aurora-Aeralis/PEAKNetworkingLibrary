@@ -999,15 +999,17 @@ namespace NetworkingLibrary.Services
             if (compress) flags |= COMPRESSED_FLAG;
             bool hasGlobalHmac;
             byte[]? globalMacKey;
+            Func<byte[], byte[]>? signer;
             lock (cryptoStateLock)
             {
                 hasGlobalHmac = globalHmac != null;
                 globalMacKey = globalSharedSecret != null ? (byte[])globalSharedSecret.Clone() : null;
+                signer = modSigners.TryGetValue(modId, out var localSigner) ? localSigner : null;
             }
             try
             {
                 if (hasGlobalHmac) flags |= HMAC_FLAG;
-                if (modSigners.ContainsKey(modId)) flags |= SIGN_FLAG;
+                if (signer != null) flags |= SIGN_FLAG;
                 if (reliable == ReliableType.Reliable) flags |= ACK_FLAG;
 
                 ulong seq;
@@ -1033,7 +1035,7 @@ namespace NetworkingLibrary.Services
 
                 byte[] headerAndPayload = ms.ToArray();
 
-                if (modSigners.TryGetValue(modId, out var signer))
+                if (signer != null)
                 {
                     var sig = signer(headerAndPayload);
                     using var ms2 = new MemoryStream();
@@ -1379,10 +1381,14 @@ namespace NetworkingLibrary.Services
                     }
 
                     uint modId = BinaryPrimitives.ReadUInt32LittleEndian(payloadToProcess.AsSpan(1, 4));
-                    if (!modPublicKeys.TryGetValue(modId, out var rsaParams))
+                    RSAParameters rsaParams;
+                    lock (cryptoStateLock)
                     {
-                        //Net.Logger.LogWarning($"ProcessIncomingFrame: No public key registered for mod {modId}; dropping signed msg");
-                        return;
+                        if (!modPublicKeys.TryGetValue(modId, out rsaParams))
+                        {
+                            //Net.Logger.LogWarning($"ProcessIncomingFrame: No public key registered for mod {modId}; dropping signed msg");
+                            return;
+                        }
                     }
 
                     int expectedSigLen = rsaParams.Modulus?.Length ?? 0;
@@ -2041,7 +2047,10 @@ namespace NetworkingLibrary.Services
         public void RegisterModSigner(uint modId, Func<byte[], byte[]> signerDelegate)
         {
             ArgumentNullException.ThrowIfNull(signerDelegate);
-            modSigners[modId] = signerDelegate;
+            lock (cryptoStateLock)
+            {
+                modSigners[modId] = signerDelegate;
+            }
         }
         /// <summary>
         /// </summary>
@@ -2051,7 +2060,10 @@ namespace NetworkingLibrary.Services
                 throw new ArgumentException("RSA public key modulus must not be empty.", nameof(pub));
             if (pub.Exponent == null || pub.Exponent.Length == 0)
                 throw new ArgumentException("RSA public key exponent must not be empty.", nameof(pub));
-            modPublicKeys[modId] = pub;
+            lock (cryptoStateLock)
+            {
+                modPublicKeys[modId] = pub;
+            }
         }
 
         void InvokeLocalMessage(Message message, CSteamID localSender)

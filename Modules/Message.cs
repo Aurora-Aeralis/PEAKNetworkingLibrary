@@ -146,16 +146,16 @@ namespace NetworkingLibrary.Modules
 
         private void WriteInt32LE(int value)
         {
-            Span<byte> tmp = stackalloc byte[8];
+            Span<byte> tmp = stackalloc byte[4];
             BinaryPrimitives.WriteInt32LittleEndian(tmp, value);
-            AppendSpan(tmp[..4]);
+            AppendSpan(tmp);
         }
 
         private void WriteUInt32LE(uint value)
         {
-            Span<byte> tmp = stackalloc byte[8];
+            Span<byte> tmp = stackalloc byte[4];
             BinaryPrimitives.WriteUInt32LittleEndian(tmp, value);
-            AppendSpan(tmp[..4]);
+            AppendSpan(tmp);
         }
 
         private void WriteInt64LE(long value)

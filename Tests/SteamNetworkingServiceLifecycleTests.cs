@@ -253,6 +253,20 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void RegisterModSigner_NullDelegate_ThrowsArgumentNullException()
+    {
+        var service = new SteamNetworkingService();
+        Assert.Throws<ArgumentNullException>(() => service.RegisterModSigner(TestModId, null!));
+    }
+
+    [Fact]
+    public void RegisterModPublicKey_EmptyParameters_ThrowsArgumentException()
+    {
+        var service = new SteamNetworkingService();
+        Assert.Throws<ArgumentException>(() => service.RegisterModPublicKey(TestModId, new RSAParameters()));
+    }
+
+    [Fact]
     public void Shutdown_PreservesRpcRegistrationsAcrossReinitializeAndLobbyEnter()
     {
         var service = new SteamNetworkingService();

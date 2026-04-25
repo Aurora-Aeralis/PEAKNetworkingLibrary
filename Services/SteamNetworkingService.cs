@@ -1806,7 +1806,7 @@ namespace NetworkingLibrary.Services
         {
             if (LocalRsa == null) return;
             var pub = SerializeRsaPublicKey(LocalRsa);
-            var rng = RandomNumberGenerator.Create();
+            using var rng = RandomNumberGenerator.Create();
             var nonceBytes = new byte[16]; rng.GetBytes(nonceBytes);
             var nonce = Convert.ToBase64String(nonceBytes);
 
@@ -1825,7 +1825,7 @@ namespace NetworkingLibrary.Services
         void StartHandshakeReply(CSteamID sender, string peerPubKeySerialized, string peerNonce)
         {
             if (LocalRsa == null) return;
-            var rng = RandomNumberGenerator.Create();
+            using var rng = RandomNumberGenerator.Create();
             var localNonceBytes = new byte[16];
             rng.GetBytes(localNonceBytes);
             var generatedLocalNonce = Convert.ToBase64String(localNonceBytes);
@@ -1866,10 +1866,20 @@ namespace NetworkingLibrary.Services
             var sym = new byte[32];
             rng.GetBytes(sym);
 
-            var rsaPeer = new RSACryptoServiceProvider();
-            var rsaParams = DeserializeRsaPublicKey(peerPubForSecret);
-            rsaPeer.ImportParameters(rsaParams);
-            var enc = rsaPeer.Encrypt(sym, false);
+            byte[] enc;
+            try
+            {
+                using var rsaPeer = new RSACryptoServiceProvider();
+                var rsaParams = DeserializeRsaPublicKey(peerPubForSecret);
+                rsaPeer.ImportParameters(rsaParams);
+                enc = rsaPeer.Encrypt(sym, false);
+            }
+            catch (Exception ex)
+            {
+                Net.Logger.LogWarning($"Handshake reply rejected invalid peer RSA key from {sender}: {ex.Message}");
+                CryptographicOperations.ZeroMemory(sym);
+                return;
+            }
 
             var m2 = new Message(0u, "NETWORK_INTERNAL_HANDSHAKE_SECRET", 0);
             m2.WriteBytes(enc);
@@ -1964,9 +1974,17 @@ namespace NetworkingLibrary.Services
 
         static RSAParameters DeserializeRsaPublicKey(string s)
         {
+            if (string.IsNullOrWhiteSpace(s))
+                throw new FormatException("Serialized RSA key is empty.");
+
             var parts = s.Split(':');
+            if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[0]) || string.IsNullOrWhiteSpace(parts[1]))
+                throw new FormatException("Serialized RSA key must contain modulus and exponent segments.");
+
             var mod = Convert.FromBase64String(parts[0]);
             var exp = Convert.FromBase64String(parts[1]);
+            if (mod.Length == 0 || exp.Length == 0)
+                throw new FormatException("Serialized RSA key modulus and exponent must not be empty.");
             return new RSAParameters { Modulus = mod, Exponent = exp };
         }
 
@@ -1991,10 +2009,21 @@ namespace NetworkingLibrary.Services
 
         /// <summary>
         /// </summary>
-        public void RegisterModSigner(uint modId, Func<byte[], byte[]> signerDelegate) => modSigners[modId] = signerDelegate;
+        public void RegisterModSigner(uint modId, Func<byte[], byte[]> signerDelegate)
+        {
+            ArgumentNullException.ThrowIfNull(signerDelegate);
+            modSigners[modId] = signerDelegate;
+        }
         /// <summary>
         /// </summary>
-        public void RegisterModPublicKey(uint modId, RSAParameters pub) => modPublicKeys[modId] = pub;
+        public void RegisterModPublicKey(uint modId, RSAParameters pub)
+        {
+            if (pub.Modulus == null || pub.Modulus.Length == 0)
+                throw new ArgumentException("RSA public key modulus must not be empty.", nameof(pub));
+            if (pub.Exponent == null || pub.Exponent.Length == 0)
+                throw new ArgumentException("RSA public key exponent must not be empty.", nameof(pub));
+            modPublicKeys[modId] = pub;
+        }
 
         void InvokeLocalMessage(Message message, CSteamID localSender)
         {

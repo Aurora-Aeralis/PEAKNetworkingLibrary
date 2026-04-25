@@ -153,6 +153,10 @@ namespace NetworkingLibrary.Services
         private readonly Dictionary<string, string> lastLobbyData = new();
         private Func<CSteamID, int> getNumLobbyMembers = SteamMatchmaking.GetNumLobbyMembers;
         private Func<CSteamID, int, CSteamID> getLobbyMemberByIndex = SteamMatchmaking.GetLobbyMemberByIndex;
+        private Action<CSteamID, string, string> setLobbyData = SteamMatchmaking.SetLobbyData;
+        private Func<CSteamID, string, string> getLobbyData = SteamMatchmaking.GetLobbyData;
+        private Action<CSteamID, string, string> setLobbyMemberData = SteamMatchmaking.SetLobbyMemberData;
+        private Func<CSteamID, CSteamID, string, string> getLobbyMemberData = SteamMatchmaking.GetLobbyMemberData;
 
         Callback<LobbyEnter_t>? cbLobbyEnter;
         Callback<LobbyCreated_t>? cbLobbyCreated;
@@ -645,7 +649,14 @@ namespace NetworkingLibrary.Services
             if (!InLobby) { LogError("Cannot set lobby data when not in lobby."); return; }
             if (!lobbyDataKeys.Contains(key)) LogWarning($"Accessing unregistered lobby key '{key}'.");
             var serialized = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
-            SteamMatchmaking.SetLobbyData(Lobby, key, serialized);
+            try
+            {
+                setLobbyData(Lobby, key, serialized);
+            }
+            catch (Exception ex)
+            {
+                LogError($"SetLobbyData failed for key '{key}': {ex}");
+            }
         }
 
         /// <summary>
@@ -654,7 +665,16 @@ namespace NetworkingLibrary.Services
         {
             if (!InLobby) { LogError("Cannot get lobby data when not in lobby."); return default(T)!; }
             if (!lobbyDataKeys.Contains(key)) LogWarning($"Accessing unregistered lobby key '{key}'.");
-            string v = SteamMatchmaking.GetLobbyData(Lobby, key);
+            string v;
+            try
+            {
+                v = getLobbyData(Lobby, key);
+            }
+            catch (Exception ex)
+            {
+                LogError($"GetLobbyData failed for key '{key}': {ex}");
+                return default(T)!;
+            }
             if (string.IsNullOrEmpty(v)) return default(T)!;
             try { return (T)Convert.ChangeType(v, typeof(T), System.Globalization.CultureInfo.InvariantCulture); }
             catch { LogError($"Could not parse lobby data [{key},{v}] as {typeof(T).Name}"); return default(T)!; }
@@ -675,7 +695,14 @@ namespace NetworkingLibrary.Services
             if (!InLobby) { LogError("Cannot set player data when not in lobby."); return; }
             if (!playerDataKeys.Contains(key)) LogWarning($"Accessing unregistered player key '{key}'.");
             var serialized = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
-            SteamMatchmaking.SetLobbyMemberData(Lobby, key, serialized);
+            try
+            {
+                setLobbyMemberData(Lobby, key, serialized);
+            }
+            catch (Exception ex)
+            {
+                LogError($"SetPlayerData failed for key '{key}': {ex}");
+            }
         }
 
         /// <summary>
@@ -685,7 +712,16 @@ namespace NetworkingLibrary.Services
             if (!InLobby) { LogError("Cannot get player data when not in lobby."); return default(T)!; }
             if (!playerDataKeys.Contains(key)) LogWarning($"Accessing unregistered player key '{key}'.");
             var player = new CSteamID(steamId64);
-            string v = SteamMatchmaking.GetLobbyMemberData(Lobby, player, key);
+            string v;
+            try
+            {
+                v = getLobbyMemberData(Lobby, player, key);
+            }
+            catch (Exception ex)
+            {
+                LogError($"GetPlayerData failed for key '{key}' and player '{steamId64}': {ex}");
+                return default(T)!;
+            }
             if (string.IsNullOrEmpty(v)) return default(T)!;
             try { return (T)Convert.ChangeType(v, typeof(T), System.Globalization.CultureInfo.InvariantCulture); }
             catch { LogError($"Could not parse player data [{key},{v}] as {typeof(T).Name}"); return default(T)!; }

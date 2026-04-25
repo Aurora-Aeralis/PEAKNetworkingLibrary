@@ -52,6 +52,11 @@ namespace NetworkingLibrary.Modules
 
         public void SetBytes(byte[] data)
         {
+            if (data == null) throw new ArgumentNullException(nameof(data));
+            if (data.Length > MaxSize * 16)
+            {
+                throw new Exception($"Message payload exceeds max allowed size {MaxSize * 16}");
+            }
             buffer.Clear();
             buffer.AddRange(data);
             readableBuffer = buffer.ToArray();

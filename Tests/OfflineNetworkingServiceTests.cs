@@ -82,6 +82,34 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
+    public void Rpc_WithoutLobby_DoesNotDispatchToLocalHandler()
+    {
+        var service = new OfflineNetworkingService();
+        var receiver = new RpcReceiver();
+
+        service.Initialize();
+        service.RegisterNetworkObject(receiver, TestModId);
+        service.RPC(TestModId, "OnPing", ReliableType.Reliable, 12);
+
+        Assert.False(service.InLobby);
+        Assert.Equal(-1, receiver.LastValue);
+    }
+
+    [Fact]
+    public void RpcTarget_WithoutLobby_DoesNotDispatchToLocalHandler()
+    {
+        var service = new OfflineNetworkingService();
+        var receiver = new RpcReceiver();
+
+        service.Initialize();
+        service.RegisterNetworkObject(receiver, TestModId);
+        service.RPCTarget(TestModId, "OnPing", service.LocalSteamId, ReliableType.Reliable, 12);
+
+        Assert.False(service.InLobby);
+        Assert.Equal(-1, receiver.LastValue);
+    }
+
+    [Fact]
     public void Shutdown_ResetsLobbyScopedState()
     {
         var service = new OfflineNetworkingService();

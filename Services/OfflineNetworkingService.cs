@@ -285,6 +285,7 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void RPC(uint modId, string methodName, ReliableType reliable, params object[] parameters)
         {
+            if (!InLobby) { Net.Logger.LogError("RPC called while not in lobby"); return; }
             var msg = BuildMessage(modId, methodName, 0, parameters, null);
             if (msg == null) return;
             DispatchIncoming(msg, LocalSteamId);
@@ -292,6 +293,7 @@ namespace NetworkingLibrary.Services
 
         public void RPC(uint modId, string methodName, ReliableType reliable, Type[] parameterTypes, params object?[] parameters)
         {
+            if (!InLobby) { Net.Logger.LogError("RPC called while not in lobby"); return; }
             var msg = BuildMessage(modId, methodName, 0, parameters, parameterTypes);
             if (msg == null) return;
             DispatchIncoming(msg, LocalSteamId);
@@ -301,6 +303,7 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, params object[] parameters)
         {
+            if (!InLobby) { Net.Logger.LogError("Cannot RPC target when not in lobby"); return; }
             var msg = BuildMessage(modId, methodName, 0, parameters, null);
             if (msg == null) return;
             if (targetSteamId64 == LocalSteamId) DispatchIncoming(msg, LocalSteamId);
@@ -308,6 +311,7 @@ namespace NetworkingLibrary.Services
 
         public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, Type[] parameterTypes, params object?[] parameters)
         {
+            if (!InLobby) { Net.Logger.LogError("Cannot RPC target when not in lobby"); return; }
             var msg = BuildMessage(modId, methodName, 0, parameters, parameterTypes);
             if (msg == null) return;
             if (targetSteamId64 == LocalSteamId) DispatchIncoming(msg, LocalSteamId);

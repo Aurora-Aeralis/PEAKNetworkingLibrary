@@ -422,6 +422,24 @@ namespace NetworkingLibrary.Modules
             return null;
         }
 
+        private static bool ImplementsExactGenericIList(Type type)
+        {
+            if (type.IsInterface && type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IList<>))
+            {
+                return true;
+            }
+
+            foreach (var i in type.GetInterfaces())
+            {
+                if (i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IList<>))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private static bool TryCopyItemsToListTarget(object target, Type elementType, IList source)
         {
             if (target is IList targetList)
@@ -577,7 +595,7 @@ namespace NetworkingLibrary.Modules
                 }
 
                 var elemType = TryGetGenericListElementType(type);
-                bool isListLike = typeof(IList).IsAssignableFrom(type) || type.GetInterface(typeof(IList<>).Name) != null;
+                bool isListLike = typeof(IList).IsAssignableFrom(type) || ImplementsExactGenericIList(type);
                 if (elemType != null && isListLike)
                 {
                     int len = ReadCollectionLength(type.FullName ?? "List");

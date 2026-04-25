@@ -9,6 +9,16 @@ namespace NetworkingLibrary.Tests;
 
 public class MessageNullContractTests
 {
+    private interface IList<T>
+    {
+        void Add(T value);
+    }
+
+    private sealed class FakeList<T> : IList<T>
+    {
+        public void Add(T value) { }
+    }
+
     private sealed class UnsupportedRef
     {
         public int Value { get; set; }
@@ -203,6 +213,20 @@ public class MessageNullContractTests
         var read = Roundtrip(malformed);
         var ex = Assert.Throws<Exception>(() => read.ReadObject(typeof(List<int>)));
         Assert.Contains("length exceeds max", ex.Message);
+    }
+
+    [Fact]
+    public void ReadObject_TypeWithNonBclIListName_DoesNotUseListDeserialization()
+    {
+        var malformed = NewMessage();
+        malformed.WriteBool(true);
+        malformed.WriteInt(2);
+        malformed.WriteObject(typeof(int), 1);
+        malformed.WriteObject(typeof(int), 2);
+
+        var read = Roundtrip(malformed);
+        var ex = Assert.Throws<Exception>(() => read.ReadObject(typeof(FakeList<int>)));
+        Assert.Contains("Unsupported read type", ex.Message);
     }
 
     [Fact]

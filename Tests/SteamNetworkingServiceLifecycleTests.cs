@@ -388,6 +388,87 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void OnLobbyEnter_RefreshPlayerList_UsesConfiguredLobbyMemberDelegates()
+    {
+        var service = new SteamNetworkingService();
+        var numCalls = 0;
+        var indexCalls = 0;
+
+        SetField(service, "getNumLobbyMembers", (Func<CSteamID, int>)(_ =>
+        {
+            numCalls++;
+            return 2;
+        }));
+        SetField(service, "getLobbyMemberByIndex", (Func<CSteamID, int, CSteamID>)((_, index) =>
+        {
+            indexCalls++;
+            return new CSteamID((ulong)(100 + index));
+        }));
+
+        InvokeLobbyEnter(service, 9001UL);
+
+        Assert.Equal(1, numCalls);
+        Assert.Equal(2, indexCalls);
+    }
+
+    [Fact]
+    public void OnLobbyCreated_RefreshPlayerList_UsesConfiguredLobbyMemberDelegates()
+    {
+        var service = new SteamNetworkingService();
+        var numCalls = 0;
+        var indexCalls = 0;
+
+        SetField(service, "getNumLobbyMembers", (Func<CSteamID, int>)(_ =>
+        {
+            numCalls++;
+            return 3;
+        }));
+        SetField(service, "getLobbyMemberByIndex", (Func<CSteamID, int, CSteamID>)((_, index) =>
+        {
+            indexCalls++;
+            return new CSteamID((ulong)(200 + index));
+        }));
+
+        InvokeNonPublic(service, "OnLobbyCreated", new LobbyCreated_t
+        {
+            m_eResult = EResult.k_EResultOK,
+            m_ulSteamIDLobby = 9002UL
+        });
+
+        Assert.Equal(1, numCalls);
+        Assert.Equal(3, indexCalls);
+    }
+
+    [Fact]
+    public void OnLobbyChatUpdate_RefreshPlayerList_UsesConfiguredLobbyMemberDelegates()
+    {
+        var service = new SteamNetworkingService();
+        var numCalls = 0;
+        var indexCalls = 0;
+
+        SetLobby(service, 9003UL);
+        SetField(service, "getNumLobbyMembers", (Func<CSteamID, int>)(_ =>
+        {
+            numCalls++;
+            return 1;
+        }));
+        SetField(service, "getLobbyMemberByIndex", (Func<CSteamID, int, CSteamID>)((_, _) =>
+        {
+            indexCalls++;
+            return new CSteamID(300UL);
+        }));
+
+        InvokeNonPublic(service, "OnLobbyChatUpdate", new LobbyChatUpdate_t
+        {
+            m_ulSteamIDUserChanged = 300UL,
+            m_rgfChatMemberStateChange = (uint)EChatMemberStateChange.k_EChatMemberStateChangeEntered
+        });
+
+        Assert.Equal(1, numCalls);
+        Assert.Equal(1, indexCalls);
+    }
+
+    [Fact]
     public void SetLobbyData_AndSetPlayerData_DoNotThrow_WhenSteamCallsFail()
     {
         var service = new SteamNetworkingService();

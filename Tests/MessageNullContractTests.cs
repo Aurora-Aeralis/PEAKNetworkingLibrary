@@ -118,6 +118,30 @@ public class MessageNullContractTests
         Assert.Equal(new List<int> { 10, 11, 12 }, (List<int>)read.ReadObject(typeof(List<int>)));
     }
 
+    [Fact]
+    public void ReadObject_ByteArray_Rejects_Negative_Length()
+    {
+        var malformed = NewMessage();
+        malformed.WriteBool(true);
+        malformed.WriteInt(-1);
+
+        var read = Roundtrip(malformed);
+        var ex = Assert.Throws<Exception>(() => read.ReadObject(typeof(byte[])));
+        Assert.Contains("length out of range", ex.Message);
+    }
+
+    [Fact]
+    public void ReadObject_List_Rejects_Excessive_Length()
+    {
+        var malformed = NewMessage();
+        malformed.WriteBool(true);
+        malformed.WriteInt(Message.MaxSize + 1);
+
+        var read = Roundtrip(malformed);
+        var ex = Assert.Throws<Exception>(() => read.ReadObject(typeof(List<int>)));
+        Assert.Contains("length exceeds max", ex.Message);
+    }
+
     private static byte[] BuildLegacyMessageData(Action<Message> writePayload)
     {
         var legacy = NewMessage();

@@ -569,11 +569,21 @@ namespace NetworkingLibrary.Modules
         #region Compression helpers
         public byte[] CompressPayload()
         {
-            var data = ToArray();
+            return CompressPayload(ToArray());
+        }
+
+        public byte[] CompressPayload(byte[] payload)
+        {
+            if (payload == null) throw new ArgumentNullException(nameof(payload));
+            return CompressPayload(payload.AsSpan());
+        }
+
+        public byte[] CompressPayload(ReadOnlySpan<byte> payload)
+        {
             using var ms = new MemoryStream();
             using (var gz = new GZipStream(ms, System.IO.Compression.CompressionLevel.Optimal, true))
             {
-                gz.Write(data, 0, data.Length);
+                gz.Write(payload);
             }
             return ms.ToArray();
         }

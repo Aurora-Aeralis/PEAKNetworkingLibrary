@@ -199,6 +199,12 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void JoinLobby(ulong lobbySteamId64)
         {
+            if (lobbySteamId64 == 0UL)
+            {
+                LogWarning("JoinLobby called with invalid lobby id 0.");
+                return;
+            }
+
             InLobby = true;
             HostSteamId64 = lobbySteamId64;
             lobbyData.Clear();

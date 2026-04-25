@@ -95,6 +95,20 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
+    public void JoinLobby_InvalidLobbyId_DoesNotThrow_AndDoesNotMutateLobbyState()
+    {
+        var service = new OfflineNetworkingService();
+        var initialHostId = service.HostSteamId64;
+
+        var exception = Record.Exception(() => service.JoinLobby(0UL));
+
+        Assert.Null(exception);
+        Assert.False(service.InLobby);
+        Assert.Equal(initialHostId, service.HostSteamId64);
+        Assert.NotEqual(0UL, service.HostSteamId64);
+    }
+
+    [Fact]
     public void RpcToHost_WithoutLobby_DoesNotDispatchToLocalHandler()
     {
         var service = new OfflineNetworkingService();

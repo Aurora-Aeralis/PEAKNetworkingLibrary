@@ -1024,6 +1024,12 @@ namespace NetworkingLibrary.Services
                 int total = ReadI32(msHeader);
                 int index = ReadI32(msHeader);
 
+                if (total < 1 || index < 0 || index >= total)
+                {
+                    Net.Logger.LogWarning($"ProcessIncomingFrame: malformed fragment header total={total} index={index} from {sender}");
+                    return;
+                }
+
                 //Net.Logger.LogInfo($"ProcessIncomingFrame: header flags=0x{flags:X2} msgId={msgId} seq={seq} total={total} idx={index}");
 
                 int remainingHeader = (int)(msHeader.Length - msHeader.Position);
@@ -1211,6 +1217,10 @@ namespace NetworkingLibrary.Services
 
                 DispatchIncoming(message, sender);
             }
+            catch (EndOfStreamException ex)
+            {
+                Net.Logger.LogWarning($"ProcessIncomingFrame: malformed frame from {sender}, dropping. {ex.Message}");
+            }
             catch (Exception ex)
             {
                 Net.Logger.LogError($"ProcessIncomingFrame top-level exception: {ex}");
@@ -1267,8 +1277,30 @@ namespace NetworkingLibrary.Services
             return true;
         }
 
-        private static ulong ReadU64(Stream s) { var b = new byte[8]; s.Read(b, 0, 8); return BitConverter.ToUInt64(b, 0); }
-        private static int ReadI32(Stream s) { var b = new byte[4]; s.Read(b, 0, 4); return BitConverter.ToInt32(b, 0); }
+        private static void ReadExact(Stream s, byte[] buffer, int count)
+        {
+            int offset = 0;
+            while (offset < count)
+            {
+                int read = s.Read(buffer, offset, count - offset);
+                if (read <= 0) throw new EndOfStreamException($"Expected {count} bytes but only received {offset}.");
+                offset += read;
+            }
+        }
+
+        private static ulong ReadU64(Stream s)
+        {
+            var b = new byte[8];
+            ReadExact(s, b, b.Length);
+            return BitConverter.ToUInt64(b, 0);
+        }
+
+        private static int ReadI32(Stream s)
+        {
+            var b = new byte[4];
+            ReadExact(s, b, b.Length);
+            return BitConverter.ToInt32(b, 0);
+        }
 
 
         void SendAckToSender(CSteamID sender, ulong msgId)

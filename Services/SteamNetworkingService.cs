@@ -143,10 +143,10 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public Func<Message, ulong, bool>? IncomingValidator { get; set; }
 
-        private static readonly List<string> lobbyDataKeys = new();
-        private static readonly List<string> playerDataKeys = new();
-        private static readonly Dictionary<CSteamID, Dictionary<string, string>> lastPlayerData = new();
-        private static readonly Dictionary<string, string> lastLobbyData = new();
+        private readonly List<string> lobbyDataKeys = new();
+        private readonly List<string> playerDataKeys = new();
+        private readonly Dictionary<CSteamID, Dictionary<string, string>> lastPlayerData = new();
+        private readonly Dictionary<string, string> lastLobbyData = new();
 
         Callback<LobbyEnter_t>? cbLobbyEnter;
         Callback<LobbyCreated_t>? cbLobbyCreated;
@@ -258,6 +258,13 @@ namespace NetworkingLibrary.Services
 
             rpcs.Clear();
             unacked.Clear();
+            lobbyDataKeys.Clear();
+            playerDataKeys.Clear();
+            lastLobbyData.Clear();
+            lastPlayerData.Clear();
+            players = Array.Empty<CSteamID>();
+            Lobby = CSteamID.Nil;
+            InLobby = false;
             handshakeStates.Clear();
             perPeerSymmetricKey.Clear();
             globalHmac?.Dispose();

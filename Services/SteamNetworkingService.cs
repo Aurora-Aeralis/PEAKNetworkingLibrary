@@ -1677,7 +1677,6 @@ namespace NetworkingLibrary.Services
                 return;
             }
 
-            bool invoked = false;
             IEnumerable<MessageHandler> candidates = handlers.Where(h => h.Mask == message.Mask);
             if (!string.IsNullOrEmpty(message.OverloadKey))
             {
@@ -1685,39 +1684,47 @@ namespace NetworkingLibrary.Services
                 if (keyed.Length > 0) candidates = keyed.Concat(candidates.Where(h => BuildOverloadKey(h) != message.OverloadKey));
             }
 
+            MessageHandler? chosenHandler = null;
+            object[]? chosenParams = null;
+            MessageHandler? fallbackHandler = null;
+            object[]? fallbackParams = null;
+
             foreach (var handler in candidates)
             {
-                var msgCopy = new Message(message.ToArray());
-                try
+                if (!TryDeserializeForHandler(message, handler, sender, out var callParams, out int unread))
+                    continue;
+
+                if (unread == 0)
                 {
-                    var paramInfos = handler.Parameters;
-                    int paramCount = handler.TakesInfo ? paramInfos.Length - 1 : paramInfos.Length;
-                    var callParams = new object[paramInfos.Length];
-
-                    for (int i = 0; i < paramCount; i++)
-                    {
-                        var t = paramInfos[i].ParameterType;
-                        callParams[i] = msgCopy.ReadObject(t);
-                    }
-
-                    if (handler.TakesInfo)
-                    {
-                        var infoType = paramInfos[paramInfos.Length - 1].ParameterType;
-                        callParams[paramInfos.Length - 1] = CreateRpcInfoInstance(infoType, sender);
-                    }
-
-                    handler.Method.Invoke(handler.Target, callParams);
-                    invoked = true;
+                    chosenHandler = handler;
+                    chosenParams = callParams;
                     break;
                 }
-                catch
-                {
-                    continue;
-                }
+
+                fallbackHandler ??= handler;
+                fallbackParams ??= callParams;
             }
 
-            if (!invoked)
+            if (chosenHandler == null)
+            {
+                chosenHandler = fallbackHandler;
+                chosenParams = fallbackParams;
+            }
+
+            if (chosenHandler == null || chosenParams == null)
+            {
                 Net.Logger.LogWarning($"No handler matched for {message.ModID}:{message.MethodName} mask={message.Mask}");
+                return;
+            }
+
+            try
+            {
+                chosenHandler.Method.Invoke(chosenHandler.Target, chosenParams);
+            }
+            catch (Exception ex)
+            {
+                Net.Logger.LogError($"Invoke RPC error: {ex}");
+            }
         }
 
         object CreateRpcInfoInstance(Type infoType, CSteamID sender)

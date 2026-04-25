@@ -332,6 +332,24 @@ public class RpcNullParameterSerializationTests
     }
 
     [Fact]
+    public void SteamDispatchIncoming_LegacyOverloadKey_WithDifferentAssemblyMetadata_StillMatchesCanonicalHandler()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new ByteBoolDispatchReceiver();
+        using var token = service.RegisterNetworkObject(receiver, TestModId);
+
+        var msg = (Message?)SteamBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { true }, null });
+        Assert.NotNull(msg);
+
+        msg!.OverloadKey = BuildSimulatedLegacyAssemblyQualifiedKey("Legacy.Contracts", "7.2.1.0", typeof(bool));
+        SteamDispatchIncoming.Invoke(service, new object?[] { msg, new CSteamID(42UL) });
+
+        Assert.Equal("bool", receiver.LastOverload);
+        Assert.True(receiver.LastBoolValue);
+        Assert.Null(receiver.LastByteValue);
+    }
+
+    [Fact]
     public void BuildOverloadKey_UsesStableCanonicalTypeIdentity_AcrossServices()
     {
         const string expected = "System.Int32?|System.String[]|System.Collections.Generic.Dictionary<System.String,System.Int32[]>";
@@ -512,5 +530,10 @@ public class RpcNullParameterSerializationTests
     static string BuildLegacyAssemblyQualifiedKey(params Type[] types)
     {
         return string.Join("|", types.Select(type => type.AssemblyQualifiedName ?? type.FullName ?? type.Name));
+    }
+
+    static string BuildSimulatedLegacyAssemblyQualifiedKey(string assemblyName, string version, params Type[] types)
+    {
+        return string.Join("|", types.Select(type => $"{type.FullName}, {assemblyName}, Version={version}, Culture=neutral, PublicKeyToken=null"));
     }
 }

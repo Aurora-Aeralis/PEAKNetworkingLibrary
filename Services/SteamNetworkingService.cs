@@ -1910,7 +1910,69 @@ namespace NetworkingLibrary.Services
         static bool OverloadKeyMatches(MessageHandler handler, string incomingOverloadKey)
         {
             if (BuildOverloadKey(handler) == incomingOverloadKey) return true;
-            return BuildLegacyOverloadKey(handler) == incomingOverloadKey;
+            return NormalizeLegacyOverloadKey(BuildLegacyOverloadKey(handler)) == NormalizeLegacyOverloadKey(incomingOverloadKey);
+        }
+
+        static string NormalizeLegacyOverloadKey(string overloadKey)
+        {
+            if (string.IsNullOrEmpty(overloadKey)) return string.Empty;
+            return string.Join("|", overloadKey.Split('|').Select(StripAssemblyMetadataFromLegacyTypeName));
+        }
+
+        static string StripAssemblyMetadataFromLegacyTypeName(string typeIdentity)
+        {
+            if (string.IsNullOrWhiteSpace(typeIdentity)) return string.Empty;
+
+            var normalized = new StringBuilder(typeIdentity.Length);
+            var bracketDepth = 0;
+
+            for (var i = 0; i < typeIdentity.Length; i++)
+            {
+                var c = typeIdentity[i];
+                switch (c)
+                {
+                    case '[':
+                        bracketDepth++;
+                        normalized.Append(c);
+                        break;
+                    case ']':
+                        bracketDepth = Math.Max(0, bracketDepth - 1);
+                        normalized.Append(c);
+                        break;
+                    case ',':
+                        if (IsGenericArgumentSeparator(typeIdentity, i + 1))
+                        {
+                            normalized.Append(c);
+                            break;
+                        }
+
+                        if (bracketDepth == 0) return normalized.ToString().Trim();
+
+                        if (bracketDepth >= 2)
+                        {
+                            while (i + 1 < typeIdentity.Length && typeIdentity[i + 1] != ']') i++;
+                            break;
+                        }
+
+                        normalized.Append(c);
+                        break;
+                    default:
+                        normalized.Append(c);
+                        break;
+                }
+            }
+
+            return normalized.ToString().Trim();
+        }
+
+        static bool IsGenericArgumentSeparator(string typeIdentity, int startIndex)
+        {
+            for (var i = startIndex; i < typeIdentity.Length; i++)
+            {
+                if (!char.IsWhiteSpace(typeIdentity[i])) return typeIdentity[i] == '[';
+            }
+
+            return false;
         }
 
         SlidingWindowRateLimiter GetOrCreateRateLimiter(ulong steam64)

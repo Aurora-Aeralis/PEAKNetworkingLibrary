@@ -23,7 +23,7 @@
 		<PackageProjectUrl></PackageProjectUrl>
 		<RepositoryUrl></RepositoryUrl>
 		<RepositoryType></RepositoryType>
-		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<PackageLicenseExpression>LGPL-3.0-or-later</PackageLicenseExpression>
 		<PackageTags>BepInEx;PEAK;Networking;Library</PackageTags>
 		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 	</PropertyGroup>

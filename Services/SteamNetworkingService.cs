@@ -1469,55 +1469,37 @@ namespace NetworkingLibrary.Services
                         return;
                     }
 
-                    var modCandidates = compressed ? new List<uint>(2) : new List<uint>(1);
-                    if (payloadToProcess.Length >= 1 + 4)
+                    Dictionary<int, List<RSAParameters>> signerKeysByLength;
+                    lock (cryptoStateLock)
                     {
-                        modCandidates.Add(BinaryPrimitives.ReadUInt32LittleEndian(payloadToProcess.AsSpan(1, 4)));
+                        signerKeysByLength = modPublicKeys.Values
+                            .Where(p => p.Modulus != null && p.Modulus.Length > 0)
+                            .GroupBy(p => p.Modulus!.Length)
+                            .ToDictionary(g => g.Key, g => g.ToList());
                     }
 
-                    int minSigOffset = Math.Max(0, payloadToProcess.Length - (ushort.MaxValue + 2));
-                    for (int sigSectionStart = payloadToProcess.Length - 2; sigSectionStart >= minSigOffset; sigSectionStart--)
+                    foreach (var kvp in signerKeysByLength)
                     {
+                        int expectedSigLen = kvp.Key;
+                        if (payloadToProcess.Length < expectedSigLen + 2)
+                        {
+                            continue;
+                        }
+
+                        int sigSectionStart = payloadToProcess.Length - 2 - expectedSigLen;
                         ushort declaredLen = BinaryPrimitives.ReadUInt16LittleEndian(payloadToProcess.AsSpan(sigSectionStart, 2));
-                        if (declaredLen == 0) continue;
-                        int sigEnd = sigSectionStart + 2 + declaredLen;
-                        if (sigEnd != payloadToProcess.Length) continue;
+                        if (declaredLen != expectedSigLen)
+                        {
+                            continue;
+                        }
 
                         var signature = new byte[declaredLen];
                         Array.Copy(payloadToProcess, sigSectionStart + 2, signature, 0, declaredLen);
                         var dataOnly = new byte[sigSectionStart];
                         Array.Copy(payloadToProcess, 0, dataOnly, 0, sigSectionStart);
 
-                        if (compressed)
+                        foreach (var rsaParams in kvp.Value)
                         {
-                            try
-                            {
-                                var decompressedForHeader = Message.DecompressPayload(dataOnly, Message.MaxLogicalSize);
-                                if (decompressedForHeader.Length >= 1 + 4)
-                                {
-                                    uint modIdFromDecompressed = BinaryPrimitives.ReadUInt32LittleEndian(decompressedForHeader.AsSpan(1, 4));
-                                    if (!modCandidates.Contains(modIdFromDecompressed))
-                                    {
-                                        modCandidates.Add(modIdFromDecompressed);
-                                    }
-                                }
-                            }
-                            catch
-                            {
-                            }
-                        }
-
-                        foreach (var modId in modCandidates)
-                        {
-                            RSAParameters rsaParams;
-                            lock (cryptoStateLock)
-                            {
-                                if (!modPublicKeys.TryGetValue(modId, out rsaParams)) continue;
-                            }
-
-                            int expectedSigLen = rsaParams.Modulus?.Length ?? 0;
-                            if (expectedSigLen != declaredLen) continue;
-
                             try
                             {
                                 using var rsa = new RSACryptoServiceProvider();

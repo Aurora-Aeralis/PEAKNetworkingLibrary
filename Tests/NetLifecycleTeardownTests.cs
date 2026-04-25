@@ -1,14 +1,19 @@
 using HarmonyLib;
 using NetworkingLibrary.Services;
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.Serialization;
+using UnityEngine;
 using Xunit;
 
 namespace NetworkingLibrary.Tests;
 
 public class NetLifecycleTeardownTests
 {
+    sealed class ExtraMarkerComponent : MonoBehaviour { }
+
     sealed class FakeNetworkingService : INetworkingService
     {
         public bool ShutdownCalled { get; private set; }
@@ -200,6 +205,47 @@ public class NetLifecycleTeardownTests
         }
     }
 
+    [Fact]
+    public void CleanupDuplicatePollers_DestroysWholeGameObject_WhenDuplicateOnlyHasTransformAndPoller()
+    {
+        var pollerObject = new GameObject("duplicate-poller-only");
+        var poller = pollerObject.AddComponent<NetworkingPoller>();
+        var destroyedObjects = new List<UnityEngine.Object>();
+
+        try
+        {
+            InvokeCleanupDuplicatePollers(new[] { poller }, obj => destroyedObjects.Add(obj));
+
+            Assert.Single(destroyedObjects);
+            Assert.Same(pollerObject, destroyedObjects.Single());
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(pollerObject);
+        }
+    }
+
+    [Fact]
+    public void CleanupDuplicatePollers_DestroysOnlyPollerComponent_WhenDuplicateHasOtherComponents()
+    {
+        var pollerObject = new GameObject("duplicate-poller-with-extra");
+        var poller = pollerObject.AddComponent<NetworkingPoller>();
+        pollerObject.AddComponent<ExtraMarkerComponent>();
+        var destroyedObjects = new List<UnityEngine.Object>();
+
+        try
+        {
+            InvokeCleanupDuplicatePollers(new[] { poller }, obj => destroyedObjects.Add(obj));
+
+            Assert.Single(destroyedObjects);
+            Assert.Same(poller, destroyedObjects.Single());
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(pollerObject);
+        }
+    }
+
     static Harmony GetHarmony()
     {
         return (Harmony)typeof(Net).GetField("Harmony", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
@@ -220,5 +266,11 @@ public class NetLifecycleTeardownTests
     static void InvokeOnDestroy(Net net)
     {
         typeof(Net).GetMethod("OnDestroy", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(net, null);
+    }
+
+    static void InvokeCleanupDuplicatePollers(IEnumerable<NetworkingPoller> pollers, Action<UnityEngine.Object> destroyAction)
+    {
+        typeof(Net).GetMethod("CleanupDuplicatePollers", BindingFlags.Static | BindingFlags.NonPublic)!
+            .Invoke(null, new object[] { pollers, destroyAction });
     }
 }

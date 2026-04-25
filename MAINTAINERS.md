@@ -21,6 +21,14 @@ patches and related discussions.
               or a URL.
 
 
+Local setup
+===========
+
+Before building locally:
+- Copy `Config.Build.user.props.template` to `Config.Build.user.props`.
+- Set your local `PeakGameRootDir` and/or `PeakPluginsDir` values in `Config.Build.user.props`.
+
+
 Applications
 ============
 

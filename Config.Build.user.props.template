@@ -1,5 +1,6 @@
 <Project>
 
+  <!-- Copy this file to Config.Build.user.props and set local machine paths. -->
   <PropertyGroup>
     <!-- Set if the default steam game install directory doesn't work. -->
     <!-- <PeakGameRootDir></PeakGameRootDir> -->

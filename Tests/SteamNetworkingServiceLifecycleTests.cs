@@ -180,6 +180,22 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void Shutdown_WhileInLobby_RaisesLobbyLeftOnce()
+    {
+        var service = new SteamNetworkingService();
+        var lobbyLeftCount = 0;
+        service.LobbyLeft += () => lobbyLeftCount++;
+
+        InvokeLobbyEnter(service, 9001UL);
+
+        service.Shutdown();
+        service.Shutdown();
+
+        Assert.Equal(1, lobbyLeftCount);
+        Assert.False(service.InLobby);
+    }
+
+    [Fact]
     public async Task Shutdown_RacingWithRetransmitAndFlush_DoesNotThrow()
     {
         var service = new SteamNetworkingService();

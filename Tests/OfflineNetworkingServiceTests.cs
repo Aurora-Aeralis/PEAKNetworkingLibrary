@@ -178,6 +178,23 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
+    public void Shutdown_WhileInLobby_RaisesLobbyLeftOnce()
+    {
+        var service = new OfflineNetworkingService();
+        var lobbyLeftCount = 0;
+        service.LobbyLeft += () => lobbyLeftCount++;
+
+        service.Initialize();
+        service.CreateLobby();
+
+        service.Shutdown();
+        service.Shutdown();
+
+        Assert.Equal(1, lobbyLeftCount);
+        Assert.False(service.InLobby);
+    }
+
+    [Fact]
     public void Shutdown_PreservesRpcRegistrationsAcrossReinitializeAndLobbyCreate()
     {
         var service = new OfflineNetworkingService();

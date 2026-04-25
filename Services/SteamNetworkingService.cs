@@ -289,6 +289,9 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void Shutdown()
         {
+            if (InLobby || Lobby != CSteamID.Nil)
+                LeaveLobby();
+
             cbLobbyEnter = null;
             cbLobbyCreated = null;
             cbLobbyChatUpdate = null;

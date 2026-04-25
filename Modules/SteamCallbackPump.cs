@@ -21,9 +21,18 @@ namespace NetworkingLibrary.Modules
         public static void DisableAndDestroyExisting()
         {
             DisablePumping();
-            var existingPump = GameObject.Find(PumpObjectName);
-            if (existingPump == null) return;
-            UnityEngine.Object.Destroy(existingPump);
+            var pumps = UnityEngine.Object.FindObjectsOfType<SteamCallbackPump>(true);
+            if (pumps == null || pumps.Length == 0) return;
+
+            for (int i = 0; i < pumps.Length; i++)
+            {
+                var pump = pumps[i];
+                if (pump == null || pump.gameObject == null) continue;
+                if (!string.Equals(pump.gameObject.name, PumpObjectName, StringComparison.Ordinal)) continue;
+
+                if (Application.isPlaying) UnityEngine.Object.Destroy(pump.gameObject);
+                else UnityEngine.Object.DestroyImmediate(pump.gameObject);
+            }
         }
 
         void Update()

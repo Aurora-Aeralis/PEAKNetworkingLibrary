@@ -133,7 +133,11 @@ namespace NetworkingLibrary.Modules
             {
                 lock (queue) queue.Enqueue(a);
             }
-            else StartCoroutine(EnqueueDelayed(a, delaySeconds));
+            else
+            {
+                if (IsMainThread()) StartCoroutine(EnqueueDelayed(a, delaySeconds));
+                else lock (queue) queue.Enqueue(() => StartCoroutine(EnqueueDelayed(a, delaySeconds)));
+            }
         }
 
         IEnumerator EnqueueDelayed(Action a, float d)

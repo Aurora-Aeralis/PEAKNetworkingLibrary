@@ -26,6 +26,7 @@ namespace NetworkingLibrary.Modules
         private List<byte> buffer = new();
         internal byte[] readableBuffer = Array.Empty<byte>();
         internal int readPos = 0;
+        private bool _disposed;
         private bool UsesReferencePresenceFlags => ProtocolVersion >= 2;
 
         public bool Compressed { get; private set; } = false;
@@ -73,6 +74,7 @@ namespace NetworkingLibrary.Modules
 
         public void SetBytes(byte[] data)
         {
+            ThrowIfDisposed();
             if (data == null) throw new ArgumentNullException(nameof(data));
             if (data.Length > MaxLogicalSize)
             {
@@ -86,6 +88,7 @@ namespace NetworkingLibrary.Modules
 
         public byte[] ToArray()
         {
+            ThrowIfDisposed();
             readableBuffer = buffer.ToArray();
             return readableBuffer;
         }
@@ -95,6 +98,7 @@ namespace NetworkingLibrary.Modules
 
         public void Reset(bool zero = true)
         {
+            ThrowIfDisposed();
             if (zero)
             {
                 buffer.Clear();
@@ -108,22 +112,24 @@ namespace NetworkingLibrary.Modules
         }
 
         #region Write helpers
-        public Message WriteByte(byte v) { buffer.Add(v); return this; }
+        public Message WriteByte(byte v) { ThrowIfDisposed(); buffer.Add(v); return this; }
         public Message WriteBytes(byte[] v)
         {
+            ThrowIfDisposed();
             if (v == null) throw new ArgumentNullException(nameof(v));
             WriteInt(v.Length);
             buffer.AddRange(v);
             return this;
         }
-        public Message WriteInt(int v) { buffer.AddRange(BitConverter.GetBytes(v)); return this; }
-        public Message WriteUInt(uint v) { buffer.AddRange(BitConverter.GetBytes(v)); return this; }
-        public Message WriteLong(long v) { buffer.AddRange(BitConverter.GetBytes(v)); return this; }
-        public Message WriteULong(ulong v) { buffer.AddRange(BitConverter.GetBytes(v)); return this; }
-        public Message WriteFloat(float v) { buffer.AddRange(BitConverter.GetBytes(v)); return this; }
-        public Message WriteBool(bool v) { buffer.AddRange(BitConverter.GetBytes(v)); return this; }
+        public Message WriteInt(int v) { ThrowIfDisposed(); buffer.AddRange(BitConverter.GetBytes(v)); return this; }
+        public Message WriteUInt(uint v) { ThrowIfDisposed(); buffer.AddRange(BitConverter.GetBytes(v)); return this; }
+        public Message WriteLong(long v) { ThrowIfDisposed(); buffer.AddRange(BitConverter.GetBytes(v)); return this; }
+        public Message WriteULong(ulong v) { ThrowIfDisposed(); buffer.AddRange(BitConverter.GetBytes(v)); return this; }
+        public Message WriteFloat(float v) { ThrowIfDisposed(); buffer.AddRange(BitConverter.GetBytes(v)); return this; }
+        public Message WriteBool(bool v) { ThrowIfDisposed(); buffer.AddRange(BitConverter.GetBytes(v)); return this; }
         public Message WriteString(string v)
         {
+            ThrowIfDisposed();
             var bytes = Encoding.UTF8.GetBytes(v ?? "");
             WriteInt(bytes.Length);
             buffer.AddRange(bytes);
@@ -136,6 +142,7 @@ namespace NetworkingLibrary.Modules
         /// </summary>
         public void WriteObject(Type type, object value)
         {
+            ThrowIfDisposed();
             if (type == null) throw new ArgumentNullException(nameof(type));
 
             var nt = Nullable.GetUnderlyingType(type);
@@ -352,6 +359,7 @@ namespace NetworkingLibrary.Modules
 
         public byte ReadByte()
         {
+            ThrowIfDisposed();
             EnsureReadable(1, nameof(ReadByte));
             byte v = readableBuffer[readPos];
             readPos++;
@@ -359,6 +367,7 @@ namespace NetworkingLibrary.Modules
         }
         public int ReadInt()
         {
+            ThrowIfDisposed();
             EnsureReadable(4, nameof(ReadInt));
             int v = BitConverter.ToInt32(readableBuffer, readPos);
             readPos += 4;
@@ -366,6 +375,7 @@ namespace NetworkingLibrary.Modules
         }
         public uint ReadUInt()
         {
+            ThrowIfDisposed();
             EnsureReadable(4, nameof(ReadUInt));
             uint v = BitConverter.ToUInt32(readableBuffer, readPos);
             readPos += 4;
@@ -373,6 +383,7 @@ namespace NetworkingLibrary.Modules
         }
         public long ReadLong()
         {
+            ThrowIfDisposed();
             EnsureReadable(8, nameof(ReadLong));
             long v = BitConverter.ToInt64(readableBuffer, readPos);
             readPos += 8;
@@ -380,6 +391,7 @@ namespace NetworkingLibrary.Modules
         }
         public ulong ReadULong()
         {
+            ThrowIfDisposed();
             EnsureReadable(8, nameof(ReadULong));
             ulong v = BitConverter.ToUInt64(readableBuffer, readPos);
             readPos += 8;
@@ -387,6 +399,7 @@ namespace NetworkingLibrary.Modules
         }
         public float ReadFloat()
         {
+            ThrowIfDisposed();
             EnsureReadable(4, nameof(ReadFloat));
             float v = BitConverter.ToSingle(readableBuffer, readPos);
             readPos += 4;
@@ -394,6 +407,7 @@ namespace NetworkingLibrary.Modules
         }
         public bool ReadBool()
         {
+            ThrowIfDisposed();
             EnsureReadable(1, nameof(ReadBool));
             bool v = BitConverter.ToBoolean(readableBuffer, readPos);
             readPos += 1;
@@ -401,6 +415,7 @@ namespace NetworkingLibrary.Modules
         }
         public string ReadString()
         {
+            ThrowIfDisposed();
             int len = ReadInt();
             if (len < 0)
             {
@@ -423,6 +438,7 @@ namespace NetworkingLibrary.Modules
         /// </summary>
         public object ReadObject(Type type)
         {
+            ThrowIfDisposed();
             if (type == null) throw new ArgumentNullException(nameof(type));
 
             var nt = Nullable.GetUnderlyingType(type);
@@ -539,9 +555,18 @@ namespace NetworkingLibrary.Modules
 
         public void Dispose()
         {
-            buffer = null!;
-            readableBuffer = null!;
+            if (_disposed) return;
+            _disposed = true;
+            buffer.Clear();
+            buffer = new List<byte>();
+            readableBuffer = Array.Empty<byte>();
+            readPos = 0;
             GC.SuppressFinalize(this);
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(Message));
         }
     }
 }

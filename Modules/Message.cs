@@ -334,6 +334,10 @@ namespace NetworkingLibrary.Modules
             {
                 throw new Exception("ReadString out of range");
             }
+            if (len > MaxSize)
+            {
+                throw new Exception($"ReadString length exceeds max {MaxSize}");
+            }
             if (len == 0) return string.Empty;
             EnsureReadable(len, nameof(ReadString));
             string s = Encoding.UTF8.GetString(readableBuffer, readPos, len);

@@ -9,48 +9,23 @@ using NetworkingLibrary.Services;
 
 namespace NetworkingLibrary.Services
 {
-    /// <summary>
-    /// </summary>
     public class OfflineNetworkingService : INetworkingService
     {
-        /// <summary>
-        /// </summary>
         public bool IsInitialized { get; private set; }
-        /// <summary>
-        /// </summary>
         public bool InLobby { get; private set; }
         /// <summary>
         /// Current host identity for the active lobby.
         /// In offline mode, host routing is always resolved to the local peer.
         /// </summary>
         public ulong HostSteamId64 { get; private set; } = 1000UL;
-        /// <summary>
-        /// </summary>
         public string HostIdString => HostSteamId64.ToString();
-        /// <summary>
-        /// </summary>
         public event Action? LobbyCreated;
-        /// <summary>
-        /// </summary>
         public event Action? LobbyEntered;
-        /// <summary>
-        /// </summary>
         public event Action? LobbyLeft;
-        /// <summary>
-        /// </summary>
         public event Action<ulong>? PlayerEntered;
-        /// <summary>
-        /// </summary>
         public event Action<ulong>? PlayerLeft;
-        /// <summary>
-        /// </summary>
         public event Action<string[]>? LobbyDataChanged;
-        /// <summary>
-        /// </summary>
         public event Action<ulong, string[]>? PlayerDataChanged;
-
-        /// <summary>
-        /// </summary>
         public Func<Message, ulong, bool>? IncomingValidator { get; set; }
 
         /// <summary>
@@ -134,9 +109,6 @@ namespace NetworkingLibrary.Services
 
         long _nextMessageId = 0;
         private ulong NextMessageId() => (ulong)System.Threading.Interlocked.Increment(ref _nextMessageId);
-
-        /// <summary>
-        /// </summary>
         public ulong LocalSteamId { get; private set; } = 1000;
 
         class Token : IDisposable
@@ -163,18 +135,12 @@ namespace NetworkingLibrary.Services
         /// True while in an offline lobby because offline mode simulates a single-peer host.
         /// </summary>
         public bool IsHost => offlineIsHost;
-
-        /// <summary>
-        /// </summary>
         public void Initialize()
         {
             if (IsInitialized) return;
             EnsureLocalPeerKey();
             IsInitialized = true;
         }
-
-        /// <summary>
-        /// </summary>
         public void Shutdown()
         {
             if (InLobby)
@@ -191,9 +157,6 @@ namespace NetworkingLibrary.Services
             modPublicKeys.Clear();
             globalHmac?.Dispose(); globalHmac = null;
         }
-
-        /// <summary>
-        /// </summary>
         public void CreateLobby(int maxPlayers = 8)
         {
             if (!IsInitialized)
@@ -256,9 +219,6 @@ namespace NetworkingLibrary.Services
             PlayerEntered?.Invoke(LocalSteamId);
             offlineIsHost = true;
         }
-
-        /// <summary>
-        /// </summary>
         public void LeaveLobby()
         {
             if (!InLobby) return;
@@ -290,9 +250,6 @@ namespace NetworkingLibrary.Services
             CryptographicOperations.ZeroMemory(globalSharedSecret);
             globalSharedSecret = null;
         }
-
-        /// <summary>
-        /// </summary>
         public void InviteToLobby(ulong steamId64)
         {
             if (!IsInitialized)
@@ -325,9 +282,6 @@ namespace NetworkingLibrary.Services
             rng.GetBytes(key);
             perPeerSymmetricKey[LocalSteamId] = key;
         }
-
-        /// <summary>
-        /// </summary>
         public IDisposable RegisterNetworkObject(object instance, uint modId, int mask = 0)
         {
             if (instance == null) throw new ArgumentNullException(nameof(instance));
@@ -357,8 +311,6 @@ namespace NetworkingLibrary.Services
             }
             return new Token(() => DeregisterHandlers(modId, registeredHandlers));
         }
-        /// <summary>
-        /// </summary>
         public IDisposable RegisterNetworkType(Type type, uint modId, int mask = 0)
         {
             if (type == null) throw new ArgumentNullException(nameof(type));
@@ -404,9 +356,6 @@ namespace NetworkingLibrary.Services
                 if (methods.Count == 0) rpcs.Remove(modId);
             }
         }
-
-        /// <summary>
-        /// </summary>
         public void DeregisterNetworkObject(object instance, uint modId, int mask = 0)
         {
             if (instance == null) throw new ArgumentNullException(nameof(instance));
@@ -425,8 +374,6 @@ namespace NetworkingLibrary.Services
                 if (methods.Count == 0) rpcs.Remove(modId);
             }
         }
-        /// <summary>
-        /// </summary>
         public void DeregisterNetworkType(Type type, uint modId, int mask = 0)
         {
             if (type == null) throw new ArgumentNullException(nameof(type));
@@ -443,9 +390,6 @@ namespace NetworkingLibrary.Services
                 if (methods.Count == 0) rpcs.Remove(modId);
             }
         }
-
-        /// <summary>
-        /// </summary>
         public void RPC(uint modId, string methodName, ReliableType reliable, params object[] parameters)
         {
             if (!InLobby) { LogError("RPC called while not in lobby"); return; }
@@ -461,9 +405,6 @@ namespace NetworkingLibrary.Services
             if (msg == null) return;
             DispatchIncoming(msg, LocalSteamId);
         }
-
-        /// <summary>
-        /// </summary>
         public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, params object[] parameters)
         {
             if (!InLobby) { LogError("Cannot RPC target when not in lobby"); return; }
@@ -479,9 +420,6 @@ namespace NetworkingLibrary.Services
             if (msg == null) return;
             if (targetSteamId64 == LocalSteamId) DispatchIncoming(msg, LocalSteamId);
         }
-
-        /// <summary>
-        /// </summary>
         public void RPCToHost(uint modId, string methodName, ReliableType reliable, params object[] parameters)
         {
             if (!InLobby)
@@ -491,16 +429,11 @@ namespace NetworkingLibrary.Services
             }
             RPCTarget(modId, methodName, HostSteamId64, reliable, parameters);
         }
-
-        /// <summary>
-        /// </summary>
         public void RegisterLobbyDataKey(string key)
         {
             ValidateDataKey(key, nameof(key));
             lobbyKeys.Add(key);
         }
-        /// <summary>
-        /// </summary>
         public void SetLobbyData(string key, object value)
         {
             ValidateDataKey(key, nameof(key));
@@ -510,8 +443,6 @@ namespace NetworkingLibrary.Services
             lobbyData[key] = serialized;
             LobbyDataChanged?.Invoke(new[] { key });
         }
-        /// <summary>
-        /// </summary>
         public T GetLobbyData<T>(string key)
         {
             ValidateDataKey(key, nameof(key));
@@ -521,16 +452,11 @@ namespace NetworkingLibrary.Services
             try { return (T)Convert.ChangeType(v, typeof(T), System.Globalization.CultureInfo.InvariantCulture); }
             catch { LogError($"Could not parse lobby data [{key},{v}]"); return default!; }
         }
-
-        /// <summary>
-        /// </summary>
         public void RegisterPlayerDataKey(string key)
         {
             ValidateDataKey(key, nameof(key));
             playerKeys.Add(key);
         }
-        /// <summary>
-        /// </summary>
         public void SetPlayerData(string key, object value)
         {
             ValidateDataKey(key, nameof(key));
@@ -545,8 +471,6 @@ namespace NetworkingLibrary.Services
             perPlayerData[LocalSteamId][key] = serialized;
             PlayerDataChanged?.Invoke(LocalSteamId, new[] { key });
         }
-        /// <summary>
-        /// </summary>
         public T GetPlayerData<T>(ulong steamId64, string key)
         {
             ValidateDataKey(key, nameof(key));
@@ -557,9 +481,6 @@ namespace NetworkingLibrary.Services
             try { return (T)Convert.ChangeType(v, typeof(T), System.Globalization.CultureInfo.InvariantCulture); }
             catch { LogError($"Could not parse player data [{key},{v}]"); return default!; }
         }
-
-        /// <summary>
-        /// </summary>
         public void PollReceive()
         {
             // Nothing queued in offline mode.

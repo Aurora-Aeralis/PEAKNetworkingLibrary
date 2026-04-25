@@ -296,7 +296,7 @@ namespace NetworkingLibrary.Services
         {
             if (!IsInitialized)
             {
-                Net.Logger.LogError("CreateLobby called before SteamNetworkingService.Initialize.");
+                Net.Logger?.LogError("CreateLobby called before SteamNetworkingService.Initialize.");
                 return;
             }
 
@@ -315,7 +315,7 @@ namespace NetworkingLibrary.Services
         {
             if (!IsInitialized)
             {
-                Net.Logger.LogError("JoinLobby called before SteamNetworkingService.Initialize.");
+                Net.Logger?.LogError("JoinLobby called before SteamNetworkingService.Initialize.");
                 return;
             }
 
@@ -352,7 +352,7 @@ namespace NetworkingLibrary.Services
         {
             if (!IsInitialized)
             {
-                Net.Logger.LogError("InviteToLobby called before SteamNetworkingService.Initialize.");
+                Net.Logger?.LogError("InviteToLobby called before SteamNetworkingService.Initialize.");
                 return;
             }
 

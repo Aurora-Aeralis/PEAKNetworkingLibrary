@@ -23,17 +23,32 @@ public class OfflineNetworkingServiceTests
     public void LeaveLobby_ResetsLobbyState_AndHostIdentity()
     {
         var service = new OfflineNetworkingService();
-        var previousHost = 424242UL;
+        var lobbyId = 424242UL;
 
-        service.JoinLobby(previousHost);
+        service.JoinLobby(lobbyId);
         Assert.True(service.InLobby);
-        Assert.Equal(previousHost, service.HostSteamId64);
+        Assert.Equal(service.LocalSteamId, service.HostSteamId64);
 
         service.LeaveLobby();
 
         Assert.False(service.InLobby);
-        Assert.NotEqual(previousHost, service.HostSteamId64);
+        Assert.NotEqual(lobbyId, service.HostSteamId64);
         Assert.Equal(service.LocalSteamId, service.HostSteamId64);
+    }
+
+    [Fact]
+    public void JoinLobby_ThenRpcToHost_DispatchesToLocalRegisteredHandler()
+    {
+        var service = new OfflineNetworkingService();
+        var receiver = new RpcReceiver();
+
+        service.Initialize();
+        service.RegisterNetworkObject(receiver, TestModId);
+        service.JoinLobby(987654321UL);
+        service.RPCToHost(TestModId, "OnPing", ReliableType.Reliable, 99);
+
+        Assert.Equal(service.LocalSteamId, service.HostSteamId64);
+        Assert.Equal(99, receiver.LastValue);
     }
 
     [Fact]

@@ -18,6 +18,9 @@ namespace NetworkingLibrary.Services
         /// </summary>
         bool InLobby { get; }
         /// <summary>
+        /// Host peer Steam64 identity for RPC routing in the current lobby.
+        /// Steam implementation returns the current lobby owner Steam64.
+        /// Offline implementation returns the local Steam64 in single-process simulation.
         /// </summary>
         ulong HostSteamId64 { get; }
         /// <summary>
@@ -43,6 +46,7 @@ namespace NetworkingLibrary.Services
         /// </summary>
         void CreateLobby(int maxPlayers = 8);
         /// <summary>
+        /// Join a lobby by lobby identity (Steam lobby id in Steam implementation).
         /// </summary>
         void JoinLobby(ulong lobbySteamId64);
         /// <summary>

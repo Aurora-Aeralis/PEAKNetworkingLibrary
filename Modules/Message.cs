@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -267,12 +268,12 @@ namespace NetworkingLibrary.Modules
 
         public static void UnregisterSerializer<T>()
         {
-            writeCasters.Remove(typeof(T));
-            readCasters.Remove(typeof(T));
+            writeCasters.TryRemove(typeof(T), out _);
+            readCasters.TryRemove(typeof(T), out _);
         }
 
-        private static readonly Dictionary<Type, Action<Message, object>> writeCasters = new();
-        private static readonly Dictionary<Type, Func<Message, object>> readCasters = new();
+        private static readonly ConcurrentDictionary<Type, Action<Message, object>> writeCasters = new();
+        private static readonly ConcurrentDictionary<Type, Func<Message, object>> readCasters = new();
 
         static Message()
         {

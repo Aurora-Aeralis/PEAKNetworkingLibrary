@@ -270,7 +270,8 @@ namespace NetworkingLibrary.Services
             }
 
             if (!InLobby) return;
-            if (!perPlayerData.ContainsKey(steamId64)) perPlayerData[steamId64] = new Dictionary<string, string>();
+            if (perPlayerData.ContainsKey(steamId64)) return;
+            perPlayerData[steamId64] = new Dictionary<string, string>();
             PlayerEntered?.Invoke(steamId64);
         }
 

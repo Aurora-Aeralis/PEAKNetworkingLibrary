@@ -329,10 +329,14 @@ public class RpcNullParameterSerializationTests
         var receiver = new PartialReadDispatchReceiver();
         using var token = service.RegisterNetworkObject(receiver, TestModId);
 
-        var msg = (Message?)SteamBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { 5, 6, 9 }, new[] { typeof(int), typeof(int), typeof(int) } });
-        Assert.NotNull(msg);
+        // Build the payload directly so the test can exercise fallback dispatch even
+        // when registered overload resolution would reject a 3-parameter call.
+        var msg = new Message(TestModId, "Shared", 0);
+        msg.WriteObject(typeof(int), 5);
+        msg.WriteObject(typeof(int), 6);
+        msg.WriteObject(typeof(int), 9);
 
-        SteamDispatchIncoming.Invoke(service, new object?[] { msg!, new CSteamID(42UL) });
+        SteamDispatchIncoming.Invoke(service, new object?[] { msg, new CSteamID(42UL) });
 
         Assert.Equal("pair", receiver.LastOverload);
         Assert.Null(receiver.SingleValue);

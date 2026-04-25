@@ -68,7 +68,7 @@ namespace NetworkingLibrary.Services
 
         public ulong GetLocalSteam64()
         {
-            return 0UL;
+            return LocalSteamId;
         }
 
         public ulong[] GetLobbyMemberSteamIds()

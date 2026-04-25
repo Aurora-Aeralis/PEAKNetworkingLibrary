@@ -167,8 +167,10 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void Shutdown()
         {
+            if (InLobby)
+                LeaveLobby();
+
             IsInitialized = false;
-            InLobby = false;
             offlineIsHost = false;
             HostSteamId64 = LocalSteamId;
             lobbyData.Clear();

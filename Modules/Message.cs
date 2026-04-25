@@ -13,7 +13,7 @@ namespace NetworkingLibrary.Modules
     /// </summary>
     public class Message : IDisposable
     {
-        public const byte PROTOCOL_VERSION = 2;
+        public const byte PROTOCOL_VERSION = 3;
         public static int MaxSize = 64 * 1024;
         public static int MaxLogicalSize => MaxSize * 16;
 
@@ -21,6 +21,7 @@ namespace NetworkingLibrary.Modules
         public uint ModID;
         public string MethodName = string.Empty;
         public int Mask;
+        public string? OverloadKey;
 
         private List<byte> buffer = new();
         internal byte[] readableBuffer = Array.Empty<byte>();
@@ -29,17 +30,27 @@ namespace NetworkingLibrary.Modules
 
         public bool Compressed { get; private set; } = false;
 
-        public Message(uint modId, string methodName, int mask)
+        public Message(uint modId, string methodName, int mask) : this(modId, methodName, mask, null)
         {
-            ProtocolVersion = PROTOCOL_VERSION;
+        }
+
+        public Message(uint modId, string methodName, int mask, string? overloadKey)
+        {
+            ProtocolVersion = overloadKey == null ? (byte)2 : PROTOCOL_VERSION;
             ModID = modId;
             MethodName = methodName;
             Mask = mask;
+            OverloadKey = overloadKey;
 
             WriteByte(ProtocolVersion);
             WriteUInt(ModID);
             WriteString(MethodName);
             WriteInt(Mask);
+            if (ProtocolVersion >= 3)
+            {
+                WriteBool(true);
+                WriteString(overloadKey!);
+            }
         }
 
         public Message(byte[] data)
@@ -49,6 +60,15 @@ namespace NetworkingLibrary.Modules
             ModID = ReadUInt();
             MethodName = ReadString();
             Mask = ReadInt();
+            if (ProtocolVersion >= 3)
+            {
+                var hasOverloadKey = ReadBool();
+                OverloadKey = hasOverloadKey ? ReadString() : null;
+            }
+            else
+            {
+                OverloadKey = null;
+            }
         }
 
         public void SetBytes(byte[] data)

@@ -406,17 +406,49 @@ namespace NetworkingLibrary.Services
         {
             try
             {
-                var msg = new Message(modId, methodName, mask);
                 if (rpcs.TryGetValue(modId, out var methods) && methods.TryGetValue(methodName, out var handlers) && handlers.Count > 0)
                 {
-                    var handler = handlers[0];
-                    var expected = handler.Parameters;
-                    int expectedCount = handler.TakesInfo ? expected.Length - 1 : expected.Length;
-                    if (expectedCount != parameters.Length)
-                        throw new Exception($"Parameter count mismatch: expected {expectedCount}, got {parameters.Length}");
-                    for (int i = 0; i < expectedCount; i++)
+                    MessageHandler chosen = null!;
+                    foreach (var h in handlers)
                     {
-                        var t = expected[i].ParameterType;
+                        if (h.Mask != mask) continue;
+                        var expected = h.Parameters;
+                        int expectedCount = h.TakesInfo ? expected.Length - 1 : expected.Length;
+                        if (expectedCount != parameters.Length) continue;
+
+                        bool ok = true;
+                        for (int i = 0; i < expectedCount; i++)
+                        {
+                            var t = expected[i].ParameterType;
+                            var p = parameters[i];
+                            if (p == null)
+                            {
+                                if (t.IsValueType && Nullable.GetUnderlyingType(t) == null) { ok = false; break; }
+                                continue;
+                            }
+                            if (!t.IsAssignableFrom(p.GetType())) { ok = false; break; }
+                        }
+
+                        if (ok) { chosen = h; break; }
+                    }
+
+                    if (chosen == null)
+                    {
+                        chosen = handlers.FirstOrDefault(h =>
+                        {
+                            int expectedCount = h.TakesInfo ? h.Parameters.Length - 1 : h.Parameters.Length;
+                            return expectedCount == parameters.Length && h.Mask == mask;
+                        }) ?? handlers[0];
+                    }
+
+                    var msg = new Message(modId, methodName, mask, BuildOverloadKey(chosen));
+                    var expectedParams = chosen.Parameters;
+                    int expectedCountFinal = chosen.TakesInfo ? expectedParams.Length - 1 : expectedParams.Length;
+                    if (expectedCountFinal != parameters.Length)
+                        throw new Exception($"Parameter count mismatch for {methodName}: expected {expectedCountFinal}, got {parameters.Length}");
+                    for (int i = 0; i < expectedCountFinal; i++)
+                    {
+                        var t = expectedParams[i].ParameterType;
                         var p = parameters[i];
                         if (p == null)
                         {
@@ -425,12 +457,15 @@ namespace NetworkingLibrary.Services
                             msg.WriteObject(t, null!);
                             continue;
                         }
-                        if (!t.IsAssignableFrom(p.GetType())) throw new Exception($"Type mismatch {t} vs {p.GetType()}");
+                        if (!t.IsAssignableFrom(p.GetType()))
+                            throw new Exception($"Parameter {i} type mismatch: expected {t}, got {p.GetType()}");
                         msg.WriteObject(t, p);
                     }
+                    return msg;
                 }
                 else
                 {
+                    var msg = new Message(modId, methodName, mask);
                     if (parameterTypes != null)
                     {
                         if (parameterTypes.Length != parameters.Length)
@@ -446,7 +481,8 @@ namespace NetworkingLibrary.Services
                                 msg.WriteObject(t, null!);
                                 continue;
                             }
-                            if (!t.IsAssignableFrom(p.GetType())) throw new Exception($"Type mismatch {t} vs {p.GetType()}");
+                            if (!t.IsAssignableFrom(p.GetType()))
+                                throw new Exception($"Parameter {i} type mismatch: expected {t}, got {p.GetType()}");
                             msg.WriteObject(t, p);
                         }
                     }
@@ -458,8 +494,8 @@ namespace NetworkingLibrary.Services
                             msg.WriteObject(p.GetType(), p);
                         }
                     }
+                    return msg;
                 }
-                return msg;
             }
             catch (Exception ex) { Debug.LogError($"BuildMessage failed: {ex}"); return null; }
         }
@@ -473,20 +509,72 @@ namespace NetworkingLibrary.Services
             if (!rpcs.TryGetValue(message.ModID, out var methods)) { Debug.LogWarning($"No mod {message.ModID}"); return; }
             if (!methods.TryGetValue(message.MethodName, out var handlers)) { Debug.LogWarning($"No method {message.MethodName}"); return; }
 
-            foreach (var handler in handlers.ToArray())
+            MessageHandler? chosenHandler = null;
+            object[]? chosenParams = null;
+            MessageHandler? fallbackHandler = null;
+            object[]? fallbackParams = null;
+
+            IEnumerable<MessageHandler> dispatchOrder = handlers.Where(h => h.Mask == message.Mask);
+            if (!string.IsNullOrEmpty(message.OverloadKey))
             {
-                if (handler.Mask != message.Mask) continue;
+                var keyed = dispatchOrder.Where(h => BuildOverloadKey(h) == message.OverloadKey).ToArray();
+                if (keyed.Length > 0) dispatchOrder = keyed.Concat(dispatchOrder.Where(h => BuildOverloadKey(h) != message.OverloadKey));
+            }
+
+            foreach (var handler in dispatchOrder)
+            {
+                if (!TryDeserializeForHandler(message, handler, from, out var callParams, out int unread))
+                    continue;
+
+                if (unread == 0)
+                {
+                    chosenHandler = handler;
+                    chosenParams = callParams;
+                    break;
+                }
+
+                fallbackHandler ??= handler;
+                fallbackParams ??= callParams;
+            }
+
+            if (chosenHandler == null)
+            {
+                chosenHandler = fallbackHandler;
+                chosenParams = fallbackParams;
+            }
+
+            if (chosenHandler == null || chosenParams == null)
+            {
+                Debug.LogWarning($"No matching overload for {message.MethodName} (mask {message.Mask})");
+                return;
+            }
+
+            try { chosenHandler.Method.Invoke(chosenHandler.Target, chosenParams); }
+            catch (Exception ex) { Debug.LogError($"Invoke RPC error: {ex}"); }
+        }
+
+        bool TryDeserializeForHandler(Message source, MessageHandler handler, ulong from, out object[] callParams, out int unread)
+        {
+            callParams = null!;
+            unread = int.MaxValue;
+            try
+            {
+                var msgCopy = new Message(source.ToArray());
                 var pi = handler.Parameters;
                 int paramCount = handler.TakesInfo ? pi.Length - 1 : pi.Length;
-                var callParams = new object[pi.Length];
-                for (int i = 0; i < paramCount; i++) callParams[i] = message.ReadObject(pi[i].ParameterType);
+                callParams = new object[pi.Length];
+                for (int i = 0; i < paramCount; i++) callParams[i] = msgCopy.ReadObject(pi[i].ParameterType);
                 if (handler.TakesInfo)
                 {
                     var t = pi[pi.Length - 1].ParameterType;
                     callParams[pi.Length - 1] = CreateRpcInfoInstance(t, from);
                 }
-                try { handler.Method.Invoke(handler.Target, callParams); }
-                catch (Exception ex) { Debug.LogError($"Invoke RPC error: {ex}"); }
+                unread = msgCopy.UnreadLength();
+                return true;
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -502,6 +590,14 @@ namespace NetworkingLibrary.Services
                 return p!;
             }
             catch { return null!; }
+        }
+
+        static string BuildOverloadKey(MessageHandler handler)
+        {
+            var pi = handler.Parameters;
+            int parameterCount = handler.TakesInfo ? pi.Length - 1 : pi.Length;
+            if (parameterCount <= 0) return string.Empty;
+            return string.Join("|", pi.Take(parameterCount).Select(p => p.ParameterType.AssemblyQualifiedName ?? p.ParameterType.FullName ?? p.ParameterType.Name));
         }
 
         class SlidingWindowRateLimiter

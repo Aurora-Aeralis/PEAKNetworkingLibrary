@@ -91,7 +91,18 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public ulong LocalSteamId { get; private set; } = 1000;
 
-        class Token : IDisposable { Action on; public Token(Action on) { this.on = on; } public void Dispose() => on(); }
+        class Token : IDisposable
+        {
+            Action? on;
+            public Token(Action on) { this.on = on; }
+            public void Dispose()
+            {
+                var action = on;
+                if (action == null) return;
+                on = null;
+                action();
+            }
+        }
 
         bool offlineIsHost = false;
         public bool IsHost => offlineIsHost;
@@ -192,8 +203,25 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public IDisposable RegisterNetworkType(Type type, uint modId, int mask = 0)
         {
-            Net.Logger.LogWarning("This feature is currently not setup in the offline system");
-            return new Token(() => { });
+            if (type == null) throw new ArgumentNullException(nameof(type));
+            foreach (var method in type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                var attrs = method.GetCustomAttributes(false).OfType<CustomRPCAttribute>().ToArray();
+                if (attrs.Length == 0) continue;
+                if (!method.IsStatic) throw new InvalidOperationException($"Cannot register instance RPC method {type.FullName}.{method.Name} without an instance.");
+
+                if (!rpcs.ContainsKey(modId)) rpcs[modId] = new Dictionary<string, List<MessageHandler>>();
+                if (!rpcs[modId].ContainsKey(method.Name)) rpcs[modId][method.Name] = new List<MessageHandler>();
+                rpcs[modId][method.Name].Add(new MessageHandler
+                {
+                    Target = null!,
+                    Method = method,
+                    Parameters = method.GetParameters(),
+                    TakesInfo = method.GetParameters().Length > 0 && method.GetParameters().Last().ParameterType.Name == "RPCInfo",
+                    Mask = mask
+                });
+            }
+            return new Token(() => DeregisterNetworkType(type, modId, mask));
         }
 
         /// <summary>
@@ -215,8 +243,16 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void DeregisterNetworkType(Type type, uint modId, int mask = 0)
         {
-            Net.Logger.LogWarning("This feature is currently not setup in the offline system");
-            return;
+            if (type == null) throw new ArgumentNullException(nameof(type));
+            if (!rpcs.TryGetValue(modId, out var methods)) return;
+            foreach (var methodName in methods.Keys.ToArray())
+            {
+                if (!methods.TryGetValue(methodName, out var handlers)) continue;
+                for (int i = handlers.Count - 1; i >= 0; i--)
+                    if (handlers[i].Method.DeclaringType == type && handlers[i].Mask == mask) handlers.RemoveAt(i);
+                if (handlers.Count == 0) methods.Remove(methodName);
+            }
+            if (methods.Count == 0) rpcs.Remove(modId);
         }
 
         /// <summary>

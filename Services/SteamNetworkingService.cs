@@ -256,7 +256,9 @@ namespace NetworkingLibrary.Services
             {
                 try
                 {
-                    var go = GameObject.Find("SteamCallbackPump");
+                    var existingPumps = UnityEngine.Object.FindObjectsOfType<SteamCallbackPump>(true);
+                    var existingPump = existingPumps?.FirstOrDefault(p => p != null && p.isActiveAndEnabled);
+                    var go = existingPump != null ? existingPump.gameObject : GameObject.Find("SteamCallbackPump");
                     if (go == null)
                     {
                         go = new GameObject("SteamCallbackPump");
@@ -264,10 +266,20 @@ namespace NetworkingLibrary.Services
                         go.AddComponent<SteamCallbackPump>();
                         LogInfo("Created SteamCallbackPump GameObject.");
                     }
-                    else if (go.GetComponent<SteamCallbackPump>() == null)
+                    else
                     {
-                        go.AddComponent<SteamCallbackPump>();
+                        if (!go.activeSelf) go.SetActive(true);
+                        var pump = go.GetComponent<SteamCallbackPump>();
+                        if (pump == null)
+                        {
+                            go.AddComponent<SteamCallbackPump>();
+                        }
+                        else if (!pump.enabled)
+                        {
+                            pump.enabled = true;
+                        }
                     }
+                    GameObject.DontDestroyOnLoad(go);
 
                     SteamCallbackPump.EnablePumping();
                 }

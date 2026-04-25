@@ -5,15 +5,12 @@ using HarmonyLib;
 using System;
 using System.IO;
 using UnityEngine;
-using Mono.Cecil.Cil;
 using System.Reflection;
 using System.Linq;
 
 using NetworkingLibrary.Services;
 using NetworkingLibrary.Modules;
 using NetworkingLibrary.Features;
-using System.Xml.Linq;
-
 namespace NetworkingLibrary
 {
     [BepInPlugin(MyPluginInfo.PLUGIN_GUID, MyPluginInfo.PLUGIN_NAME, MyPluginInfo.PLUGIN_VERSION)]
@@ -65,7 +62,15 @@ namespace NetworkingLibrary
 
             FileManager.InitializeConfig();
 
-            Harmony.PatchAll();
+            try
+            {
+                Harmony ??= new Harmony(MyPluginInfo.PLUGIN_GUID);
+                Harmony.PatchAll();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Failed to apply Harmony patches: {ex}");
+            }
 
             Service = null;
             TryInitializeNetworkingService(Logger, out var initializedService);

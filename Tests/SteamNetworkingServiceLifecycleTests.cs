@@ -388,6 +388,46 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void SetLobbyData_AndSetPlayerData_DoNotThrow_WhenSteamCallsFail()
+    {
+        var service = new SteamNetworkingService();
+        SetInLobby(service, true);
+        SetLobby(service, 9001UL);
+        SetField(service, "setLobbyData", (Action<CSteamID, string, string>)((_, _, _) => throw new InvalidOperationException("set lobby failed")));
+        SetField(service, "setLobbyMemberData", (Action<CSteamID, string, string>)((_, _, _) => throw new InvalidOperationException("set player failed")));
+
+        var lobbyEx = Record.Exception(() => service.SetLobbyData("map", "forest"));
+        var playerEx = Record.Exception(() => service.SetPlayerData("team", "blue"));
+
+        Assert.Null(lobbyEx);
+        Assert.Null(playerEx);
+    }
+
+    [Fact]
+    public void GetLobbyData_AndGetPlayerData_ReturnDefault_WhenSteamCallsFail()
+    {
+        var service = new SteamNetworkingService();
+        SetInLobby(service, true);
+        SetLobby(service, 9001UL);
+        SetField(service, "getLobbyData", (Func<CSteamID, string, string>)((_, _) => throw new InvalidOperationException("get lobby failed")));
+        SetField(service, "getLobbyMemberData", (Func<CSteamID, CSteamID, string, string>)((_, _, _) => throw new InvalidOperationException("get player failed")));
+
+        var lobbyEx = Record.Exception(() =>
+        {
+            var value = service.GetLobbyData<int>("round");
+            Assert.Equal(default, value);
+        });
+        var playerEx = Record.Exception(() =>
+        {
+            var value = service.GetPlayerData<int>(1234UL, "score");
+            Assert.Equal(default, value);
+        });
+
+        Assert.Null(lobbyEx);
+        Assert.Null(playerEx);
+    }
+
+    [Fact]
     public async Task DispatchIncoming_AndBuildMessage_HandleConcurrentRpcRegistrationChanges()
     {
         var service = new SteamNetworkingService();

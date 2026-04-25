@@ -654,7 +654,29 @@ namespace NetworkingLibrary.Services
         public void RPC(uint modId, string methodName, ReliableType reliable, params object[] parameters)
         {
             if (!InLobby) { Net.Logger.LogError("RPC called while not in lobby"); return; }
-            var msg = BuildMessage(modId, methodName, 0, parameters);
+            var msg = BuildMessage(modId, methodName, 0, parameters, null);
+            if (msg == null) return;
+
+            //Net.Logger.LogError($"{players}");
+            foreach (var p in players)
+            {
+                //Net.Logger.LogError($"{p}");
+                if (p == SteamUser.GetSteamID())
+                {
+                    //Net.Logger.LogError($"{SteamUser.GetSteamID()} == {p}");
+                    continue;
+                }
+                EnqueueOrSend(BuildFramedBytesWithMeta(msg, modId, reliable), p, reliable, DeterminePriority(modId, methodName));
+                //Net.Logger.LogError($"Fired to user: {p}");
+            }
+
+            InvokeLocalMessage(new Message(msg.ToArray()), SteamUser.GetSteamID());
+        }
+
+        public void RPC(uint modId, string methodName, ReliableType reliable, Type[] parameterTypes, params object?[] parameters)
+        {
+            if (!InLobby) { Net.Logger.LogError("RPC called while not in lobby"); return; }
+            var msg = BuildMessage(modId, methodName, 0, parameters, parameterTypes);
             if (msg == null) return;
 
             //Net.Logger.LogError($"{players}");
@@ -685,7 +707,16 @@ namespace NetworkingLibrary.Services
         public void RPCTarget(uint modId, string methodName, CSteamID target, ReliableType reliable, params object[] parameters)
         {
             if (!InLobby) { Net.Logger.LogError("Cannot RPC target when not in lobby"); return; }
-            var msg = BuildMessage(modId, methodName, 0, parameters);
+            var msg = BuildMessage(modId, methodName, 0, parameters, null);
+            if (msg == null) return;
+            var framed = BuildFramedBytesWithMeta(msg, modId, reliable);
+            EnqueueOrSend(framed, target, reliable, DeterminePriority(modId, methodName));
+        }
+
+        public void RPCTarget(uint modId, string methodName, CSteamID target, ReliableType reliable, Type[] parameterTypes, params object?[] parameters)
+        {
+            if (!InLobby) { Net.Logger.LogError("Cannot RPC target when not in lobby"); return; }
+            var msg = BuildMessage(modId, methodName, 0, parameters, parameterTypes);
             if (msg == null) return;
             var framed = BuildFramedBytesWithMeta(msg, modId, reliable);
             EnqueueOrSend(framed, target, reliable, DeterminePriority(modId, methodName));
@@ -1631,7 +1662,7 @@ namespace NetworkingLibrary.Services
             }
         }
 
-        Message? BuildMessage(uint modId, string methodName, int mask, object[] parameters)
+        Message? BuildMessage(uint modId, string methodName, int mask, object?[] parameters, Type[]? parameterTypes)
         {
             try
             {
@@ -1650,7 +1681,14 @@ namespace NetworkingLibrary.Services
                         bool ok = true;
                         for (int i = 0; i < expectedCount; i++)
                         {
-                            if (!expected[i].ParameterType.IsAssignableFrom(parameters[i].GetType())) { ok = false; break; }
+                            var t = expected[i].ParameterType;
+                            var p = parameters[i];
+                            if (p == null)
+                            {
+                                if (t.IsValueType && Nullable.GetUnderlyingType(t) == null) { ok = false; break; }
+                                continue;
+                            }
+                            if (!t.IsAssignableFrom(p.GetType())) { ok = false; break; }
                         }
                         if (ok) { chosen = h; break; }
                     }
@@ -1669,10 +1707,48 @@ namespace NetworkingLibrary.Services
                     for (int i = 0; i < expectedCountFinal; i++)
                     {
                         var t = expectedParams[i].ParameterType;
-                        var p = parameters[i] ?? throw new Exception($"Null parameter {i}");
+                        var p = parameters[i];
+                        if (p == null)
+                        {
+                            if (t.IsValueType && Nullable.GetUnderlyingType(t) == null)
+                                throw new Exception($"Parameter {i} for {methodName} cannot be null; expected non-nullable {t}.");
+                            msg.WriteObject(t, null!);
+                            continue;
+                        }
                         if (!t.IsAssignableFrom(p.GetType()))
                             throw new Exception($"Parameter {i} type mismatch: expected {t}, got {p.GetType()}");
                         msg.WriteObject(t, p);
+                    }
+                }
+                else
+                {
+                    if (parameterTypes != null)
+                    {
+                        if (parameterTypes.Length != parameters.Length)
+                            throw new Exception($"Parameter type count mismatch: expected {parameterTypes.Length}, got {parameters.Length}");
+                        for (int i = 0; i < parameters.Length; i++)
+                        {
+                            var t = parameterTypes[i];
+                            var p = parameters[i];
+                            if (p == null)
+                            {
+                                if (t.IsValueType && Nullable.GetUnderlyingType(t) == null)
+                                    throw new Exception($"Parameter {i} for {methodName} cannot be null; expected non-nullable {t}.");
+                                msg.WriteObject(t, null!);
+                                continue;
+                            }
+                            if (!t.IsAssignableFrom(p.GetType()))
+                                throw new Exception($"Parameter {i} type mismatch: expected {t}, got {p.GetType()}");
+                            msg.WriteObject(t, p);
+                        }
+                    }
+                    else
+                    {
+                        for (int i = 0; i < parameters.Length; i++)
+                        {
+                            var p = parameters[i] ?? throw new Exception($"Parameter {i} is null for unregistered RPC {methodName}; use typed RPC overload.");
+                            msg.WriteObject(p.GetType(), p);
+                        }
                     }
                 }
 

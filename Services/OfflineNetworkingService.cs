@@ -282,7 +282,14 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void RPC(uint modId, string methodName, ReliableType reliable, params object[] parameters)
         {
-            var msg = BuildMessage(modId, methodName, 0, parameters);
+            var msg = BuildMessage(modId, methodName, 0, parameters, null);
+            if (msg == null) return;
+            DispatchIncoming(msg, LocalSteamId);
+        }
+
+        public void RPC(uint modId, string methodName, ReliableType reliable, Type[] parameterTypes, params object?[] parameters)
+        {
+            var msg = BuildMessage(modId, methodName, 0, parameters, parameterTypes);
             if (msg == null) return;
             DispatchIncoming(msg, LocalSteamId);
         }
@@ -291,7 +298,14 @@ namespace NetworkingLibrary.Services
         /// </summary>
         public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, params object[] parameters)
         {
-            var msg = BuildMessage(modId, methodName, 0, parameters);
+            var msg = BuildMessage(modId, methodName, 0, parameters, null);
+            if (msg == null) return;
+            if (targetSteamId64 == LocalSteamId) DispatchIncoming(msg, LocalSteamId);
+        }
+
+        public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, Type[] parameterTypes, params object?[] parameters)
+        {
+            var msg = BuildMessage(modId, methodName, 0, parameters, parameterTypes);
             if (msg == null) return;
             if (targetSteamId64 == LocalSteamId) DispatchIncoming(msg, LocalSteamId);
         }
@@ -357,7 +371,7 @@ namespace NetworkingLibrary.Services
             // Nothing queued in offline mode.
         }
 
-        Message? BuildMessage(uint modId, string methodName, int mask, object[] parameters)
+        Message? BuildMessage(uint modId, string methodName, int mask, object?[] parameters, Type[]? parameterTypes)
         {
             try
             {
@@ -372,17 +386,46 @@ namespace NetworkingLibrary.Services
                     for (int i = 0; i < expectedCount; i++)
                     {
                         var t = expected[i].ParameterType;
-                        var p = parameters[i] ?? throw new Exception($"Null parameter {i}");
+                        var p = parameters[i];
+                        if (p == null)
+                        {
+                            if (t.IsValueType && Nullable.GetUnderlyingType(t) == null)
+                                throw new Exception($"Parameter {i} for {methodName} cannot be null; expected non-nullable {t}.");
+                            msg.WriteObject(t, null!);
+                            continue;
+                        }
                         if (!t.IsAssignableFrom(p.GetType())) throw new Exception($"Type mismatch {t} vs {p.GetType()}");
                         msg.WriteObject(t, p);
                     }
                 }
                 else
                 {
-                    foreach (var p in parameters)
+                    if (parameterTypes != null)
                     {
-                        if (p == null) throw new Exception("Null parameter");
-                        msg.WriteObject(p.GetType(), p);
+                        if (parameterTypes.Length != parameters.Length)
+                            throw new Exception($"Parameter type count mismatch: expected {parameterTypes.Length}, got {parameters.Length}");
+                        for (int i = 0; i < parameters.Length; i++)
+                        {
+                            var t = parameterTypes[i];
+                            var p = parameters[i];
+                            if (p == null)
+                            {
+                                if (t.IsValueType && Nullable.GetUnderlyingType(t) == null)
+                                    throw new Exception($"Parameter {i} for {methodName} cannot be null; expected non-nullable {t}.");
+                                msg.WriteObject(t, null!);
+                                continue;
+                            }
+                            if (!t.IsAssignableFrom(p.GetType())) throw new Exception($"Type mismatch {t} vs {p.GetType()}");
+                            msg.WriteObject(t, p);
+                        }
+                    }
+                    else
+                    {
+                        for (int i = 0; i < parameters.Length; i++)
+                        {
+                            var p = parameters[i] ?? throw new Exception($"Parameter {i} is null for unregistered RPC {methodName}; use typed RPC overload.");
+                            msg.WriteObject(p.GetType(), p);
+                        }
                     }
                 }
                 return msg;

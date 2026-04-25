@@ -75,4 +75,19 @@ public class MessageCompressionBoundsTests
         Assert.Equal(beforeCompression, afterCompression);
         Assert.Equal(beforeCompression, decompressed);
     }
+
+    [Fact]
+    public void CompressPayload_ByteArray_Overload_Matches_Message_Overload_And_Roundtrips()
+    {
+        using var source = new Message(11u, "compress", 4);
+        source.WriteString("roundtrip");
+        source.WriteBytes(new byte[] { 1, 5, 9, 13, 17 });
+        var payload = source.ToArray();
+
+        var compressedFromMessage = source.CompressPayload();
+        var compressedFromPayload = source.CompressPayload(payload);
+
+        Assert.Equal(compressedFromMessage, compressedFromPayload);
+        Assert.Equal(payload, Message.DecompressPayload(compressedFromPayload));
+    }
 }

@@ -1079,7 +1079,7 @@ namespace NetworkingLibrary.Services
         {
             var payload = msg.ToArray();
             bool compress = payload.Length > 1024;
-            if (compress) payload = msg.CompressPayload(); // Uncertain of this messes up everything or not, did not test this.
+            if (compress) payload = msg.CompressPayload(payload);
 
             byte flags = 0;
             if (compress) flags |= COMPRESSED_FLAG;

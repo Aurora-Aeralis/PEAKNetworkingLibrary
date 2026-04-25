@@ -13,13 +13,14 @@ namespace NetworkingLibrary.Modules
     /// </summary>
     public class Message : IDisposable
     {
-        public const byte PROTOCOL_VERSION = 2;
+        public const byte PROTOCOL_VERSION = 3;
         public static int MaxSize = 64 * 1024;
 
         public byte ProtocolVersion;
         public uint ModID;
         public string MethodName = string.Empty;
         public int Mask;
+        public string? OverloadKey;
 
         private List<byte> buffer = new();
         internal byte[] readableBuffer = Array.Empty<byte>();
@@ -28,17 +29,24 @@ namespace NetworkingLibrary.Modules
 
         public bool Compressed { get; private set; } = false;
 
-        public Message(uint modId, string methodName, int mask)
+        public Message(uint modId, string methodName, int mask) : this(modId, methodName, mask, null)
+        {
+        }
+
+        public Message(uint modId, string methodName, int mask, string? overloadKey)
         {
             ProtocolVersion = PROTOCOL_VERSION;
             ModID = modId;
             MethodName = methodName;
             Mask = mask;
+            OverloadKey = overloadKey;
 
             WriteByte(ProtocolVersion);
             WriteUInt(ModID);
             WriteString(MethodName);
             WriteInt(Mask);
+            WriteBool(overloadKey != null);
+            if (overloadKey != null) WriteString(overloadKey);
         }
 
         public Message(byte[] data)
@@ -48,6 +56,15 @@ namespace NetworkingLibrary.Modules
             ModID = ReadUInt();
             MethodName = ReadString();
             Mask = ReadInt();
+            if (ProtocolVersion >= 3)
+            {
+                var hasOverloadKey = ReadBool();
+                OverloadKey = hasOverloadKey ? ReadString() : null;
+            }
+            else
+            {
+                OverloadKey = null;
+            }
         }
 
         public void SetBytes(byte[] data)

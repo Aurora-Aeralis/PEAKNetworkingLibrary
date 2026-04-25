@@ -384,7 +384,6 @@ namespace NetworkingLibrary.Services
         {
             try
             {
-                var msg = new Message(modId, methodName, mask);
                 if (rpcs.TryGetValue(modId, out var methods) && methods.TryGetValue(methodName, out var handlers) && handlers.Count > 0)
                 {
                     MessageHandler chosen = null!;
@@ -420,6 +419,7 @@ namespace NetworkingLibrary.Services
                         }) ?? handlers[0];
                     }
 
+                    var msg = new Message(modId, methodName, mask, BuildOverloadKey(chosen));
                     var expectedParams = chosen.Parameters;
                     int expectedCountFinal = chosen.TakesInfo ? expectedParams.Length - 1 : expectedParams.Length;
                     if (expectedCountFinal != parameters.Length)
@@ -439,9 +439,11 @@ namespace NetworkingLibrary.Services
                             throw new Exception($"Parameter {i} type mismatch: expected {t}, got {p.GetType()}");
                         msg.WriteObject(t, p);
                     }
+                    return msg;
                 }
                 else
                 {
+                    var msg = new Message(modId, methodName, mask);
                     if (parameterTypes != null)
                     {
                         if (parameterTypes.Length != parameters.Length)
@@ -470,8 +472,8 @@ namespace NetworkingLibrary.Services
                             msg.WriteObject(p.GetType(), p);
                         }
                     }
+                    return msg;
                 }
-                return msg;
             }
             catch (Exception ex) { Debug.LogError($"BuildMessage failed: {ex}"); return null; }
         }
@@ -490,10 +492,15 @@ namespace NetworkingLibrary.Services
             MessageHandler? fallbackHandler = null;
             object[]? fallbackParams = null;
 
-            foreach (var handler in handlers.ToArray())
+            IEnumerable<MessageHandler> dispatchOrder = handlers.Where(h => h.Mask == message.Mask);
+            if (!string.IsNullOrEmpty(message.OverloadKey))
             {
-                if (handler.Mask != message.Mask) continue;
+                var keyed = dispatchOrder.Where(h => BuildOverloadKey(h) == message.OverloadKey).ToArray();
+                if (keyed.Length > 0) dispatchOrder = keyed.Concat(dispatchOrder.Where(h => BuildOverloadKey(h) != message.OverloadKey));
+            }
 
+            foreach (var handler in dispatchOrder)
+            {
                 if (!TryDeserializeForHandler(message, handler, from, out var callParams, out int unread))
                     continue;
 
@@ -561,6 +568,14 @@ namespace NetworkingLibrary.Services
                 return p!;
             }
             catch { return null!; }
+        }
+
+        static string BuildOverloadKey(MessageHandler handler)
+        {
+            var pi = handler.Parameters;
+            int parameterCount = handler.TakesInfo ? pi.Length - 1 : pi.Length;
+            if (parameterCount <= 0) return string.Empty;
+            return string.Join("|", pi.Take(parameterCount).Select(p => p.ParameterType.AssemblyQualifiedName ?? p.ParameterType.FullName ?? p.ParameterType.Name));
         }
 
         class SlidingWindowRateLimiter

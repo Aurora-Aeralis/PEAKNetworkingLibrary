@@ -502,6 +502,50 @@ public class SteamNetworkingServiceLifecycleTests
         Assert.Equal(new IntPtr(writes - 1 + 10_000), secondBuffer[writes - 1]);
     }
 
+    [Fact]
+    public void SendWithPossibleAck_SelfTarget_FrameUsesIncomingPipeline_AndClearsUnacked()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new RpcReceiver();
+        using var _ = service.RegisterNetworkObject(receiver, TestModId, mask: 0);
+
+        var local = SteamUser.GetSteamID();
+        var msg = new Message(TestModId, nameof(RpcReceiver.OnPing), 0);
+        msg.WriteObject(typeof(int), 73);
+        var framed = BuildFramed(service, msg, TestModId, ReliableType.Reliable);
+
+        InvokeNonPublic(service, "SendWithPossibleAck", framed, local, ReliableType.Reliable);
+
+        Assert.Equal(1, receiver.CallCount);
+        Assert.Equal(73, receiver.LastValue);
+        AssertUnackedCount(service, 0);
+    }
+
+    [Fact]
+    public void SendBytes_SelfTarget_FrameStillHonorsIncomingValidator()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new RpcReceiver();
+        using var _ = service.RegisterNetworkObject(receiver, TestModId, mask: 0);
+
+        var local = SteamUser.GetSteamID();
+        var msg = new Message(TestModId, nameof(RpcReceiver.OnPing), 0);
+        msg.WriteObject(typeof(int), 5);
+        var framed = BuildFramed(service, msg, TestModId, ReliableType.Unreliable);
+        var validatorCalls = 0;
+        service.IncomingValidator = (_, sender) =>
+        {
+            validatorCalls++;
+            Assert.Equal(local.m_SteamID, sender);
+            return false;
+        };
+
+        InvokeNonPublic(service, "SendBytes", framed, local, ReliableType.Unreliable);
+
+        Assert.Equal(1, validatorCalls);
+        Assert.Equal(0, receiver.CallCount);
+    }
+
     static void SetInLobby(SteamNetworkingService service, bool value)
     {
         typeof(SteamNetworkingService).GetField("<InLobby>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(service, value);
@@ -604,6 +648,11 @@ public class SteamNetworkingServiceLifecycleTests
     static IntPtr[] GetInboundBuffer(SteamNetworkingService service)
     {
         return (IntPtr[])GetField(service, "inMessages")!;
+    }
+
+    static byte[] BuildFramed(SteamNetworkingService service, Message message, uint modId, ReliableType reliable)
+    {
+        return (byte[])InvokeNonPublic(service, "BuildFramedBytesWithMeta", message, modId, reliable)!;
     }
 
     static object? InvokeNonPublic(SteamNetworkingService service, string methodName, params object[] args)

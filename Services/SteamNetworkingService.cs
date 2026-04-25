@@ -1141,8 +1141,7 @@ namespace NetworkingLibrary.Services
 
             if (target == SteamUser.GetSteamID())
             {
-                var m = new Message(data);
-                InvokeLocalMessage(m, SteamUser.GetSteamID());
+                ProcessIncomingFrame(data, SteamUser.GetSteamID());
                 return;
             }
 

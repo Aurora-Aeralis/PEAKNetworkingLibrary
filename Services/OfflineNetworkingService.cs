@@ -157,8 +157,10 @@ namespace NetworkingLibrary.Services
             lobbyData.Clear();
             perPlayerData.Clear();
             perPlayerData[LocalSteamId] = new Dictionary<string, string>();
+            // Event contract (deterministic): LobbyCreated (host-only) -> LobbyEntered -> PlayerEntered(local member).
             LobbyCreated?.Invoke();
             LobbyEntered?.Invoke();
+            PlayerEntered?.Invoke(LocalSteamId);
             offlineIsHost = true;
         }
 
@@ -172,6 +174,7 @@ namespace NetworkingLibrary.Services
             lobbyData.Clear();
             perPlayerData.Clear();
             perPlayerData[LocalSteamId] = new Dictionary<string, string>();
+            // Event contract (deterministic): LobbyEntered -> PlayerEntered(local member).
             LobbyEntered?.Invoke();
             PlayerEntered?.Invoke(LocalSteamId);
             offlineIsHost = false;

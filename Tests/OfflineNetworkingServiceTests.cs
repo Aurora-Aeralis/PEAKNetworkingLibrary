@@ -102,4 +102,47 @@ public class OfflineNetworkingServiceTests
 
         Assert.Equal(42, receiver.LastValue);
     }
+
+    [Fact]
+    public void CreateLobby_RaisesDeterministicEventSequence()
+    {
+        var service = new OfflineNetworkingService();
+        var events = new List<string>();
+
+        service.LobbyCreated += () => events.Add("LobbyCreated");
+        service.LobbyEntered += () => events.Add("LobbyEntered");
+        service.PlayerEntered += steamId => events.Add($"PlayerEntered:{steamId}");
+
+        service.CreateLobby();
+
+        Assert.Equal(
+            new[]
+            {
+                "LobbyCreated",
+                "LobbyEntered",
+                $"PlayerEntered:{service.LocalSteamId}"
+            },
+            events);
+    }
+
+    [Fact]
+    public void JoinLobby_RaisesDeterministicEventSequence()
+    {
+        var service = new OfflineNetworkingService();
+        var events = new List<string>();
+
+        service.LobbyCreated += () => events.Add("LobbyCreated");
+        service.LobbyEntered += () => events.Add("LobbyEntered");
+        service.PlayerEntered += steamId => events.Add($"PlayerEntered:{steamId}");
+
+        service.JoinLobby(4242UL);
+
+        Assert.Equal(
+            new[]
+            {
+                "LobbyEntered",
+                $"PlayerEntered:{service.LocalSteamId}"
+            },
+            events);
+    }
 }

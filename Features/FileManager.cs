@@ -5,7 +5,6 @@ using System.Text;
 using BepInEx.Configuration;
 using BepInEx;
 using UnityEngine;
-using UnityEngine.Analytics;
 
 namespace NetworkingLibrary.Features
 {

@@ -28,6 +28,28 @@ public class SteamNetworkingServiceLifecycleTests
         }
     }
 
+    sealed class LargePayloadRpcReceiver
+    {
+        public int IntCallCount { get; private set; }
+        public int LastIntValue { get; private set; } = -1;
+        public int StringCallCount { get; private set; }
+        public string LastStringValue { get; private set; } = string.Empty;
+
+        [CustomRPC]
+        void OnPing(int value)
+        {
+            LastIntValue = value;
+            IntCallCount++;
+        }
+
+        [CustomRPC]
+        void OnLargePing(string value)
+        {
+            LastStringValue = value;
+            StringCallCount++;
+        }
+    }
+
     sealed class MixedRpcReceiver
     {
         [CustomRPC]
@@ -584,6 +606,65 @@ public class SteamNetworkingServiceLifecycleTests
 
         Assert.Equal(1, validatorCalls);
         Assert.Equal(0, receiver.CallCount);
+    }
+
+    [Fact]
+    public void ProcessIncomingFrame_SignedOnly_ResolvesModIdAndDispatches()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new LargePayloadRpcReceiver();
+        using var _ = service.RegisterNetworkObject(receiver, TestModId, mask: 0);
+        using var rsa = RSA.Create(2048);
+        service.RegisterModSigner(TestModId, bytes => rsa.SignData(bytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
+        service.RegisterModPublicKey(TestModId, rsa.ExportParameters(false));
+
+        var msg = new Message(TestModId, "OnPing", 0);
+        msg.WriteObject(typeof(int), 123);
+        var framed = BuildFramed(service, msg, TestModId, ReliableType.Unreliable);
+
+        InvokeNonPublic(service, "ProcessIncomingFrame", framed, new CSteamID(4242UL));
+
+        Assert.Equal(1, receiver.IntCallCount);
+        Assert.Equal(123, receiver.LastIntValue);
+    }
+
+    [Fact]
+    public void ProcessIncomingFrame_CompressedOnly_StillDispatches()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new LargePayloadRpcReceiver();
+        using var _ = service.RegisterNetworkObject(receiver, TestModId, mask: 0);
+        var largeText = new string('x', 4000);
+
+        var msg = new Message(TestModId, "OnLargePing", 0);
+        msg.WriteObject(typeof(string), largeText);
+        var framed = BuildFramed(service, msg, TestModId, ReliableType.Unreliable);
+
+        InvokeNonPublic(service, "ProcessIncomingFrame", framed, new CSteamID(4343UL));
+
+        Assert.Equal(1, receiver.StringCallCount);
+        Assert.Equal(largeText, receiver.LastStringValue);
+    }
+
+    [Fact]
+    public void ProcessIncomingFrame_SignedAndCompressed_ResolvesModIdAndDispatches()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new LargePayloadRpcReceiver();
+        using var _ = service.RegisterNetworkObject(receiver, TestModId, mask: 0);
+        using var rsa = RSA.Create(2048);
+        service.RegisterModSigner(TestModId, bytes => rsa.SignData(bytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
+        service.RegisterModPublicKey(TestModId, rsa.ExportParameters(false));
+        var largeText = new string('y', 5000);
+
+        var msg = new Message(TestModId, "OnLargePing", 0);
+        msg.WriteObject(typeof(string), largeText);
+        var framed = BuildFramed(service, msg, TestModId, ReliableType.Unreliable);
+
+        InvokeNonPublic(service, "ProcessIncomingFrame", framed, new CSteamID(4444UL));
+
+        Assert.Equal(1, receiver.StringCallCount);
+        Assert.Equal(largeText, receiver.LastStringValue);
     }
 
     static void SetInLobby(SteamNetworkingService service, bool value)

@@ -1463,72 +1463,81 @@ namespace NetworkingLibrary.Services
 
                 if (hasSign)
                 {
-                    if (payloadToProcess.Length < 5)
+                    if (payloadToProcess.Length < 2)
                     {
                         //LogWarning("ProcessIncomingFrame: Signed payload too small");
                         return;
                     }
 
-                    if (payloadToProcess.Length < 1 + 4)
+                    var modCandidates = compressed ? new List<uint>(2) : new List<uint>(1);
+                    if (payloadToProcess.Length >= 1 + 4)
                     {
-                        //LogWarning("ProcessIncomingFrame: Signed payload too small to contain ModID");
-                        return;
+                        modCandidates.Add(BinaryPrimitives.ReadUInt32LittleEndian(payloadToProcess.AsSpan(1, 4)));
                     }
 
-                    uint modId = BinaryPrimitives.ReadUInt32LittleEndian(payloadToProcess.AsSpan(1, 4));
-                    RSAParameters rsaParams;
-                    lock (cryptoStateLock)
+                    int minSigOffset = Math.Max(0, payloadToProcess.Length - (ushort.MaxValue + 2));
+                    for (int sigSectionStart = payloadToProcess.Length - 2; sigSectionStart >= minSigOffset; sigSectionStart--)
                     {
-                        if (!modPublicKeys.TryGetValue(modId, out rsaParams))
+                        ushort declaredLen = BinaryPrimitives.ReadUInt16LittleEndian(payloadToProcess.AsSpan(sigSectionStart, 2));
+                        if (declaredLen == 0) continue;
+                        int sigEnd = sigSectionStart + 2 + declaredLen;
+                        if (sigEnd != payloadToProcess.Length) continue;
+
+                        var signature = new byte[declaredLen];
+                        Array.Copy(payloadToProcess, sigSectionStart + 2, signature, 0, declaredLen);
+                        var dataOnly = new byte[sigSectionStart];
+                        Array.Copy(payloadToProcess, 0, dataOnly, 0, sigSectionStart);
+
+                        if (compressed)
                         {
-                            //LogWarning($"ProcessIncomingFrame: No public key registered for mod {modId}; dropping signed msg");
-                            return;
+                            try
+                            {
+                                var decompressedForHeader = Message.DecompressPayload(dataOnly, Message.MaxLogicalSize);
+                                if (decompressedForHeader.Length >= 1 + 4)
+                                {
+                                    uint modIdFromDecompressed = BinaryPrimitives.ReadUInt32LittleEndian(decompressedForHeader.AsSpan(1, 4));
+                                    if (!modCandidates.Contains(modIdFromDecompressed))
+                                    {
+                                        modCandidates.Add(modIdFromDecompressed);
+                                    }
+                                }
+                            }
+                            catch
+                            {
+                            }
+                        }
+
+                        foreach (var modId in modCandidates)
+                        {
+                            RSAParameters rsaParams;
+                            lock (cryptoStateLock)
+                            {
+                                if (!modPublicKeys.TryGetValue(modId, out rsaParams)) continue;
+                            }
+
+                            int expectedSigLen = rsaParams.Modulus?.Length ?? 0;
+                            if (expectedSigLen != declaredLen) continue;
+
+                            try
+                            {
+                                using var rsa = new RSACryptoServiceProvider();
+                                rsa.ImportParameters(rsaParams);
+                                var ok = rsa.VerifyData(dataOnly, CryptoConfig.MapNameToOID("SHA256"), signature);
+                                if (!ok) continue;
+                                payloadToProcess = dataOnly;
+                                goto SignatureVerified;
+                            }
+                            catch (Exception ex)
+                            {
+                                LogError($"ProcessIncomingFrame: Signature verification error: {ex}");
+                                return;
+                            }
                         }
                     }
 
-                    int expectedSigLen = rsaParams.Modulus?.Length ?? 0;
-                    if (expectedSigLen <= 0 || payloadToProcess.Length < expectedSigLen + 2)
-                    {
-                        //LogWarning("ProcessIncomingFrame: Signed payload too small for expected signature length");
-                        return;
-                    }
-
-                    int sigSectionStart = payloadToProcess.Length - expectedSigLen - 2;
-                    if (sigSectionStart < 0)
-                    {
-                        //LogWarning("ProcessIncomingFrame: Signature section invalid");
-                        return;
-                    }
-
-                    ushort declaredLen = BinaryPrimitives.ReadUInt16LittleEndian(payloadToProcess.AsSpan(sigSectionStart, 2));
-                    if (declaredLen != expectedSigLen)
-                    {
-                        //LogWarning($"ProcessIncomingFrame: Signature length mismatch (declared={declaredLen}, expected={expectedSigLen}); dropping");
-                        return;
-                    }
-
-                    var signature = new byte[expectedSigLen];
-                    Array.Copy(payloadToProcess, sigSectionStart + 2, signature, 0, expectedSigLen);
-                    var dataOnly = new byte[sigSectionStart];
-                    Array.Copy(payloadToProcess, 0, dataOnly, 0, sigSectionStart);
-
-                    try
-                    {
-                        using var rsa = new RSACryptoServiceProvider();
-                        rsa.ImportParameters(rsaParams);
-                        var ok = rsa.VerifyData(dataOnly, CryptoConfig.MapNameToOID("SHA256"), signature);
-                        if (!ok)
-                        {
-                            //LogWarning("ProcessIncomingFrame: Signature verification failed; dropping");
-                            return;
-                        }
-                        payloadToProcess = dataOnly;
-                    }
-                    catch (Exception ex)
-                    {
-                        LogError($"ProcessIncomingFrame: Signature verification error: {ex}");
-                        return;
-                    }
+                    //LogWarning("ProcessIncomingFrame: Signature verification failed; dropping");
+                    return;
+                SignatureVerified:;
                 }
 
                 if (compressed)

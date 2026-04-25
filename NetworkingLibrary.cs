@@ -44,9 +44,19 @@ namespace NetworkingLibrary
             Service = NetworkingServiceFactory.CreateDefaultService();
             Service.Initialize();
 
-            var go = new GameObject($"{MyPluginInfo.PLUGIN_NAME}.Poller");
-            go.AddComponent<NetworkingPoller>().hideFlags = HideFlags.HideAndDontSave;
-            DontDestroyOnLoad(go);
+            var pollerName = $"{MyPluginInfo.PLUGIN_NAME}.Poller";
+            var existingPoller = FindObjectsOfType<NetworkingPoller>(true).FirstOrDefault();
+            var go = existingPoller != null ? existingPoller.gameObject : GameObject.Find(pollerName);
+            if (go == null)
+            {
+                go = new GameObject(pollerName);
+                go.AddComponent<NetworkingPoller>().hideFlags = HideFlags.HideAndDontSave;
+                DontDestroyOnLoad(go);
+            }
+            else if (go.GetComponent<NetworkingPoller>() == null)
+            {
+                go.AddComponent<NetworkingPoller>().hideFlags = HideFlags.HideAndDontSave;
+            }
 
             Logger.LogInfo($"{MyPluginInfo.PLUGIN_NAME} v{MyPluginInfo.PLUGIN_VERSION} has fully loaded!");
         }

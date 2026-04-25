@@ -58,6 +58,10 @@ namespace NetworkingLibrary.Modules
         {
             SetBytes(data);
             ProtocolVersion = ReadByte();
+            if (ProtocolVersion < 1 || ProtocolVersion > PROTOCOL_VERSION)
+            {
+                throw new Exception($"Unsupported message protocol version {ProtocolVersion}. Supported range is 1-{PROTOCOL_VERSION}.");
+            }
             ModID = ReadUInt();
             MethodName = ReadString();
             Mask = ReadInt();

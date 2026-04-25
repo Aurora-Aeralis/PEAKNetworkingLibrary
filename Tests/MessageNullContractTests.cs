@@ -158,6 +158,17 @@ public class MessageNullContractTests
         Assert.Equal("value", read.ReadString());
     }
 
+    [Fact]
+    public void Ctor_Rejects_Unsupported_ProtocolVersion()
+    {
+        var message = NewMessage();
+        var bytes = message.ToArray();
+        bytes[0] = Message.PROTOCOL_VERSION + 1;
+
+        var ex = Assert.Throws<Exception>(() => new Message(bytes));
+        Assert.Contains("Unsupported message protocol version", ex.Message);
+    }
+
 
     [Fact]
     public void ReadString_Rejects_Excessive_Length()

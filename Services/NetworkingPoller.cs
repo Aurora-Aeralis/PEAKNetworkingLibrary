@@ -1,5 +1,6 @@
 ﻿using System;
 using UnityEngine;
+using NetworkingLibrary.Modules;
 
 namespace NetworkingLibrary.Services
 {
@@ -9,6 +10,7 @@ namespace NetworkingLibrary.Services
         {
             try
             {
+                UnityMainThreadDispatcher.ProcessPendingMainThreadWork();
                 Net.Service?.PollReceive();
             }
             catch (Exception ex)

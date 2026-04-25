@@ -55,7 +55,7 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
-    public void LeaveAndShutdown_ClearsTransientSequenceAndRateLimiterState()
+    public void Leave_PreservesOutgoingSequence_AndShutdown_ClearsAllTransientState()
     {
         var service = new SteamNetworkingService();
 
@@ -67,11 +67,11 @@ public class SteamNetworkingServiceLifecycleTests
 
         AssertDictionaryCount(service, "lastSeenSequence", 0);
         AssertDictionaryCount(service, "rateLimiters", 0);
-        AssertDictionaryCount(service, "outgoingSequencePerMod", 0);
+        AssertDictionaryCount(service, "outgoingSequencePerMod", 1);
 
         SeedLastSeenSequence(service);
         SeedRateLimiters(service);
-        SeedOutgoingSequencePerMod(service);
+        SeedOutgoingSequencePerMod(service, 778);
 
         service.Shutdown();
 
@@ -220,10 +220,10 @@ public class SteamNetworkingServiceLifecycleTests
         dict.Add(5678UL, limiter);
     }
 
-    static void SeedOutgoingSequencePerMod(SteamNetworkingService service)
+    static void SeedOutgoingSequencePerMod(SteamNetworkingService service, uint modId = TestModId)
     {
         var dict = (IDictionary)GetField(service, "outgoingSequencePerMod")!;
-        dict.Add(TestModId, 7UL);
+        dict.Add(modId, 7UL);
     }
 
     static void AssertDictionaryCount(SteamNetworkingService service, string dictionaryFieldName, int expected)

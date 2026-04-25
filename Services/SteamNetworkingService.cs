@@ -1779,9 +1779,14 @@ namespace NetworkingLibrary.Services
             lock (cryptoStateLock)
             {
                 if (!handshakeStates.TryGetValue(sender.m_SteamID, out var current) || current.Sym == null) return;
+                if (!current.Sym.SequenceEqual(sym))
+                {
+                    Net.Logger.LogWarning("Handshake state changed before confirm commit; discarding stale confirmation");
+                    return;
+                }
                 current.Completed = true;
                 handshakeStates[sender.m_SteamID] = current;
-                perPeerSymmetricKey[sender.m_SteamID] = current.Sym;
+                perPeerSymmetricKey[sender.m_SteamID] = sym;
             }
         }
 

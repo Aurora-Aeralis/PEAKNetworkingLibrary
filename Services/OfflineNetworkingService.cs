@@ -493,6 +493,13 @@ namespace NetworkingLibrary.Services
                             throw new Exception($"Parameter {i} type mismatch: expected {t}, got {p.GetType()}");
                         msg.WriteObject(t, p);
                     }
+
+                    if (msg.Length() > Message.MaxLogicalSize)
+                    {
+                        Debug.LogError("Message exceeds maximum allowed overall size.");
+                        return null;
+                    }
+
                     return msg;
                 }
                 else
@@ -526,6 +533,13 @@ namespace NetworkingLibrary.Services
                             msg.WriteObject(p.GetType(), p);
                         }
                     }
+
+                    if (msg.Length() > Message.MaxLogicalSize)
+                    {
+                        Debug.LogError("Message exceeds maximum allowed overall size.");
+                        return null;
+                    }
+
                     return msg;
                 }
             }

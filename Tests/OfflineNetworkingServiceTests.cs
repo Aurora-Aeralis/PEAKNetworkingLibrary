@@ -12,11 +12,19 @@ public class OfflineNetworkingServiceTests
     {
         public int LastValue { get; private set; } = -1;
         public int CallCount { get; private set; }
+        public int LastBytesLength { get; private set; } = -1;
 
         [CustomRPC]
         void OnPing(int value)
         {
             LastValue = value;
+            CallCount++;
+        }
+
+        [CustomRPC]
+        void OnBytes(byte[] payload)
+        {
+            LastBytesLength = payload.Length;
             CallCount++;
         }
     }
@@ -245,5 +253,42 @@ public class OfflineNetworkingServiceTests
         second.Dispose();
         service.RPC(TestModId, "OnPing", ReliableType.Reliable, 3);
         Assert.Equal(3, receiver.CallCount);
+    }
+
+    [Fact]
+    public void Rpc_RegisteredHandler_OversizedPayload_IsRejected()
+    {
+        var service = new OfflineNetworkingService();
+        var receiver = new RpcReceiver();
+
+        service.Initialize();
+        service.CreateLobby();
+        service.RegisterNetworkObject(receiver, TestModId);
+
+        var oversizedPayload = new byte[Message.MaxLogicalSize];
+        service.RPC(TestModId, "OnBytes", ReliableType.Reliable, oversizedPayload);
+
+        Assert.Equal(0, receiver.CallCount);
+        Assert.Equal(-1, receiver.LastBytesLength);
+    }
+
+    [Fact]
+    public void Rpc_UnregisteredPath_OversizedPayload_IsRejected()
+    {
+        var service = new OfflineNetworkingService();
+        var dispatchCount = 0;
+
+        service.Initialize();
+        service.CreateLobby();
+        service.IncomingValidator = (_, _) =>
+        {
+            dispatchCount++;
+            return true;
+        };
+
+        var oversizedPayload = new byte[Message.MaxLogicalSize];
+        service.RPC(TestModId + 1, "UnregisteredBytes", ReliableType.Reliable, new[] { typeof(byte[]) }, oversizedPayload);
+
+        Assert.Equal(0, dispatchCount);
     }
 }

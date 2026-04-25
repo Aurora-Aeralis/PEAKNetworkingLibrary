@@ -1469,18 +1469,20 @@ namespace NetworkingLibrary.Services
                         return;
                     }
 
-                    Dictionary<int, List<RSAParameters>> signerKeysByLength;
+                    Dictionary<uint, RSAParameters> publicKeysByMod;
+                    int[] knownSignatureLengths;
                     lock (cryptoStateLock)
                     {
-                        signerKeysByLength = modPublicKeys.Values
+                        publicKeysByMod = new Dictionary<uint, RSAParameters>(modPublicKeys);
+                        knownSignatureLengths = publicKeysByMod.Values
                             .Where(p => p.Modulus != null && p.Modulus.Length > 0)
-                            .GroupBy(p => p.Modulus!.Length)
-                            .ToDictionary(g => g.Key, g => g.ToList());
+                            .Select(p => p.Modulus!.Length)
+                            .Distinct()
+                            .ToArray();
                     }
 
-                    foreach (var kvp in signerKeysByLength)
+                    foreach (int expectedSigLen in knownSignatureLengths)
                     {
-                        int expectedSigLen = kvp.Key;
                         if (payloadToProcess.Length < expectedSigLen + 2)
                         {
                             continue;
@@ -1498,26 +1500,42 @@ namespace NetworkingLibrary.Services
                         var dataOnly = new byte[sigSectionStart];
                         Array.Copy(payloadToProcess, 0, dataOnly, 0, sigSectionStart);
 
-                        foreach (var rsaParams in kvp.Value)
+                        if (!TryExtractSignedMessageModId(dataOnly, compressed, out var signedModId))
                         {
-                            try
+                            continue;
+                        }
+
+                        if (!publicKeysByMod.TryGetValue(signedModId, out var rsaParams))
+                        {
+                            continue;
+                        }
+
+                        if (rsaParams.Modulus == null || rsaParams.Modulus.Length != declaredLen)
+                        {
+                            continue;
+                        }
+
+                        try
+                        {
+                            using var rsa = new RSACryptoServiceProvider();
+                            rsa.ImportParameters(rsaParams);
+                            if (!rsa.VerifyData(dataOnly, CryptoConfig.MapNameToOID("SHA256"), signature))
                             {
-                                using var rsa = new RSACryptoServiceProvider();
-                                rsa.ImportParameters(rsaParams);
-                                var ok = rsa.VerifyData(dataOnly, CryptoConfig.MapNameToOID("SHA256"), signature);
-                                if (!ok) continue;
-                                payloadToProcess = dataOnly;
-                                goto SignatureVerified;
-                            }
-                            catch (Exception ex)
-                            {
-                                LogError($"ProcessIncomingFrame: Signature verification error: {ex}");
+                                //LogWarning($"ProcessIncomingFrame: Signature verification failed for mod {signedModId}");
                                 return;
                             }
+
+                            payloadToProcess = dataOnly;
+                            goto SignatureVerified;
+                        }
+                        catch (Exception ex)
+                        {
+                            LogError($"ProcessIncomingFrame: Signature verification error for mod {signedModId}: {ex}");
+                            return;
                         }
                     }
 
-                    //LogWarning("ProcessIncomingFrame: Signature verification failed; dropping");
+                    //LogWarning("ProcessIncomingFrame: Signature trailer not recognized or no matching mod key; dropping");
                     return;
                 SignatureVerified:;
                 }
@@ -1585,6 +1603,31 @@ namespace NetworkingLibrary.Services
             {
                 LogError($"ProcessIncomingFrame top-level exception: {ex}");
             }
+        }
+
+        static bool TryExtractSignedMessageModId(byte[] signedData, bool compressed, out uint modId)
+        {
+            modId = 0;
+            byte[] candidate = signedData;
+            if (compressed)
+            {
+                try
+                {
+                    candidate = Message.DecompressPayload(signedData, Message.MaxLogicalSize);
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+
+            if (candidate.Length < sizeof(uint))
+            {
+                return false;
+            }
+
+            modId = BinaryPrimitives.ReadUInt32LittleEndian(candidate);
+            return true;
         }
 
         byte[] AppendFrameMac(byte[] frameWithoutTrailingMac, byte[] key)

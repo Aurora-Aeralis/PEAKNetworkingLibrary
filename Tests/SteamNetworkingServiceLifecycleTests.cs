@@ -14,6 +14,7 @@ namespace NetworkingLibrary.Tests;
 public class SteamNetworkingServiceLifecycleTests
 {
     const uint TestModId = 777;
+    const uint OtherModId = 888;
 
     sealed class RpcReceiver
     {
@@ -665,6 +666,29 @@ public class SteamNetworkingServiceLifecycleTests
 
         Assert.Equal(1, receiver.StringCallCount);
         Assert.Equal(largeText, receiver.LastStringValue);
+    }
+
+    [Fact]
+    public void ProcessIncomingFrame_SignedWithDifferentModKey_DropsFrame()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new LargePayloadRpcReceiver();
+        using var _ = service.RegisterNetworkObject(receiver, TestModId, mask: 0);
+        using var expectedModRsa = RSA.Create(2048);
+        using var otherModRsa = RSA.Create(2048);
+
+        service.RegisterModSigner(OtherModId, bytes => otherModRsa.SignData(bytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
+        service.RegisterModPublicKey(TestModId, expectedModRsa.ExportParameters(false));
+        service.RegisterModPublicKey(OtherModId, otherModRsa.ExportParameters(false));
+
+        var msg = new Message(TestModId, "OnPing", 0);
+        msg.WriteObject(typeof(int), 123);
+        var framed = BuildFramed(service, msg, OtherModId, ReliableType.Unreliable);
+
+        InvokeNonPublic(service, "ProcessIncomingFrame", framed, new CSteamID(4545UL));
+
+        Assert.Equal(0, receiver.IntCallCount);
+        Assert.Equal(-1, receiver.LastIntValue);
     }
 
     static void SetInLobby(SteamNetworkingService service, bool value)

@@ -44,7 +44,7 @@ namespace NetworkingLibrary.Modules
 
         static void QueueCreateRequest()
         {
-            Interlocked.Exchange(ref createRequestQueued, 1);
+            if (Interlocked.CompareExchange(ref createRequestQueued, 1, 0) != 0) return;
             lock (queue) queue.Enqueue(ProcessPendingMainThreadWork);
         }
 
@@ -166,7 +166,10 @@ namespace NetworkingLibrary.Modules
                     instance = null;
                     createRequestQueued = 0;
                     mainThreadId = -1;
-                    while (queue.Count > 0) queue.Dequeue();
+                    lock (queue)
+                    {
+                        while (queue.Count > 0) queue.Dequeue();
+                    }
                     instanceReady.Reset();
                     CreateInstanceOnMainThreadFactory = CreateOrFindDispatcherOnMainThread;
                 }
@@ -175,6 +178,13 @@ namespace NetworkingLibrary.Modules
             internal static void SetMainThreadIdForTests(int id) => mainThreadId = id;
             internal static int CreateRequestQueuedForTests => Volatile.Read(ref createRequestQueued);
             internal static int CurrentMainThreadIdForTests => Volatile.Read(ref mainThreadId);
+            internal static int PendingQueueCountForTests
+            {
+                get
+                {
+                    lock (queue) return queue.Count;
+                }
+            }
         }
     }
 }

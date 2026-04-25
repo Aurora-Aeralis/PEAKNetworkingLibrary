@@ -49,6 +49,22 @@ public class UnityMainThreadDispatcherTests : IDisposable
     }
 
     [Fact]
+    public async Task Instance_ConcurrentWorkerCalls_QueueOnlySingleMainThreadCreateRequest()
+    {
+        UnityMainThreadDispatcher.TestHooks.ResetForTests();
+        UnityMainThreadDispatcher.TestHooks.SetMainThreadIdForTests(Thread.CurrentThread.ManagedThreadId);
+
+        var tasks = Enumerable.Range(0, 10)
+            .Select(_ => Task.Run(() => Record.Exception(() => UnityMainThreadDispatcher.Instance())))
+            .ToArray();
+
+        await Task.WhenAll(tasks);
+
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.CreateRequestQueuedForTests);
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.PendingQueueCountForTests);
+    }
+
+    [Fact]
     public async Task Instance_ConcurrentCalls_CreateOnlyOnceOnMainThread()
     {
         var createCalls = 0;

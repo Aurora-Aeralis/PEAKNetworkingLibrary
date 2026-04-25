@@ -1,17 +1,6 @@
-using BepInEx;
-using BepInEx.Configuration;
-using BepInEx.Logging;
-using HarmonyLib;
-using NetworkingLibrary.Patches;
-using System;
-using System.Collections;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using UnityEngine;
-
 namespace NetworkingLibrary.Features
 {
+    // Kept as a compatibility shim for external integrations that may still reflect or reference this type.
     public static class Additions
     {
     }

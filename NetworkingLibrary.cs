@@ -10,7 +10,6 @@ using System.Reflection;
 using System.Linq;
 
 using NetworkingLibrary.Services;
-using NetworkingLibrary.Patches;
 using NetworkingLibrary.Modules;
 using NetworkingLibrary.Features;
 using System.Xml.Linq;

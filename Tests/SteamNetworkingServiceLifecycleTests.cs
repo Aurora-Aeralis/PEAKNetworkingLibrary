@@ -53,6 +53,22 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void Shutdown_ClearsTransientSequenceAndRateLimiterState()
+    {
+        var service = new SteamNetworkingService();
+
+        SeedLastSeenSequence(service);
+        SeedRateLimiters(service);
+        SeedOutgoingSequencePerMod(service);
+
+        service.Shutdown();
+
+        AssertDictionaryCount(service, "lastSeenSequence", 0);
+        AssertDictionaryCount(service, "rateLimiters", 0);
+        AssertDictionaryCount(service, "outgoingSequencePerMod", 0);
+    }
+
+    [Fact]
     public void PollReceive_DoesNotFlushQueues_WhenNotInLobby()
     {
         var service = new SteamNetworkingService();
@@ -157,6 +173,32 @@ public class SteamNetworkingServiceLifecycleTests
 
             dict.Add(ValueTuple.Create((ulong)(i + 1000), (ulong)i + 1), unacked);
         }
+    }
+
+    static void SeedLastSeenSequence(SteamNetworkingService service)
+    {
+        var dict = (IDictionary)GetField(service, "lastSeenSequence")!;
+        dict.Add(1234UL, new System.Collections.Generic.Dictionary<uint, ulong> { [TestModId] = 9UL });
+    }
+
+    static void SeedRateLimiters(SteamNetworkingService service)
+    {
+        var dict = (IDictionary)GetField(service, "rateLimiters")!;
+        var limiterType = typeof(SteamNetworkingService).GetNestedType("SlidingWindowRateLimiter", BindingFlags.NonPublic)!;
+        var limiter = Activator.CreateInstance(limiterType, 4, TimeSpan.FromSeconds(2))!;
+        dict.Add(5678UL, limiter);
+    }
+
+    static void SeedOutgoingSequencePerMod(SteamNetworkingService service)
+    {
+        var dict = (IDictionary)GetField(service, "outgoingSequencePerMod")!;
+        dict.Add(TestModId, 7UL);
+    }
+
+    static void AssertDictionaryCount(SteamNetworkingService service, string dictionaryFieldName, int expected)
+    {
+        var dict = (ICollection)GetField(service, dictionaryFieldName)!;
+        Assert.Equal(expected, dict.Count);
     }
 
     static void AssertQueueCount(SteamNetworkingService service, string queueFieldName, int expected)

@@ -517,7 +517,9 @@ namespace NetworkingLibrary.Services
                     if (parameterTypes != null)
                     {
                         if (parameterTypes.Length != parameters.Length)
+                        {
                             throw new Exception($"Parameter type count mismatch: expected {parameterTypes.Length}, got {parameters.Length}");
+                        }
                         for (int i = 0; i < parameters.Length; i++)
                         {
                             var t = parameterTypes[i];

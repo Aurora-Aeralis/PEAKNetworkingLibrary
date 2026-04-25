@@ -45,4 +45,18 @@ public class MessageCompressionBoundsTests
         var decompressed = Message.DecompressPayload(compressed, Message.MaxLogicalSize);
         Assert.Equal(source.ToArray(), decompressed);
     }
+
+    [Fact]
+    public void DecompressPayload_DefaultLimit_Allows_Data_Within_Logical_Message_Cap()
+    {
+        var original = new byte[Message.MaxSize + 1];
+        for (var i = 0; i < original.Length; i++) original[i] = (byte)(i % 13);
+
+        using var source = new Message(1u, "compress", 0);
+        source.WriteBytes(original);
+        var compressed = source.CompressPayload();
+
+        var decompressed = Message.DecompressPayload(compressed);
+        Assert.Equal(source.ToArray(), decompressed);
+    }
 }

@@ -13,6 +13,8 @@ namespace NetworkingLibrary.Features
         const string VersionSection = "Version";
         const string VersionKey = "ConfigSchemaVersion";
         const string LegacyVersionKey = "Current Version";
+        const string PluginVersionKey = "PluginVersion";
+        const string CurrentConfigSchemaVersion = "1";
 
         internal static ConfigEntry<T> BindConfig<T>(string Header, string Features, T Value, string? Info = "")
         {
@@ -24,7 +26,7 @@ namespace NetworkingLibrary.Features
             string ConfigFolderPath = Path.Combine(Paths.ConfigPath, $"DAa Mods/{MyPluginInfo.PLUGIN_NAME}");
             if (!Directory.Exists(ConfigFolderPath)) Directory.CreateDirectory(ConfigFolderPath);
             Net.Instance.config = new ConfigFile(Path.Combine(ConfigFolderPath, "config.cfg"), true);
-            MigrateConfigIfNeeded(Net.Instance.config, MyPluginInfo.PLUGIN_VERSION);
+            MigrateConfigIfNeeded(Net.Instance.config, CurrentConfigSchemaVersion);
 
             DefineConfig();
             Net.Logger.LogInfo("Config initialized.");
@@ -32,7 +34,8 @@ namespace NetworkingLibrary.Features
 
         internal static void DefineConfig()
         {
-            BindConfig(VersionSection, VersionKey, MyPluginInfo.PLUGIN_VERSION, "Tracks config schema version for non-destructive migrations.");
+            BindConfig(VersionSection, VersionKey, CurrentConfigSchemaVersion, "Tracks config schema version for non-destructive migrations.");
+            BindConfig(VersionSection, PluginVersionKey, MyPluginInfo.PLUGIN_VERSION, "Tracks plugin release version.");
         }
 
         internal static void MigrateConfigIfNeeded(ConfigFile config, string currentVersion)

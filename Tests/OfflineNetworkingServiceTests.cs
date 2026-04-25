@@ -148,6 +148,36 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
+    public void SetLobbyData_NullValue_DoesNotThrow_AndReadsBackAsEmptyString()
+    {
+        var service = new OfflineNetworkingService();
+
+        service.Initialize();
+        service.CreateLobby();
+        service.RegisterLobbyDataKey("nullable");
+
+        var exception = Record.Exception(() => service.SetLobbyData("nullable", null!));
+
+        Assert.Null(exception);
+        Assert.Equal(string.Empty, service.GetLobbyData<string>("nullable"));
+    }
+
+    [Fact]
+    public void SetPlayerData_NullValue_DoesNotThrow_AndReadsBackAsEmptyString()
+    {
+        var service = new OfflineNetworkingService();
+
+        service.Initialize();
+        service.CreateLobby();
+        service.RegisterPlayerDataKey("nullable");
+
+        var exception = Record.Exception(() => service.SetPlayerData("nullable", null!));
+
+        Assert.Null(exception);
+        Assert.Equal(string.Empty, service.GetPlayerData<string>(service.LocalSteamId, "nullable"));
+    }
+
+    [Fact]
     public void CreateLobby_RaisesDeterministicEventSequence()
     {
         var service = new OfflineNetworkingService();

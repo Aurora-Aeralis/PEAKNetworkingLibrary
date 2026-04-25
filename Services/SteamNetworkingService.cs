@@ -498,7 +498,8 @@ namespace NetworkingLibrary.Services
         {
             if (!InLobby) { Net.Logger.LogError("Cannot set lobby data when not in lobby."); return; }
             if (!lobbyDataKeys.Contains(key)) Net.Logger.LogWarning($"Accessing unregistered lobby key '{key}'.");
-            SteamMatchmaking.SetLobbyData(Lobby, key, Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture));
+            var serialized = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+            SteamMatchmaking.SetLobbyData(Lobby, key, serialized);
         }
 
         /// <summary>
@@ -527,7 +528,8 @@ namespace NetworkingLibrary.Services
         {
             if (!InLobby) { Net.Logger.LogError("Cannot set player data when not in lobby."); return; }
             if (!playerDataKeys.Contains(key)) Net.Logger.LogWarning($"Accessing unregistered player key '{key}'.");
-            SteamMatchmaking.SetLobbyMemberData(Lobby, key, Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture));
+            var serialized = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+            SteamMatchmaking.SetLobbyMemberData(Lobby, key, serialized);
         }
 
         /// <summary>

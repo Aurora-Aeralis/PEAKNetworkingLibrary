@@ -22,6 +22,7 @@ public class UnityMainThreadDispatcherTests : IDisposable
     [Fact]
     public void Instance_FromWorkerThread_QueuesCreationRequestWithoutCreatingOnWorker()
     {
+        UnityMainThreadDispatcher.BackgroundThreadInstanceWaitTimeout = TimeSpan.FromMilliseconds(250);
         var createCalls = 0;
         UnityMainThreadDispatcher.CreateInstanceOnMainThreadFactory = () =>
         {
@@ -40,6 +41,7 @@ public class UnityMainThreadDispatcherTests : IDisposable
     public void Instance_FromWorkerThread_WhenMainThreadUnknown_DoesNotCaptureWorkerThread()
     {
         UnityMainThreadDispatcher.TestHooks.ResetForTests();
+        UnityMainThreadDispatcher.BackgroundThreadInstanceWaitTimeout = TimeSpan.FromMilliseconds(250);
 
         var error = Record.Exception(() => Task.Run(() => UnityMainThreadDispatcher.Instance()).GetAwaiter().GetResult());
 
@@ -75,5 +77,27 @@ public class UnityMainThreadDispatcherTests : IDisposable
         Assert.Equal(1, createCalls);
         Assert.All(factoryThreadIds, id => Assert.Equal(Thread.CurrentThread.ManagedThreadId, id));
         Assert.All(instances, item => Assert.Same(instances[0], item));
+    }
+
+    [Fact]
+    public async Task Instance_FromWorkerThread_WithDelayedMainThreadProcessing_DoesNotThrow()
+    {
+        UnityMainThreadDispatcher.BackgroundThreadInstanceWaitTimeout = TimeSpan.FromSeconds(2);
+        var createCalls = 0;
+
+        UnityMainThreadDispatcher.CreateInstanceOnMainThreadFactory = () =>
+        {
+            Interlocked.Increment(ref createCalls);
+            return (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        };
+
+        var workerTask = Task.Run(() => UnityMainThreadDispatcher.Instance());
+
+        await Task.Delay(450);
+        UnityMainThreadDispatcher.ProcessPendingMainThreadWork();
+
+        var instance = await workerTask;
+        Assert.NotNull(instance);
+        Assert.Equal(1, createCalls);
     }
 }

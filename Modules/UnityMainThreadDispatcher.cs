@@ -14,8 +14,10 @@ namespace NetworkingLibrary.Modules
         static int mainThreadId = -1;
         static int createRequestQueued;
         static readonly ManualResetEventSlim instanceReady = new(false);
+        static readonly TimeSpan defaultBackgroundThreadWaitTimeout = TimeSpan.FromSeconds(2);
 
         internal static Func<UnityMainThreadDispatcher> CreateInstanceOnMainThreadFactory = CreateOrFindDispatcherOnMainThread;
+        internal static TimeSpan BackgroundThreadInstanceWaitTimeout = defaultBackgroundThreadWaitTimeout;
 
         public static UnityMainThreadDispatcher Instance()
         {
@@ -28,10 +30,30 @@ namespace NetworkingLibrary.Modules
             }
 
             QueueCreateRequest();
-            if (instanceReady.Wait(TimeSpan.FromMilliseconds(200)) && instance != null) return instance;
+            if (WaitForInstanceFromBackgroundThread() && instance != null) return instance;
             if (instance != null) return instance;
 
             throw new InvalidOperationException("UnityMainThreadDispatcher.Instance() was called from a non-main thread before the main thread could create the dispatcher.");
+        }
+
+        static bool WaitForInstanceFromBackgroundThread()
+        {
+            var timeout = BackgroundThreadInstanceWaitTimeout;
+            if (timeout <= TimeSpan.Zero) timeout = defaultBackgroundThreadWaitTimeout;
+            var deadline = DateTime.UtcNow + timeout;
+            var wait = TimeSpan.FromMilliseconds(10);
+            var maxWait = TimeSpan.FromMilliseconds(200);
+
+            while (DateTime.UtcNow < deadline)
+            {
+                var remaining = deadline - DateTime.UtcNow;
+                if (remaining <= TimeSpan.Zero) break;
+                var currentWait = wait <= remaining ? wait : remaining;
+                if (instanceReady.Wait(currentWait)) return true;
+                wait = wait < maxWait ? TimeSpan.FromMilliseconds(Math.Min(wait.TotalMilliseconds * 2, maxWait.TotalMilliseconds)) : maxWait;
+            }
+
+            return false;
         }
 
         static bool CanCaptureMainThreadFromCurrentContext()
@@ -176,6 +198,7 @@ namespace NetworkingLibrary.Modules
                     }
                     instanceReady.Reset();
                     CreateInstanceOnMainThreadFactory = CreateOrFindDispatcherOnMainThread;
+                    BackgroundThreadInstanceWaitTimeout = defaultBackgroundThreadWaitTimeout;
                 }
             }
 

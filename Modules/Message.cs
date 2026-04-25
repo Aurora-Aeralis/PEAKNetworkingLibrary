@@ -297,9 +297,9 @@ namespace NetworkingLibrary.Modules
             {
                 throw new Exception($"{opName} length out of range");
             }
-            if (len > MaxSize)
+            if (len > MaxLogicalSize)
             {
-                throw new Exception($"{opName} length exceeds max {MaxSize}");
+                throw new Exception($"{opName} length exceeds max {MaxLogicalSize}");
             }
             return len;
         }
@@ -400,9 +400,9 @@ namespace NetworkingLibrary.Modules
             {
                 throw new Exception("ReadString out of range");
             }
-            if (len > MaxSize)
+            if (len > MaxLogicalSize)
             {
-                throw new Exception($"ReadString length exceeds max {MaxSize}");
+                throw new Exception($"ReadString length exceeds max {MaxLogicalSize}");
             }
             if (len == 0) return string.Empty;
             EnsureReadable(len, nameof(ReadString));

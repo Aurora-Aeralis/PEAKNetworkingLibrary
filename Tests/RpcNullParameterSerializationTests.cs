@@ -84,6 +84,11 @@ public class RpcNullParameterSerializationTests
         void Shared(int? value, string[] names, System.Collections.Generic.Dictionary<string, int[]> map) { }
     }
 
+    sealed class NestedGenericOuter<T>
+    {
+        public sealed class Inner<U> { }
+    }
+
     sealed class MaskedReceiver
     {
         public int Calls;
@@ -302,6 +307,16 @@ public class RpcNullParameterSerializationTests
         Assert.Equal(expected, steamKey);
         Assert.DoesNotContain("Version=", offlineKey);
         Assert.DoesNotContain("Version=", steamKey);
+    }
+
+    [Fact]
+    public void CanonicalTypeName_PreservesNestedGenericDefinitionPath()
+    {
+        var nested = typeof(NestedGenericOuter<int>.Inner<string>);
+
+        var canonical = CanonicalTypeName.For(nested);
+
+        Assert.Equal("NetworkingLibrary.Tests.RpcNullParameterSerializationTests+NestedGenericOuter+Inner<System.Int32,System.String>", canonical);
     }
 
     [Fact]

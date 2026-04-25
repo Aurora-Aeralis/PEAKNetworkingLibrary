@@ -22,13 +22,32 @@ namespace NetworkingLibrary.Services
             if (type.IsGenericType)
             {
                 var genericDefinition = type.GetGenericTypeDefinition();
-                var definitionName = genericDefinition.FullName ?? genericDefinition.Name;
-                var tickIndex = definitionName.IndexOf('`');
-                if (tickIndex >= 0) definitionName = definitionName.Substring(0, tickIndex);
+                var definitionName = StripGenericArityMarkers(genericDefinition.FullName ?? genericDefinition.Name);
                 return $"{definitionName}<{string.Join(",", type.GetGenericArguments().Select(For))}>";
             }
 
             return type.FullName ?? type.Name;
+        }
+
+        static string StripGenericArityMarkers(string typeName)
+        {
+            var chars = typeName.ToCharArray();
+            var write = 0;
+
+            for (var read = 0; read < chars.Length; read++)
+            {
+                if (chars[read] != '`')
+                {
+                    chars[write++] = chars[read];
+                    continue;
+                }
+
+                read++;
+                while (read < chars.Length && char.IsDigit(chars[read])) read++;
+                read--;
+            }
+
+            return new string(chars, 0, write);
         }
     }
 }

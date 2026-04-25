@@ -6,12 +6,17 @@ using UnityEngine;
 public class UnityMainThreadDispatcher : MonoBehaviour
 {
     static UnityMainThreadDispatcher? instance;
+    static readonly object instanceLock = new();
     static readonly Queue<Action> queue = new Queue<Action>();
 
     public static UnityMainThreadDispatcher Instance()
     {
-        if (instance == null)
+        if (instance != null) return instance;
+
+        lock (instanceLock)
         {
+            if (instance != null) return instance;
+
             var go = GameObject.Find("UnityMainThreadDispatcher");
             if (go == null)
             {
@@ -20,8 +25,25 @@ public class UnityMainThreadDispatcher : MonoBehaviour
                 instance = go.AddComponent<UnityMainThreadDispatcher>();
             }
             else instance = go.GetComponent<UnityMainThreadDispatcher>() ?? go.AddComponent<UnityMainThreadDispatcher>();
+
+            return instance;
         }
-        return instance;
+    }
+
+
+    void Awake()
+    {
+        lock (instanceLock)
+        {
+            if (instance == null)
+            {
+                instance = this;
+                DontDestroyOnLoad(gameObject);
+                return;
+            }
+
+            if (instance != this) Destroy(gameObject);
+        }
     }
 
     public void Enqueue(Action a, float delaySeconds = 0f)

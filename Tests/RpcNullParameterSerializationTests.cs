@@ -13,6 +13,7 @@ public class RpcNullParameterSerializationTests
     const uint TestModId = 9090;
     static readonly MethodInfo OfflineBuildMessage = typeof(OfflineNetworkingService).GetMethod("BuildMessage", BindingFlags.Instance | BindingFlags.NonPublic)!;
     static readonly MethodInfo SteamBuildMessage = typeof(SteamNetworkingService).GetMethod("BuildMessage", BindingFlags.Instance | BindingFlags.NonPublic)!;
+    static readonly MethodInfo SteamDispatchIncoming = typeof(SteamNetworkingService).GetMethod("DispatchIncoming", BindingFlags.Instance | BindingFlags.NonPublic)!;
 
     sealed class NullReceiver
     {
@@ -190,6 +191,23 @@ public class RpcNullParameterSerializationTests
         var read = new Message(msg!.ToArray());
         Assert.Null(read.ReadObject(typeof(string)));
         Assert.Null(read.ReadObject(typeof(byte[])));
+    }
+
+    [Fact]
+    public void SteamDispatchIncoming_UsesOverloadIdentity_ForWireCompatibleOverloads()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new ByteBoolDispatchReceiver();
+        using var token = service.RegisterNetworkObject(receiver, TestModId);
+
+        var msg = (Message?)SteamBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { true }, null });
+        Assert.NotNull(msg);
+
+        SteamDispatchIncoming.Invoke(service, new object?[] { msg!, new CSteamID(42UL) });
+
+        Assert.Equal("bool", receiver.LastOverload);
+        Assert.True(receiver.LastBoolValue);
+        Assert.Null(receiver.LastByteValue);
     }
 
     [Fact]

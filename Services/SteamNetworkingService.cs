@@ -1468,7 +1468,13 @@ namespace NetworkingLibrary.Services
             }
 
             bool invoked = false;
-            var candidates = handlers.Where(h => h.Mask == message.Mask).ToList();
+            IEnumerable<MessageHandler> candidates = handlers.Where(h => h.Mask == message.Mask);
+            if (!string.IsNullOrEmpty(message.OverloadKey))
+            {
+                var keyed = candidates.Where(h => BuildOverloadKey(h) == message.OverloadKey).ToArray();
+                if (keyed.Length > 0) candidates = keyed.Concat(candidates.Where(h => BuildOverloadKey(h) != message.OverloadKey));
+            }
+
             foreach (var handler in candidates)
             {
                 var msgCopy = new Message(message.ToArray());
@@ -1750,6 +1756,7 @@ namespace NetworkingLibrary.Services
                         }) ?? handlers[0];
                     }
 
+                    msg = new Message(modId, methodName, mask, BuildOverloadKey(chosen));
                     var expectedParams = chosen.Parameters;
                     int expectedCountFinal = chosen.TakesInfo ? expectedParams.Length - 1 : expectedParams.Length;
                     for (int i = 0; i < expectedCountFinal; i++)
@@ -1813,6 +1820,14 @@ namespace NetworkingLibrary.Services
                 Net.Logger.LogError($"BuildMessage failed: {ex}");
                 return null;
             }
+        }
+
+        static string BuildOverloadKey(MessageHandler handler)
+        {
+            var pi = handler.Parameters;
+            int parameterCount = handler.TakesInfo ? pi.Length - 1 : pi.Length;
+            if (parameterCount <= 0) return string.Empty;
+            return string.Join("|", pi.Take(parameterCount).Select(p => p.ParameterType.AssemblyQualifiedName ?? p.ParameterType.FullName ?? p.ParameterType.Name));
         }
 
         SlidingWindowRateLimiter GetOrCreateRateLimiter(ulong steam64)

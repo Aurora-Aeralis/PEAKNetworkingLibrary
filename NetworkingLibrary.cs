@@ -28,6 +28,9 @@ namespace NetworkingLibrary
         public ConfigFile config = null!;
         public static INetworkingService? Service { get; private set; } 
 
+        internal static Func<INetworkingService> CreateDefaultNetworkingService = NetworkingServiceFactory.CreateDefaultService;
+        internal static Func<INetworkingService> CreateOfflineNetworkingService = () => new OfflineNetworkingService();
+
         private void OnDestroy()
         {
             try
@@ -65,8 +68,9 @@ namespace NetworkingLibrary
 
             Harmony.PatchAll();
 
-            Service = NetworkingServiceFactory.CreateDefaultService();
-            Service.Initialize();
+            Service = null;
+            TryInitializeNetworkingService(Logger, out var initializedService);
+            Service = initializedService;
 
             var pollerName = $"{MyPluginInfo.PLUGIN_NAME}.Poller";
             var existingPoller = FindObjectsOfType<NetworkingPoller>(true).FirstOrDefault();
@@ -88,6 +92,41 @@ namespace NetworkingLibrary
             DontDestroyOnLoad(go);
 
             Logger.LogInfo($"{MyPluginInfo.PLUGIN_NAME} v{MyPluginInfo.PLUGIN_VERSION} has fully loaded!");
+        }
+
+        internal static bool TryInitializeNetworkingService(ManualLogSource? logger, out INetworkingService? service)
+        {
+            service = null;
+
+            try
+            {
+                service = CreateDefaultNetworkingService();
+                service.Initialize();
+                return true;
+            }
+            catch (Exception exception)
+            {
+                logger?.LogError($"Failed to initialize default networking service. Attempting OfflineNetworkingService fallback. Exception: {exception}");
+            }
+
+            try
+            {
+                service = CreateOfflineNetworkingService();
+                service.Initialize();
+                return true;
+            }
+            catch (Exception exception)
+            {
+                logger?.LogError($"FATAL: Failed to initialize fallback OfflineNetworkingService. Networking service disabled. Exception: {exception}");
+                service = null;
+                return false;
+            }
+        }
+
+        internal static void ResetNetworkingStartupHooks()
+        {
+            CreateDefaultNetworkingService = NetworkingServiceFactory.CreateDefaultService;
+            CreateOfflineNetworkingService = () => new OfflineNetworkingService();
         }
     }
 }

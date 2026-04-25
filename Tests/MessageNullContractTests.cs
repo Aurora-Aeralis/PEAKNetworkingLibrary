@@ -163,7 +163,7 @@ public class MessageNullContractTests
     public void ReadString_Rejects_Excessive_Length()
     {
         var malformed = NewMessage();
-        malformed.WriteInt(Message.MaxSize + 1);
+        malformed.WriteInt(Message.MaxLogicalSize + 1);
 
         var read = Roundtrip(malformed);
         var ex = Assert.Throws<Exception>(() => read.ReadString());
@@ -187,11 +187,33 @@ public class MessageNullContractTests
     {
         var malformed = NewMessage();
         malformed.WriteBool(true);
-        malformed.WriteInt(Message.MaxSize + 1);
+        malformed.WriteInt(Message.MaxLogicalSize + 1);
 
         var read = Roundtrip(malformed);
         var ex = Assert.Throws<Exception>(() => read.ReadObject(typeof(List<int>)));
         Assert.Contains("length exceeds max", ex.Message);
+    }
+
+    [Fact]
+    public void ReadString_Allows_Length_Above_MaxSize_Within_LogicalCap()
+    {
+        var value = new string('a', Message.MaxSize + 1);
+        var write = NewMessage();
+        write.WriteString(value);
+
+        var read = Roundtrip(write);
+        Assert.Equal(value, read.ReadString());
+    }
+
+    [Fact]
+    public void ReadObject_ByteArray_Allows_Length_Above_MaxSize_Within_LogicalCap()
+    {
+        var payload = Enumerable.Repeat((byte)7, Message.MaxSize + 1).ToArray();
+        var write = NewMessage();
+        write.WriteObject(typeof(byte[]), payload);
+
+        var read = Roundtrip(write);
+        Assert.Equal(payload, (byte[])read.ReadObject(typeof(byte[])));
     }
 
     private static byte[] BuildLegacyMessageData(Action<Message> writePayload)

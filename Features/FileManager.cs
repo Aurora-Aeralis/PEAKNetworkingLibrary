@@ -150,79 +150,112 @@ namespace NetworkingLibrary.Features
         static void DropLegacyVersionFromConfig(ConfigFile config)
         {
             var legacyDefinition = new ConfigDefinition(VersionSection, LegacyVersionKey);
-            Exception? removeException = null;
-            var removeMethod = GetRemoveMethod(config);
-            var orphanedEntriesProperty = GetOrphanedEntriesProperty(config);
-            if (removeMethod == null && orphanedEntriesProperty == null)
-            {
-                ClearLegacyVersion(config);
+            if (TryRemoveViaConfigApi(config, legacyDefinition, out var removeException))
                 return;
-            }
+            if (TryRemoveViaOrphanedEntries(config, legacyDefinition, out var orphanedEntriesException))
+                return;
+            if (ClearLegacyVersionInFile(config, out var fileCleanupException))
+                return;
+
+            Net.Logger?.LogWarning($"Failed to remove legacy config key '{LegacyVersionKey}' during migration.{BuildCleanupFailureContext(removeException, orphanedEntriesException, fileCleanupException)}");
+        }
+
+        static bool TryRemoveViaConfigApi(ConfigFile config, ConfigDefinition legacyDefinition, out Exception? exception)
+        {
+            exception = null;
+            var removeMethod = GetRemoveMethod(config);
+            if (removeMethod == null)
+                return false;
 
             try
             {
-                if (removeMethod != null)
-                {
-                    removeMethod.Invoke(config, new object[] { legacyDefinition });
-                    return;
-                }
+                removeMethod.Invoke(config, new object[] { legacyDefinition });
+                return true;
             }
-            catch (Exception exception)
+            catch (Exception ex)
             {
-                removeException = exception;
+                exception = ex;
+                return false;
             }
+        }
+
+        static bool TryRemoveViaOrphanedEntries(ConfigFile config, ConfigDefinition legacyDefinition, out Exception? exception)
+        {
+            exception = null;
+            var orphanedEntriesProperty = GetOrphanedEntriesProperty(config);
+            if (orphanedEntriesProperty == null)
+                return false;
 
             try
             {
                 var orphanedEntries = GetOrphanedEntries(config, orphanedEntriesProperty);
                 orphanedEntries?.Remove(legacyDefinition);
+                return true;
             }
-            catch (Exception orphanedEntriesException)
+            catch (Exception ex)
             {
-                var removeContext = removeException == null ? string.Empty : $" Remove invocation error: {removeException}.";
-                Net.Logger?.LogWarning($"Failed to remove legacy config key '{LegacyVersionKey}' during migration.{removeContext} OrphanedEntries fallback error: {orphanedEntriesException}");
+                exception = ex;
+                return false;
             }
         }
 
-        static void ClearLegacyVersion(ConfigFile config)
+        static bool ClearLegacyVersionInFile(ConfigFile config, out Exception? exception)
         {
-            var configPath = config.ConfigFilePath;
-            if (!File.Exists(configPath))
-                return;
-
-            var lines = File.ReadAllLines(configPath);
-            var changed = false;
-            var inVersionSection = false;
-            for (var i = 0; i < lines.Length; i++)
+            exception = null;
+            try
             {
-                var trimmed = lines[i].Trim();
-                if (trimmed.StartsWith("[", StringComparison.Ordinal) && trimmed.EndsWith("]", StringComparison.Ordinal))
+                var configPath = config.ConfigFilePath;
+                if (!File.Exists(configPath))
+                    return false;
+
+                var lines = File.ReadAllLines(configPath);
+                var changed = false;
+                var inVersionSection = false;
+                for (var i = 0; i < lines.Length; i++)
                 {
-                    var section = trimmed[1..^1].Trim();
-                    inVersionSection = section.Equals(VersionSection, StringComparison.Ordinal);
-                    continue;
+                    var trimmed = lines[i].Trim();
+                    if (trimmed.StartsWith("[", StringComparison.Ordinal) && trimmed.EndsWith("]", StringComparison.Ordinal))
+                    {
+                        var section = trimmed[1..^1].Trim();
+                        inVersionSection = section.Equals(VersionSection, StringComparison.Ordinal);
+                        continue;
+                    }
+
+                    if (!inVersionSection)
+                        continue;
+
+                    if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#", StringComparison.Ordinal) || trimmed.StartsWith(";", StringComparison.Ordinal))
+                        continue;
+
+                    var separatorIndex = lines[i].IndexOf('=');
+                    if (separatorIndex <= 0)
+                        continue;
+
+                    var key = lines[i][..separatorIndex].Trim();
+                    if (!key.Equals(LegacyVersionKey, StringComparison.Ordinal))
+                        continue;
+
+                    lines[i] = lines[i][..(separatorIndex + 1)];
+                    changed = true;
                 }
 
-                if (!inVersionSection)
-                    continue;
-
-                if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#", StringComparison.Ordinal) || trimmed.StartsWith(";", StringComparison.Ordinal))
-                    continue;
-
-                var separatorIndex = lines[i].IndexOf('=');
-                if (separatorIndex <= 0)
-                    continue;
-
-                var key = lines[i][..separatorIndex].Trim();
-                if (!key.Equals(LegacyVersionKey, StringComparison.Ordinal))
-                    continue;
-
-                lines[i] = lines[i][..(separatorIndex + 1)];
-                changed = true;
+                if (changed)
+                    File.WriteAllLines(configPath, lines);
+                return true;
             }
+            catch (Exception ex)
+            {
+                exception = ex;
+                return false;
+            }
+        }
 
-            if (changed)
-                File.WriteAllLines(configPath, lines);
+        static string BuildCleanupFailureContext(Exception? removeException, Exception? orphanedEntriesException, Exception? fileCleanupException)
+        {
+            var removeContext = removeException == null ? string.Empty : $" Remove API error: {removeException}.";
+            var orphanedEntriesContext = orphanedEntriesException == null ? string.Empty : $" OrphanedEntries error: {orphanedEntriesException}.";
+            var fileCleanupContext = fileCleanupException == null ? string.Empty : $" File cleanup error: {fileCleanupException}.";
+            return $"{removeContext}{orphanedEntriesContext}{fileCleanupContext}";
         }
 
         internal static MethodInfo? GetRemoveMethod(ConfigFile config)

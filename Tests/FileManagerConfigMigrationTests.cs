@@ -1,8 +1,11 @@
 using BepInEx.Configuration;
+using BepInEx.Logging;
 using NetworkingLibrary.Features;
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using Xunit;
 
 namespace NetworkingLibrary.Tests;
@@ -150,6 +153,23 @@ public class FileManagerConfigMigrationTests
     }
 
     [Fact]
+    public void MigrateConfigIfNeeded_TotalCleanupFailure_LogsSingleWarning()
+    {
+        using var scope = new TempConfigScope();
+        var seedConfig = new ConfigFile(scope.ConfigPath, true);
+        seedConfig.Bind("Version", "Current Version", string.Empty).Value = "1";
+        seedConfig.Save();
+
+        var config = new ThrowingLegacyCleanupConfigFile(scope.ConfigPath, true);
+        File.Delete(scope.ConfigPath);
+
+        using var loggerScope = new NetLoggerScope();
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        Assert.Single(loggerScope.Warnings);
+    }
+
+    [Fact]
     public void MigrateConfigIfNeeded_DuplicateLegacyKeyOutsideVersionSection_IgnoresNonVersionSections()
     {
         using var scope = new TempConfigScope();
@@ -276,14 +296,25 @@ public class FileManagerConfigMigrationTests
 
     sealed class ThrowingLegacyCleanupConfigFile : ConfigFile
     {
+        internal int RemoveCalls { get; private set; }
+        internal int OrphanedEntriesAccesses { get; private set; }
+
         internal ThrowingLegacyCleanupConfigFile(string configPath, bool saveOnInit) : base(configPath, saveOnInit) { }
 
         public new bool Remove(ConfigDefinition definition)
         {
+            RemoveCalls++;
             throw new InvalidOperationException("Simulated Remove reflection failure.");
         }
 
-        public new IDictionary OrphanedEntries => throw new InvalidOperationException("Simulated OrphanedEntries reflection failure.");
+        public new IDictionary OrphanedEntries
+        {
+            get
+            {
+                OrphanedEntriesAccesses++;
+                throw new InvalidOperationException("Simulated OrphanedEntries reflection failure.");
+            }
+        }
     }
 
     sealed class TempConfigScope : IDisposable
@@ -302,5 +333,47 @@ public class FileManagerConfigMigrationTests
             if (Directory.Exists(_root))
                 Directory.Delete(_root, true);
         }
+    }
+
+    sealed class NetLoggerScope : IDisposable
+    {
+        readonly FieldInfo? _loggerField = typeof(Net).GetField("<Logger>k__BackingField", BindingFlags.Static | BindingFlags.NonPublic);
+        readonly object? _originalLogger;
+        readonly ManualLogSource _logger = new("FileManagerConfigMigrationTests");
+        readonly TestLogListener _listener = new();
+
+        internal IReadOnlyList<string> Warnings => _listener.Warnings;
+
+        internal NetLoggerScope()
+        {
+            if (_loggerField == null)
+                return;
+
+            _originalLogger = _loggerField.GetValue(null);
+            Logger.Listeners.Add(_listener);
+            _loggerField.SetValue(null, _logger);
+        }
+
+        public void Dispose()
+        {
+            if (_loggerField != null)
+                _loggerField.SetValue(null, _originalLogger);
+            Logger.Listeners.Remove(_listener);
+            _logger.Dispose();
+        }
+    }
+
+    sealed class TestLogListener : ILogListener
+    {
+        readonly List<string> _warnings = new();
+        internal IReadOnlyList<string> Warnings => _warnings;
+
+        public void LogEvent(object sender, LogEventArgs eventArgs)
+        {
+            if (eventArgs.Level == LogLevel.Warning)
+                _warnings.Add(eventArgs.Data?.ToString() ?? string.Empty);
+        }
+
+        public void Dispose() { }
     }
 }

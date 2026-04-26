@@ -40,6 +40,10 @@ namespace NetworkingLibrary.Modules
         static int suppressedBacklogWarnings;
         static int emittedBacklogWarningCountForTests;
         static long lastBacklogWarningTicks;
+        static int suppressedActionErrorLogs;
+        static int emittedActionErrorLogCountForTests;
+        static string? lastActionErrorMessageForTests;
+        static long lastActionErrorLogTicks;
         static readonly ManualResetEventSlim instanceReady = new(false);
         static readonly TimeSpan defaultBackgroundThreadWaitTimeout = TimeSpan.FromSeconds(2);
 
@@ -420,7 +424,7 @@ namespace NetworkingLibrary.Modules
                     if (queue.Count > 0) a = queue.Dequeue();
                     else break;
                 }
-                try { a?.Invoke(); } catch (Exception ex) { Debug.LogError($"Dispatcher action error: {ex}"); }
+                try { a?.Invoke(); } catch (Exception ex) { EmitActionErrorLog(ex); }
                 processed++;
                 if (maxActions > 0 && processed >= maxActions) break;
                 if (stopwatch != null && stopwatch.Elapsed.TotalMilliseconds >= maxFrameMs) break;
@@ -494,6 +498,31 @@ namespace NetworkingLibrary.Modules
             }
         }
 
+        static void EmitActionErrorLog(Exception ex)
+        {
+            while (true)
+            {
+                var nowTicks = DateTime.UtcNow.Ticks;
+                var previousTicks = Interlocked.Read(ref lastActionErrorLogTicks);
+                if (previousTicks != 0 && new TimeSpan(nowTicks - previousTicks) < overflowWarningCooldown)
+                {
+                    Interlocked.Increment(ref suppressedActionErrorLogs);
+                    return;
+                }
+
+                if (Interlocked.CompareExchange(ref lastActionErrorLogTicks, nowTicks, previousTicks) == previousTicks)
+                {
+                    var suppressed = Interlocked.Exchange(ref suppressedActionErrorLogs, 0);
+                    var message = $"Dispatcher action error: {ex}";
+                    if (suppressed > 0) message = $"{message} Suppressed {suppressed} similar action exceptions.";
+                    Interlocked.Increment(ref emittedActionErrorLogCountForTests);
+                    Volatile.Write(ref lastActionErrorMessageForTests, message);
+                    Debug.LogError(message);
+                    return;
+                }
+            }
+        }
+
         internal static class TestHooks
         {
             internal static void ResetForTests()
@@ -522,6 +551,10 @@ namespace NetworkingLibrary.Modules
                     suppressedBacklogWarnings = 0;
                     emittedBacklogWarningCountForTests = 0;
                     lastBacklogWarningTicks = 0;
+                    suppressedActionErrorLogs = 0;
+                    emittedActionErrorLogCountForTests = 0;
+                    lastActionErrorMessageForTests = null;
+                    lastActionErrorLogTicks = 0;
                     CreateInstanceOnMainThreadFactory = CreateOrFindDispatcherOnMainThread;
                     BackgroundThreadInstanceWaitTimeout = defaultBackgroundThreadWaitTimeout;
                     MaxQueueDepthProvider = null;
@@ -566,6 +599,14 @@ namespace NetworkingLibrary.Modules
             {
                 get => Interlocked.Read(ref lastBacklogWarningTicks);
                 set => Interlocked.Exchange(ref lastBacklogWarningTicks, value);
+            }
+            internal static int SuppressedActionErrorLogsForTests => Volatile.Read(ref suppressedActionErrorLogs);
+            internal static int EmittedActionErrorLogCountForTests => Volatile.Read(ref emittedActionErrorLogCountForTests);
+            internal static string? LastActionErrorMessageForTests => Volatile.Read(ref lastActionErrorMessageForTests);
+            internal static long LastActionErrorLogTicksForTests
+            {
+                get => Interlocked.Read(ref lastActionErrorLogTicks);
+                set => Interlocked.Exchange(ref lastActionErrorLogTicks, value);
             }
         }
     }

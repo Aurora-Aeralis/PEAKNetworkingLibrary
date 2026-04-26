@@ -380,6 +380,37 @@ public class UnityMainThreadDispatcherTests : IDisposable
     }
 
     [Fact]
+    public void Update_WhenActionsThrowAcrossFrames_ThrottlesAndSummarizesSuppressedExceptions()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 32;
+        UnityMainThreadDispatcher.MaxActionsPerFrameProvider = () => 1;
+        UnityMainThreadDispatcher.MaxFrameWorkMillisecondsProvider = () => 1000d;
+        UnityMainThreadDispatcher.BacklogWarningFrameThresholdProvider = () => 1000;
+
+        for (var i = 0; i < 4; i++) dispatcher.Enqueue(() => throw new InvalidOperationException("boom"));
+        var update = typeof(UnityMainThreadDispatcher).GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        update.Invoke(dispatcher, null);
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.EmittedActionErrorLogCountForTests);
+        Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.SuppressedActionErrorLogsForTests);
+        Assert.Contains("Dispatcher action error:", UnityMainThreadDispatcher.TestHooks.LastActionErrorMessageForTests);
+        Assert.DoesNotContain("Suppressed", UnityMainThreadDispatcher.TestHooks.LastActionErrorMessageForTests);
+
+        update.Invoke(dispatcher, null);
+        update.Invoke(dispatcher, null);
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.EmittedActionErrorLogCountForTests);
+        Assert.Equal(2, UnityMainThreadDispatcher.TestHooks.SuppressedActionErrorLogsForTests);
+
+        UnityMainThreadDispatcher.TestHooks.LastActionErrorLogTicksForTests = DateTime.UtcNow.Subtract(TimeSpan.FromSeconds(6)).Ticks;
+        update.Invoke(dispatcher, null);
+
+        Assert.Equal(2, UnityMainThreadDispatcher.TestHooks.EmittedActionErrorLogCountForTests);
+        Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.SuppressedActionErrorLogsForTests);
+        Assert.Contains("Suppressed 2 similar action exceptions.", UnityMainThreadDispatcher.TestHooks.LastActionErrorMessageForTests);
+    }
+
+    [Fact]
     public void TestHooks_ExposeResolvedFrameBudgetValues()
     {
         UnityMainThreadDispatcher.MaxActionsPerFrameProvider = () => 7;

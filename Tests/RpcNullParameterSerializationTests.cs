@@ -312,12 +312,7 @@ public class RpcNullParameterSerializationTests
         var logs = new List<(LogLevel Level, string Message)>();
         using var loggerScope = WithCapturedNetLogs(logs);
 
-        var malformedForByteArray = new Message();
-        malformedForByteArray.WriteByte(3);
-        malformedForByteArray.WriteUInt(TestModId);
-        malformedForByteArray.WriteString("Shared");
-        malformedForByteArray.WriteInt(0);
-        malformedForByteArray.WriteBool(false);
+        var malformedForByteArray = new Message(TestModId, "Shared", 0);
         malformedForByteArray.WriteObject(typeof(int), 42);
 
         OfflineDispatchIncoming.Invoke(service, new object?[] { malformedForByteArray, service.LocalSteamId });

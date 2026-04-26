@@ -798,7 +798,11 @@ namespace NetworkingLibrary.Services
             }
             if (string.IsNullOrEmpty(v)) return default(T)!;
             try { return (T)Convert.ChangeType(v, typeof(T), System.Globalization.CultureInfo.InvariantCulture); }
-            catch { NetLog.Error(LogSource, $"Could not parse lobby data [{key},{v}] as {typeof(T).Name}"); return default(T)!; }
+            catch (Exception ex)
+            {
+                NetLog.Error(LogSource, $"Could not parse lobby data [{key},{v}] as {typeof(T).Name}: {ex.GetType().Name}: {ex.Message}");
+                return default(T)!;
+            }
         }
 
         public void RegisterPlayerDataKey(string key)
@@ -839,7 +843,11 @@ namespace NetworkingLibrary.Services
             }
             if (string.IsNullOrEmpty(v)) return default(T)!;
             try { return (T)Convert.ChangeType(v, typeof(T), System.Globalization.CultureInfo.InvariantCulture); }
-            catch { NetLog.Error(LogSource, $"Could not parse player data [{key},{v}] as {typeof(T).Name}"); return default(T)!; }
+            catch (Exception ex)
+            {
+                NetLog.Error(LogSource, $"Could not parse player data [{key},{v}] as {typeof(T).Name}: {ex.GetType().Name}: {ex.Message}");
+                return default(T)!;
+            }
         }
 
         public IDisposable RegisterNetworkObject(object instance, uint modId, int mask = 0)

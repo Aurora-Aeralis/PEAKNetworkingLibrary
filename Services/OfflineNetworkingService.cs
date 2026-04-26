@@ -126,7 +126,6 @@ namespace NetworkingLibrary.Services
             perPlayerData.Clear();
             ClearPerPeerSymmetricKeys();
             ClearGlobalSharedSecret();
-            lock (rpcLock) rpcs.Clear();
             modSigners.Clear();
             modPublicKeys.Clear();
             globalHmac?.Dispose(); globalHmac = null;

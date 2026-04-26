@@ -27,6 +27,20 @@ namespace NetworkingLibrary.Modules
 
     public class Message : IDisposable
     {
+        public readonly struct ReadCursor
+        {
+            private readonly Message owner;
+            internal readonly int Position;
+
+            internal ReadCursor(Message owner, int position)
+            {
+                this.owner = owner;
+                Position = position;
+            }
+
+            internal bool IsFrom(Message message) => ReferenceEquals(owner, message);
+        }
+
         public const byte PROTOCOL_VERSION = 3;
         public const int DefaultMaxSize = 64 * 1024;
         public const int MinMaxSize = 1024;
@@ -175,6 +189,21 @@ namespace NetworkingLibrary.Modules
         {
             ThrowIfDisposed();
             return Length() - readPos;
+        }
+
+        public ReadCursor SaveReadCursor()
+        {
+            ThrowIfDisposed();
+            return new ReadCursor(this, readPos);
+        }
+
+        public void RestoreReadCursor(ReadCursor cursor)
+        {
+            ThrowIfDisposed();
+            if (!cursor.IsFrom(this)) throw new InvalidOperationException("Cursor does not belong to this message.");
+            EnsureReadableBuffer();
+            if (cursor.Position < 0 || cursor.Position > readableBuffer.Length) throw new InvalidDataException("Read cursor out of range.");
+            readPos = cursor.Position;
         }
 
         /// <summary>

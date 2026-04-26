@@ -757,24 +757,52 @@ namespace NetworkingLibrary.Services
         {
             callParams = null!;
             unread = int.MaxValue;
+            var originalCursor = source.SaveReadCursor();
+            var probeCursor = originalCursor;
             try
             {
-                var msgCopy = new Message(source.ToArray(), messageSizePolicy);
+                if (originalCursor.Position == 0)
+                {
+                    // Offline RPC/RPCTarget can dispatch the freshly built outbound message directly.
+                    // In that flow the read cursor is still at byte 0, so advance to payload start
+                    // before probing overload arguments.
+                    source.ReadByte();   // protocol version
+                    source.ReadUInt();   // mod id
+                    source.ReadString(); // method name
+                    source.ReadInt();    // mask
+                    if (source.ProtocolVersion >= 3)
+                    {
+                        var hasOverloadKey = source.ReadBool();
+                        if (hasOverloadKey)
+                        {
+                            source.ReadString();
+                        }
+                    }
+
+                    probeCursor = source.SaveReadCursor();
+                }
+
+                source.RestoreReadCursor(probeCursor);
+
                 var pi = handler.Parameters;
                 int paramCount = handler.ParameterCountWithoutRpcInfo;
                 callParams = new object[pi.Length];
-                for (int i = 0; i < paramCount; i++) callParams[i] = msgCopy.ReadObject(pi[i].ParameterType);
+                for (int i = 0; i < paramCount; i++) callParams[i] = source.ReadObject(pi[i].ParameterType);
                 if (handler.TakesInfo)
                 {
                     var t = pi[pi.Length - 1].ParameterType;
                     callParams[pi.Length - 1] = CreateRpcInfoInstance(t, from);
                 }
-                unread = msgCopy.UnreadLength();
+                unread = source.UnreadLength();
                 return true;
             }
             catch
             {
                 return false;
+            }
+            finally
+            {
+                source.RestoreReadCursor(originalCursor);
             }
         }
 

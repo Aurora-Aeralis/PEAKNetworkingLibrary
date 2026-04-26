@@ -6,6 +6,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Text;
 using Xunit;
 
 namespace NetworkingLibrary.Tests;
@@ -231,6 +232,65 @@ public class FileManagerConfigMigrationTests
 
         Assert.Equal("1", schemaVersion);
         Assert.True(IsLegacyVersionRemoved(configText));
+    }
+
+    [Fact]
+    public void MigrateConfigIfNeeded_FileFallback_PreservesCrlfNewlines()
+    {
+        using var scope = new TempConfigScope();
+        File.WriteAllText(scope.ConfigPath,
+            "[Version]\r\n" +
+            "Current Version = 1\r\n" +
+            "Another Key = Value\r\n" +
+            "\r\n" +
+            "[General]\r\n" +
+            "Enabled = true\r\n",
+            new UTF8Encoding(false));
+
+        var config = new MissingLegacyOrphanedEntriesConfigFile(scope.ConfigPath, true);
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var configText = File.ReadAllText(scope.ConfigPath);
+        Assert.DoesNotContain("Current Version = 1", configText, StringComparison.Ordinal);
+        Assert.Contains("\r\n", configText, StringComparison.Ordinal);
+        Assert.DoesNotContain("=\n", configText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MigrateConfigIfNeeded_FileFallback_PreservesUtf8Bom()
+    {
+        using var scope = new TempConfigScope();
+        var utf8Bom = new UTF8Encoding(true);
+        File.WriteAllText(scope.ConfigPath,
+            "[Version]\n" +
+            "Current Version = 1\n",
+            utf8Bom);
+
+        var config = new MissingLegacyOrphanedEntriesConfigFile(scope.ConfigPath, true);
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var bytes = File.ReadAllBytes(scope.ConfigPath);
+        var preamble = Encoding.UTF8.GetPreamble();
+        Assert.True(bytes.Length >= preamble.Length);
+        Assert.Equal(preamble, bytes[..preamble.Length]);
+    }
+
+    [Fact]
+    public void MigrateConfigIfNeeded_NoLegacyKey_DoesNotRewriteConfig()
+    {
+        using var scope = new TempConfigScope();
+        File.WriteAllText(scope.ConfigPath,
+            "[Version]\r\n" +
+            "ConfigSchemaVersion = 1\r\n" +
+            "PluginVersion = 1.0.0\r\n",
+            new UTF8Encoding(true));
+        var before = File.ReadAllBytes(scope.ConfigPath);
+
+        var config = new ConfigFile(scope.ConfigPath, true);
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var after = File.ReadAllBytes(scope.ConfigPath);
+        Assert.Equal(before, after);
     }
 
     [Theory]

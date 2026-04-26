@@ -4,6 +4,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Collections.Concurrent;
+using System.Text;
 using BepInEx.Configuration;
 using BepInEx;
 
@@ -220,7 +221,10 @@ namespace NetworkingLibrary.Features
                 if (!File.Exists(configPath))
                     return false;
 
-                var lines = File.ReadAllLines(configPath);
+                var originalText = File.ReadAllText(configPath);
+                var encoding = DetectEncoding(configPath);
+                var newline = originalText.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+                var lines = originalText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
                 var keptLines = new List<string>(lines.Length);
                 var changed = false;
                 var inVersionSection = false;
@@ -267,7 +271,8 @@ namespace NetworkingLibrary.Features
                 if (!changed)
                     return false;
 
-                File.WriteAllLines(configPath, keptLines);
+                var rewrittenText = string.Join(newline, keptLines);
+                File.WriteAllText(configPath, rewrittenText, encoding);
                 return true;
             }
             catch (Exception ex)
@@ -275,6 +280,38 @@ namespace NetworkingLibrary.Features
                 exception = ex;
                 return false;
             }
+        }
+
+        static Encoding DetectEncoding(string filePath)
+        {
+            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream, Encoding.UTF8, true);
+            reader.Peek();
+            var detectedEncoding = reader.CurrentEncoding;
+            if (detectedEncoding is UTF8Encoding)
+                return new UTF8Encoding(HasUtf8Bom(filePath));
+            return detectedEncoding;
+        }
+
+        static bool HasUtf8Bom(string filePath)
+        {
+            var utf8Bom = Encoding.UTF8.GetPreamble();
+            if (utf8Bom.Length == 0)
+                return false;
+
+            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            if (stream.Length < utf8Bom.Length)
+                return false;
+
+            var header = new byte[utf8Bom.Length];
+            _ = stream.Read(header, 0, header.Length);
+            for (var i = 0; i < utf8Bom.Length; i++)
+            {
+                if (header[i] != utf8Bom[i])
+                    return false;
+            }
+
+            return true;
         }
 
         static string BuildCleanupFailureContext(Exception? removeException, Exception? orphanedEntriesException, Exception? fileCleanupException)

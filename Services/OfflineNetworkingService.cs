@@ -303,10 +303,12 @@ namespace NetworkingLibrary.Services
         public void LeaveLobby()
         {
             if (!InLobby) return;
+            var hadLocalPeer = perPlayerData.ContainsKey(LocalSteamId);
 
             InLobby = false;
             HostSteamId64 = LocalSteamId;
             lobbyData.Clear();
+            if (hadLocalPeer) PlayerLeft?.Invoke(LocalSteamId);
             perPlayerData.Clear();
             lobbyKeys.Clear();
             playerKeys.Clear();

@@ -176,6 +176,20 @@ namespace NetworkingLibrary
             {
                 service = CreateDefaultNetworkingService();
                 service.Initialize();
+                if (!service.IsInitialized)
+                {
+                    logger?.LogError($"Default networking service '{service.GetType().Name}' initialization returned without becoming active. Attempting OfflineNetworkingService fallback.");
+                    try
+                    {
+                        service.Shutdown();
+                    }
+                    catch (Exception shutdownException)
+                    {
+                        logger?.LogWarning($"Failed to shutdown uninitialized default networking service '{service.GetType().Name}' during fallback: {shutdownException}");
+                    }
+                    service = null;
+                    throw new InvalidOperationException("Default networking service initialization completed without becoming active.");
+                }
                 return true;
             }
             catch (Exception exception)
@@ -187,6 +201,20 @@ namespace NetworkingLibrary
             {
                 service = CreateOfflineNetworkingService();
                 service.Initialize();
+                if (!service.IsInitialized)
+                {
+                    logger?.LogError($"Fallback networking service '{service.GetType().Name}' initialization returned without becoming active. Networking service disabled.");
+                    try
+                    {
+                        service.Shutdown();
+                    }
+                    catch (Exception shutdownException)
+                    {
+                        logger?.LogWarning($"Failed to shutdown uninitialized fallback networking service '{service.GetType().Name}': {shutdownException}");
+                    }
+                    service = null;
+                    return false;
+                }
                 return true;
             }
             catch (Exception exception)

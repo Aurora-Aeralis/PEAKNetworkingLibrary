@@ -192,6 +192,30 @@ public class FileManagerConfigMigrationTests
         Assert.True(IsLegacyVersionClearedOrRemoved(configText));
     }
 
+    [Theory]
+    [InlineData("-1")]
+    [InlineData("abc")]
+    [InlineData("   ")]
+    [InlineData("1.2")]
+    [InlineData("1abc")]
+    public void MigrateConfigIfNeeded_InvalidLegacySourceVersion_DefaultsToSchemaZeroAndCompletes(string legacyVersion)
+    {
+        using var scope = new TempConfigScope();
+        File.WriteAllText(scope.ConfigPath,
+            "[Version]\n" +
+            $"Current Version = {legacyVersion}\n");
+
+        var config = new ConfigFile(scope.ConfigPath, true);
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        var configText = File.ReadAllText(scope.ConfigPath);
+
+        Assert.Equal("1", schemaVersion);
+        Assert.Contains("ConfigSchemaVersion = 1", configText, StringComparison.Ordinal);
+        Assert.True(IsLegacyVersionClearedOrRemoved(configText));
+    }
+
     static bool IsLegacyVersionClearedOrRemoved(string configText)
     {
         var inVersionSection = false;

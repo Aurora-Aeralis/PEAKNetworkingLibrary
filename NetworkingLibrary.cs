@@ -85,7 +85,7 @@ namespace NetworkingLibrary
                 canonicalPoller.hideFlags = HideFlags.HideAndDontSave;
             }
 
-            CleanupDuplicatePollers(pollers.Skip(1), Destroy);
+            CleanupDuplicatePollers(canonicalPoller, pollers.Skip(1), DestroyPollerDuringStartup);
 
             var go = canonicalPoller.gameObject;
             go.name = pollerName;
@@ -97,19 +97,46 @@ namespace NetworkingLibrary
             Logger.LogInfo($"{MyPluginInfo.PLUGIN_NAME} v{MyPluginInfo.PLUGIN_VERSION} has fully loaded!");
         }
 
-        private static void CleanupDuplicatePollers(IEnumerable<NetworkingPoller> duplicatePollers, Action<UnityEngine.Object> destroyAction)
+        private static void CleanupDuplicatePollers(
+            NetworkingPoller canonicalPoller,
+            IEnumerable<NetworkingPoller> duplicatePollers,
+            Action<UnityEngine.Object> destroyAction)
         {
             foreach (var extraPoller in duplicatePollers)
             {
-                var components = extraPoller.gameObject
+                if (extraPoller == null)
+                    continue;
+
+                var duplicatePollerObject = extraPoller.gameObject;
+                if (duplicatePollerObject == null)
+                    continue;
+
+                var components = duplicatePollerObject
                     .GetComponents<Component>()
                     .Where(component => component != null)
                     .ToArray();
                 var hasOnlyTransformAndPoller = components.Length == 2
                     && components.Any(component => component is Transform)
                     && components.Any(component => component is NetworkingPoller);
-                destroyAction(hasOnlyTransformAndPoller ? extraPoller.gameObject : extraPoller);
+                var destroyingObjectWouldDeleteCanonical = hasOnlyTransformAndPoller
+                    && duplicatePollerObject.transform != null
+                    && canonicalPoller != null
+                    && canonicalPoller.transform != null
+                    && canonicalPoller.transform.IsChildOf(duplicatePollerObject.transform);
+                destroyAction(hasOnlyTransformAndPoller && !destroyingObjectWouldDeleteCanonical
+                    ? duplicatePollerObject
+                    : extraPoller);
             }
+        }
+
+        private static void DestroyPollerDuringStartup(UnityEngine.Object target)
+        {
+            if (target is NetworkingPoller duplicatePoller)
+                duplicatePoller.enabled = false;
+            else if (target is GameObject duplicatePollerObject)
+                duplicatePollerObject.SetActive(false);
+
+            DestroyImmediate(target);
         }
 
         internal static bool TryInitializeNetworkingService(ManualLogSource? logger, out INetworkingService? service)

@@ -227,4 +227,72 @@ public class UnityMainThreadDispatcherTests : IDisposable
         Assert.Equal(2, UnityMainThreadDispatcher.TestHooks.EmittedOverflowWarningCountForTests);
         Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.SuppressedOverflowWarningsForTests);
     }
+
+    [Fact]
+    public void Update_WhenPerFrameActionBudgetReached_PartiallyDrainsQueue()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 32;
+        UnityMainThreadDispatcher.MaxActionsPerFrameProvider = () => 2;
+        UnityMainThreadDispatcher.MaxFrameWorkMillisecondsProvider = () => 1000d;
+        UnityMainThreadDispatcher.BacklogWarningFrameThresholdProvider = () => 1000;
+
+        var executed = new List<int>();
+        for (var i = 0; i < 5; i++)
+        {
+            var value = i;
+            dispatcher.Enqueue(() => executed.Add(value));
+        }
+
+        var update = typeof(UnityMainThreadDispatcher).GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        update.Invoke(dispatcher, null);
+        Assert.Equal(new[] { 0, 1 }, executed);
+        Assert.Equal(3, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
+
+        update.Invoke(dispatcher, null);
+        Assert.Equal(new[] { 0, 1, 2, 3 }, executed);
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
+
+        update.Invoke(dispatcher, null);
+        Assert.Equal(new[] { 0, 1, 2, 3, 4 }, executed);
+        Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
+    }
+
+    [Fact]
+    public void Update_WhenBacklogPersistsAcrossFrames_EmitsThrottledWarning()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 32;
+        UnityMainThreadDispatcher.MaxActionsPerFrameProvider = () => 1;
+        UnityMainThreadDispatcher.MaxFrameWorkMillisecondsProvider = () => 1000d;
+        UnityMainThreadDispatcher.BacklogWarningFrameThresholdProvider = () => 2;
+
+        for (var i = 0; i < 6; i++) dispatcher.Enqueue(() => { });
+        var update = typeof(UnityMainThreadDispatcher).GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        update.Invoke(dispatcher, null);
+        Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.EmittedBacklogWarningCountForTests);
+
+        update.Invoke(dispatcher, null);
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.EmittedBacklogWarningCountForTests);
+
+        update.Invoke(dispatcher, null);
+        Assert.True(UnityMainThreadDispatcher.TestHooks.SuppressedBacklogWarningsForTests > 0);
+
+        UnityMainThreadDispatcher.TestHooks.LastBacklogWarningTicksForTests = DateTime.UtcNow.Subtract(TimeSpan.FromSeconds(6)).Ticks;
+        update.Invoke(dispatcher, null);
+        Assert.Equal(2, UnityMainThreadDispatcher.TestHooks.EmittedBacklogWarningCountForTests);
+    }
+
+    [Fact]
+    public void TestHooks_ExposeResolvedFrameBudgetValues()
+    {
+        UnityMainThreadDispatcher.MaxActionsPerFrameProvider = () => 7;
+        UnityMainThreadDispatcher.MaxFrameWorkMillisecondsProvider = () => 2.5d;
+        UnityMainThreadDispatcher.BacklogWarningFrameThresholdProvider = () => 9;
+
+        Assert.Equal(7, UnityMainThreadDispatcher.TestHooks.MaxActionsPerFrameForTests);
+        Assert.Equal(2.5d, UnityMainThreadDispatcher.TestHooks.MaxFrameWorkMillisecondsForTests, 3);
+        Assert.Equal(9, UnityMainThreadDispatcher.TestHooks.BacklogWarningFrameThresholdForTests);
+    }
 }

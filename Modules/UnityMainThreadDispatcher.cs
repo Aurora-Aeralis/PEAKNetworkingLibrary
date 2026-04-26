@@ -17,6 +17,9 @@ namespace NetworkingLibrary.Modules
         }
 
         const int defaultMaxQueueDepth = 2048;
+        internal const int defaultMaxActionsPerFrame = 128;
+        internal const double defaultMaxFrameWorkMilliseconds = 4.0d;
+        internal const int defaultBacklogWarningFrameThreshold = 120;
         static readonly TimeSpan overflowWarningCooldown = TimeSpan.FromSeconds(5);
         static UnityMainThreadDispatcher? instance;
         static readonly object instanceLock = new();
@@ -32,6 +35,10 @@ namespace NetworkingLibrary.Modules
         static long lastOverflowWarningTicks;
         static int suppressedOverflowLoggerFailures;
         static long lastOverflowLoggerFailureTicks;
+        static int consecutiveBacklogFrames;
+        static int suppressedBacklogWarnings;
+        static int emittedBacklogWarningCountForTests;
+        static long lastBacklogWarningTicks;
         static readonly ManualResetEventSlim instanceReady = new(false);
         static readonly TimeSpan defaultBackgroundThreadWaitTimeout = TimeSpan.FromSeconds(2);
 
@@ -39,6 +46,9 @@ namespace NetworkingLibrary.Modules
         internal static TimeSpan BackgroundThreadInstanceWaitTimeout = defaultBackgroundThreadWaitTimeout;
         internal static Func<int?>? MaxQueueDepthProvider;
         internal static Func<QueueOverflowBehavior>? QueueOverflowBehaviorProvider;
+        internal static Func<int?>? MaxActionsPerFrameProvider;
+        internal static Func<double?>? MaxFrameWorkMillisecondsProvider;
+        internal static Func<int?>? BacklogWarningFrameThresholdProvider;
 
         public static UnityMainThreadDispatcher Instance()
         {
@@ -291,6 +301,10 @@ namespace NetworkingLibrary.Modules
 
         void Update()
         {
+            var maxActions = ResolveMaxActionsPerFrame();
+            var maxFrameMs = ResolveMaxFrameWorkMilliseconds();
+            var stopwatch = maxFrameMs > 0d ? Stopwatch.StartNew() : null;
+            var processed = 0;
             while (true)
             {
                 Action a = null!;
@@ -300,6 +314,76 @@ namespace NetworkingLibrary.Modules
                     else break;
                 }
                 try { a?.Invoke(); } catch (Exception ex) { Debug.LogError($"Dispatcher action error: {ex}"); }
+                processed++;
+                if (maxActions > 0 && processed >= maxActions) break;
+                if (stopwatch != null && stopwatch.Elapsed.TotalMilliseconds >= maxFrameMs) break;
+            }
+
+            TrackBacklogWarning();
+        }
+
+        static int ResolveMaxActionsPerFrame()
+        {
+            var configured = MaxActionsPerFrameProvider?.Invoke();
+            if (configured.HasValue && configured.Value > 0) return configured.Value;
+            return defaultMaxActionsPerFrame;
+        }
+
+        static double ResolveMaxFrameWorkMilliseconds()
+        {
+            var configured = MaxFrameWorkMillisecondsProvider?.Invoke();
+            if (configured.HasValue && configured.Value > 0d) return configured.Value;
+            return defaultMaxFrameWorkMilliseconds;
+        }
+
+        static int ResolveBacklogWarningFrameThreshold()
+        {
+            var configured = BacklogWarningFrameThresholdProvider?.Invoke();
+            if (configured.HasValue && configured.Value > 0) return configured.Value;
+            return defaultBacklogWarningFrameThreshold;
+        }
+
+        static void TrackBacklogWarning()
+        {
+            var remaining = 0;
+            lock (queue) remaining = queue.Count;
+            if (remaining <= 0)
+            {
+                Interlocked.Exchange(ref consecutiveBacklogFrames, 0);
+                return;
+            }
+
+            var backlogFrames = Interlocked.Increment(ref consecutiveBacklogFrames);
+            var threshold = ResolveBacklogWarningFrameThreshold();
+            if (threshold <= 0 || backlogFrames < threshold) return;
+            EmitBacklogWarning($"UnityMainThreadDispatcher backlog persisted for {backlogFrames} frames with {remaining} actions still queued.");
+        }
+
+        static void EmitBacklogWarning(string message)
+        {
+            while (true)
+            {
+                var nowTicks = DateTime.UtcNow.Ticks;
+                var previousTicks = Interlocked.Read(ref lastBacklogWarningTicks);
+                if (previousTicks != 0 && new TimeSpan(nowTicks - previousTicks) < overflowWarningCooldown)
+                {
+                    Interlocked.Increment(ref suppressedBacklogWarnings);
+                    return;
+                }
+
+                if (Interlocked.CompareExchange(ref lastBacklogWarningTicks, nowTicks, previousTicks) == previousTicks) break;
+            }
+
+            try
+            {
+                var suppressed = Interlocked.Exchange(ref suppressedBacklogWarnings, 0);
+                if (suppressed > 0) message = $"{message} Suppressed {suppressed} similar warnings.";
+                Interlocked.Increment(ref emittedBacklogWarningCountForTests);
+                Net.Logger?.LogWarning(message);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[UnityMainThreadDispatcher] Failed to write backlog warning. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
             }
         }
 
@@ -326,10 +410,17 @@ namespace NetworkingLibrary.Modules
                     lastOverflowWarningTicks = 0;
                     suppressedOverflowLoggerFailures = 0;
                     lastOverflowLoggerFailureTicks = 0;
+                    consecutiveBacklogFrames = 0;
+                    suppressedBacklogWarnings = 0;
+                    emittedBacklogWarningCountForTests = 0;
+                    lastBacklogWarningTicks = 0;
                     CreateInstanceOnMainThreadFactory = CreateOrFindDispatcherOnMainThread;
                     BackgroundThreadInstanceWaitTimeout = defaultBackgroundThreadWaitTimeout;
                     MaxQueueDepthProvider = null;
                     QueueOverflowBehaviorProvider = null;
+                    MaxActionsPerFrameProvider = null;
+                    MaxFrameWorkMillisecondsProvider = null;
+                    BacklogWarningFrameThresholdProvider = null;
                 }
             }
 
@@ -355,6 +446,17 @@ namespace NetworkingLibrary.Modules
                 set => Interlocked.Exchange(ref lastOverflowWarningTicks, value);
             }
             internal static int MaxQueueDepthForTests => ResolveMaxQueueDepth();
+            internal static int MaxActionsPerFrameForTests => ResolveMaxActionsPerFrame();
+            internal static double MaxFrameWorkMillisecondsForTests => ResolveMaxFrameWorkMilliseconds();
+            internal static int BacklogWarningFrameThresholdForTests => ResolveBacklogWarningFrameThreshold();
+            internal static int ConsecutiveBacklogFramesForTests => Volatile.Read(ref consecutiveBacklogFrames);
+            internal static int SuppressedBacklogWarningsForTests => Volatile.Read(ref suppressedBacklogWarnings);
+            internal static int EmittedBacklogWarningCountForTests => Volatile.Read(ref emittedBacklogWarningCountForTests);
+            internal static long LastBacklogWarningTicksForTests
+            {
+                get => Interlocked.Read(ref lastBacklogWarningTicks);
+                set => Interlocked.Exchange(ref lastBacklogWarningTicks, value);
+            }
         }
     }
 }

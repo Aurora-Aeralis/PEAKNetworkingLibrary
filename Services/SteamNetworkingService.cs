@@ -138,7 +138,6 @@ namespace NetworkingLibrary.Services
 
         readonly Dictionary<uint, Dictionary<string, List<MessageHandler>>> rpcs = new();
 
-        readonly Queue<QueuedSend> highQueue = new();
         readonly Queue<QueuedSend> normalQueue = new();
         readonly Queue<QueuedSend> lowQueue = new();
         readonly object queueLock = new();
@@ -605,7 +604,6 @@ namespace NetworkingLibrary.Services
         {
             lock (queueLock)
             {
-                highQueue.Clear();
                 normalQueue.Clear();
                 lowQueue.Clear();
 

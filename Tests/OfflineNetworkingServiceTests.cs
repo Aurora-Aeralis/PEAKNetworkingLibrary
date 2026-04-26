@@ -693,6 +693,30 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
+    public void Shutdown_ClearsRegisteredRpcHandlers_AndDataKeyRegistrations()
+    {
+        var service = new OfflineNetworkingService();
+        var receiver = new RpcReceiver();
+
+        service.Initialize();
+        service.RegisterNetworkObject(receiver, TestModId);
+        service.RegisterLobbyDataKey("round");
+        service.RegisterPlayerDataKey("role");
+
+        service.Shutdown();
+        Assert.Equal(0, GetRegisteredHandlerCount(service, TestModId));
+
+        var lobbyKeys = (ICollection<string>)typeof(OfflineNetworkingService)
+            .GetField("lobbyKeys", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(service)!;
+        var playerKeys = (ICollection<string>)typeof(OfflineNetworkingService)
+            .GetField("playerKeys", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(service)!;
+        Assert.Empty(lobbyKeys);
+        Assert.Empty(playerKeys);
+    }
+
+    [Fact]
     public void Concurrent_RegisterDeregister_AndDispatch_DoesNotThrow()
     {
         var service = new OfflineNetworkingService();

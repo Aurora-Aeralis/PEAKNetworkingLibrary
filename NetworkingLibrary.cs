@@ -38,6 +38,7 @@ namespace NetworkingLibrary
             finally
             {
                 Service = null;
+                ResetNetworkingStartupHooks();
             }
 
             try
@@ -48,6 +49,10 @@ namespace NetworkingLibrary
             catch (Exception ex)
             {
                 Logger?.LogWarning($"Failed to unpatch Harmony during plugin teardown: {ex.Message}");
+            }
+            finally
+            {
+                Instance = null!;
             }
         }
 

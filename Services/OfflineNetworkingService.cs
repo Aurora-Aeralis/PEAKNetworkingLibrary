@@ -5,7 +5,6 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using NetworkingLibrary.Modules;
-using NetworkingLibrary.Services;
 
 namespace NetworkingLibrary.Services
 {
@@ -127,6 +126,12 @@ namespace NetworkingLibrary.Services
             IsInitialized = false;
             offlineIsHost = false;
             HostSteamId64 = LocalSteamId;
+            lock (rpcLock)
+            {
+                rpcs.Clear();
+            }
+            lobbyKeys.Clear();
+            playerKeys.Clear();
             lobbyData.Clear();
             perPlayerData.Clear();
             ClearPerPeerSymmetricKeys();

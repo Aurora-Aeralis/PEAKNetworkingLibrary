@@ -110,6 +110,8 @@ namespace NetworkingLibrary.Services
         static Type? ResolveLoadedSteamManagerType()
         {
             const BindingFlags AnyStaticVisibility = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+            var fallbackSteamManagerType = default(Type);
+            var fallbackMatchCount = 0;
             var assemblies = AppDomain.CurrentDomain.GetAssemblies();
             for (var index = 0; index < assemblies.Length; index++)
             {
@@ -134,12 +136,35 @@ namespace NetworkingLibrary.Services
                 {
                     var candidate = types[typeIndex];
                     if (candidate == null || !string.Equals(candidate.Name, "SteamManager", StringComparison.Ordinal)) continue;
-                    if (candidate.GetProperty("Initialized", AnyStaticVisibility)?.PropertyType == typeof(bool)) return candidate;
-                    if (candidate.GetField("Initialized", AnyStaticVisibility)?.FieldType == typeof(bool)) return candidate;
+                    if (candidate.GetProperty("Initialized", AnyStaticVisibility)?.PropertyType != typeof(bool)
+                        && candidate.GetField("Initialized", AnyStaticVisibility)?.FieldType != typeof(bool))
+                        continue;
+
+                    if (IsPreferredSteamManagerType(candidate))
+                        return candidate;
+
+                    fallbackSteamManagerType = candidate;
+                    fallbackMatchCount++;
                 }
             }
 
+            if (fallbackMatchCount == 1)
+                return fallbackSteamManagerType;
+
             return null;
+        }
+
+        static bool IsPreferredSteamManagerType(Type steamManagerType)
+        {
+            var fullName = steamManagerType.FullName;
+            if (string.Equals(fullName, "pworld.Scripts.SteamManager", StringComparison.Ordinal))
+                return true;
+
+            if (string.Equals(fullName, "SteamManager", StringComparison.Ordinal))
+                return true;
+
+            var assemblyName = steamManagerType.Assembly.GetName().Name;
+            return string.Equals(assemblyName, "Assembly-CSharp", StringComparison.Ordinal);
         }
 
         static bool TryReadInitializedFromType(Type steamManagerType, out bool isInitialized)

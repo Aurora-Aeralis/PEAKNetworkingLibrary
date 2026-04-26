@@ -281,20 +281,22 @@ public class NetworkingServiceFactoryTests
     }
 
     [Fact]
-    public void TryReadSteamManagerInitialized_FindsLoadedSteamManagerType_WhenResolveTypeMisses()
+    public void TryReadSteamManagerInitialized_DoesNotUseAmbiguousLoadedSteamManagerType_WhenResolveTypeMisses()
     {
         SteamManager.Initialized = true;
+        NetworkingLibrary.Tests.OtherPlugin.SteamManager.Initialized = false;
         NetworkingServiceFactory.ResolveType = _ => null;
 
         try
         {
             var read = InvokeTryReadSteamManagerInitialized(out var isInitialized);
-            Assert.True(read);
-            Assert.True(isInitialized);
+            Assert.False(read);
+            Assert.False(isInitialized);
         }
         finally
         {
             SteamManager.Initialized = false;
+            NetworkingLibrary.Tests.OtherPlugin.SteamManager.Initialized = false;
             NetworkingServiceFactory.ResetTestHooks();
         }
     }

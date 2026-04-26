@@ -119,13 +119,7 @@ namespace NetworkingLibrary
                 if (duplicatePollerObject == null)
                     continue;
 
-                var components = duplicatePollerObject
-                    .GetComponents<Component>()
-                    .Where(component => component != null)
-                    .ToArray();
-                var hasOnlyTransformAndPoller = components.Length == 2
-                    && components.Any(component => component is Transform)
-                    && components.Any(component => component is NetworkingPoller);
+                var hasOnlyTransformAndPoller = HasOnlyTransformAndPollerComponents(duplicatePollerObject);
                 var destroyingObjectWouldDeleteCanonical = hasOnlyTransformAndPoller
                     && duplicatePollerObject.transform != null
                     && canonicalPoller.transform.IsChildOf(duplicatePollerObject.transform);
@@ -133,6 +127,34 @@ namespace NetworkingLibrary
                     ? duplicatePollerObject
                     : extraPoller);
             }
+        }
+
+        private static bool HasOnlyTransformAndPollerComponents(GameObject pollerObject)
+        {
+            var components = pollerObject.GetComponents<Component>();
+            var hasTransform = false;
+            var hasPoller = false;
+            var count = 0;
+            for (var i = 0; i < components.Length; i++)
+            {
+                var component = components[i];
+                if (component == null)
+                    continue;
+                count++;
+                if (component is Transform)
+                {
+                    hasTransform = true;
+                    continue;
+                }
+                if (component is NetworkingPoller)
+                {
+                    hasPoller = true;
+                    continue;
+                }
+                return false;
+            }
+
+            return count == 2 && hasTransform && hasPoller;
         }
 
         private static void DestroyPollerDuringStartup(UnityEngine.Object target)

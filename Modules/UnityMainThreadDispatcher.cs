@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using UnityEngine;
 
@@ -15,6 +16,8 @@ namespace NetworkingLibrary.Modules
         static int createRequestQueued;
         static readonly ManualResetEventSlim instanceReady = new(false);
         static readonly TimeSpan defaultBackgroundThreadWaitTimeout = TimeSpan.FromSeconds(2);
+        static int maxActionsPerUpdate = int.MaxValue;
+        static double maxUpdateMilliseconds = double.PositiveInfinity;
 
         internal static Func<UnityMainThreadDispatcher> CreateInstanceOnMainThreadFactory = CreateOrFindDispatcherOnMainThread;
         internal static TimeSpan BackgroundThreadInstanceWaitTimeout = defaultBackgroundThreadWaitTimeout;
@@ -164,8 +167,19 @@ namespace NetworkingLibrary.Modules
 
         void Update()
         {
+            var actionBudget = Volatile.Read(ref maxActionsPerUpdate);
+            if (actionBudget <= 0) return;
+
+            var millisecondsBudget = Volatile.Read(ref maxUpdateMilliseconds);
+            var useTimeBudget = !double.IsPositiveInfinity(millisecondsBudget);
+            var stopwatch = useTimeBudget ? Stopwatch.StartNew() : null;
+            var processed = 0;
+
             while (true)
             {
+                if (processed >= actionBudget) break;
+                if (useTimeBudget && stopwatch!.Elapsed.TotalMilliseconds >= millisecondsBudget) break;
+
                 Action a = null!;
                 lock (queue)
                 {
@@ -173,6 +187,7 @@ namespace NetworkingLibrary.Modules
                     else break;
                 }
                 try { a?.Invoke(); } catch (Exception ex) { Debug.LogError($"Dispatcher action error: {ex}"); }
+                processed++;
             }
         }
 
@@ -192,6 +207,8 @@ namespace NetworkingLibrary.Modules
                     instanceReady.Reset();
                     CreateInstanceOnMainThreadFactory = CreateOrFindDispatcherOnMainThread;
                     BackgroundThreadInstanceWaitTimeout = defaultBackgroundThreadWaitTimeout;
+                    maxActionsPerUpdate = int.MaxValue;
+                    maxUpdateMilliseconds = double.PositiveInfinity;
                 }
             }
 
@@ -204,6 +221,16 @@ namespace NetworkingLibrary.Modules
                 {
                     lock (queue) return queue.Count;
                 }
+            }
+            internal static int MaxActionsPerUpdate
+            {
+                get => Volatile.Read(ref maxActionsPerUpdate);
+                set => Volatile.Write(ref maxActionsPerUpdate, value);
+            }
+            internal static double MaxUpdateMilliseconds
+            {
+                get => Volatile.Read(ref maxUpdateMilliseconds);
+                set => Volatile.Write(ref maxUpdateMilliseconds, value);
             }
         }
     }

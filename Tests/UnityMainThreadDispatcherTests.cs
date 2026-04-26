@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,6 +12,8 @@ namespace NetworkingLibrary.Tests;
 
 public class UnityMainThreadDispatcherTests : IDisposable
 {
+    static readonly MethodInfo UpdateMethod = typeof(UnityMainThreadDispatcher).GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
     public UnityMainThreadDispatcherTests()
     {
         UnityMainThreadDispatcher.TestHooks.ResetForTests();
@@ -18,6 +21,8 @@ public class UnityMainThreadDispatcherTests : IDisposable
     }
 
     public void Dispose() => UnityMainThreadDispatcher.TestHooks.ResetForTests();
+
+    static void RunUpdate(UnityMainThreadDispatcher dispatcher) => UpdateMethod.Invoke(dispatcher, null);
 
     [Fact]
     public void Instance_FromWorkerThread_QueuesCreationRequestWithoutCreatingOnWorker()
@@ -121,5 +126,58 @@ public class UnityMainThreadDispatcherTests : IDisposable
         var instance = await workerTask;
         Assert.NotNull(instance);
         Assert.Equal(1, createCalls);
+    }
+
+    [Fact]
+    public void Update_BacklogExceedingActionBudget_DoesNotFullyDrainQueue()
+    {
+        UnityMainThreadDispatcher.TestHooks.MaxActionsPerUpdate = 2;
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        var executed = new ConcurrentQueue<int>();
+        for (var i = 0; i < 5; i++)
+        {
+            var value = i;
+            dispatcher.Enqueue(() => executed.Enqueue(value));
+        }
+
+        RunUpdate(dispatcher);
+
+        Assert.Equal(new[] { 0, 1 }, executed.ToArray());
+        Assert.Equal(3, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
+    }
+
+    [Fact]
+    public void Update_RemainingQueuedActions_RunOnSubsequentFrames()
+    {
+        UnityMainThreadDispatcher.TestHooks.MaxActionsPerUpdate = 2;
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        var executed = new ConcurrentQueue<int>();
+        for (var i = 0; i < 5; i++)
+        {
+            var value = i;
+            dispatcher.Enqueue(() => executed.Enqueue(value));
+        }
+
+        RunUpdate(dispatcher);
+        RunUpdate(dispatcher);
+        RunUpdate(dispatcher);
+
+        Assert.Equal(new[] { 0, 1, 2, 3, 4 }, executed.ToArray());
+        Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
+    }
+
+    [Fact]
+    public void Update_SmallQueue_StillFullyDrainsWithinBudget()
+    {
+        UnityMainThreadDispatcher.TestHooks.MaxActionsPerUpdate = 10;
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        var executed = 0;
+        dispatcher.Enqueue(() => Interlocked.Increment(ref executed));
+        dispatcher.Enqueue(() => Interlocked.Increment(ref executed));
+
+        RunUpdate(dispatcher);
+
+        Assert.Equal(2, executed);
+        Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
     }
 }

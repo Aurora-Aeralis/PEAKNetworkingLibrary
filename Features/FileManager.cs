@@ -158,14 +158,21 @@ namespace NetworkingLibrary.Features
                 }
                 catch (Exception exception)
                 {
+                    ClearLegacyVersionInMemory(config);
                     ClearLegacyVersion(config);
                     Net.Logger?.LogWarning($"Failed migration cleanup via Remove(ConfigDefinition) for legacy key '{LegacyVersionKey}'. Chosen path: file rewrite fallback. Reason: {exception}");
                     return;
                 }
             }
 
+            ClearLegacyVersionInMemory(config);
             ClearLegacyVersion(config);
             Net.Logger?.LogWarning($"Remove(ConfigDefinition) unavailable during migration cleanup for legacy key '{LegacyVersionKey}'. Chosen path: file rewrite fallback. Reason: targeted API not present on config type '{config.GetType().FullName}'.");
+        }
+
+        static void ClearLegacyVersionInMemory(ConfigFile config)
+        {
+            config.Bind(VersionSection, LegacyVersionKey, string.Empty).Value = string.Empty;
         }
 
         static void ClearLegacyVersion(ConfigFile config)

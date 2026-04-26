@@ -122,7 +122,9 @@ public class FileManagerConfigMigrationTests
         FileManager.MigrateConfigIfNeeded(config, "1");
 
         Assert.Equal(1, config.RemoveCalls);
+        var legacyVersion = config.Bind("Version", "Current Version", string.Empty).Value;
         var configText = File.ReadAllText(scope.ConfigPath);
+        Assert.Equal(string.Empty, legacyVersion);
         Assert.DoesNotContain("Current Version = 1", configText, StringComparison.Ordinal);
     }
 
@@ -139,9 +141,11 @@ public class FileManagerConfigMigrationTests
         FileManager.MigrateConfigIfNeeded(config, "1");
 
         var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        var legacyVersion = config.Bind("Version", "Current Version", string.Empty).Value;
         var configText = File.ReadAllText(scope.ConfigPath);
 
         Assert.Equal("1", schemaVersion);
+        Assert.Equal(string.Empty, legacyVersion);
         Assert.Contains("ConfigSchemaVersion = 1", configText, StringComparison.Ordinal);
         Assert.DoesNotContain("Current Version = 1", configText, StringComparison.Ordinal);
     }

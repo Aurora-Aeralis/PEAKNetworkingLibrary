@@ -24,6 +24,9 @@ namespace NetworkingLibrary
 
         internal static Func<INetworkingService> CreateDefaultNetworkingService = NetworkingServiceFactory.CreateDefaultService;
         internal static Func<INetworkingService> CreateOfflineNetworkingService = () => new OfflineNetworkingService();
+        internal static Func<bool> IsApplicationPlaying = () => Application.isPlaying;
+        internal static Action<UnityEngine.Object> DestroyObject = UnityEngine.Object.Destroy;
+        internal static Action<UnityEngine.Object> DestroyObjectImmediate = UnityEngine.Object.DestroyImmediate;
 
         private void OnDestroy()
         {
@@ -136,7 +139,8 @@ namespace NetworkingLibrary
             else if (target is GameObject duplicatePollerObject)
                 duplicatePollerObject.SetActive(false);
 
-            DestroyImmediate(target);
+            if (IsApplicationPlaying()) DestroyObject(target);
+            else DestroyObjectImmediate(target);
         }
 
         internal static bool TryInitializeNetworkingService(ManualLogSource? logger, out INetworkingService? service)
@@ -172,6 +176,9 @@ namespace NetworkingLibrary
         {
             CreateDefaultNetworkingService = NetworkingServiceFactory.CreateDefaultService;
             CreateOfflineNetworkingService = () => new OfflineNetworkingService();
+            IsApplicationPlaying = () => Application.isPlaying;
+            DestroyObject = UnityEngine.Object.Destroy;
+            DestroyObjectImmediate = UnityEngine.Object.DestroyImmediate;
         }
     }
 }

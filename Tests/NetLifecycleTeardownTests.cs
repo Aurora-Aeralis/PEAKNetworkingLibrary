@@ -208,19 +208,22 @@ public class NetLifecycleTeardownTests
     [Fact]
     public void CleanupDuplicatePollers_DestroysWholeGameObject_WhenDuplicateOnlyHasTransformAndPoller()
     {
+        var canonicalObject = new GameObject("canonical-poller");
+        var canonicalPoller = canonicalObject.AddComponent<NetworkingPoller>();
         var pollerObject = new GameObject("duplicate-poller-only");
         var poller = pollerObject.AddComponent<NetworkingPoller>();
         var destroyedObjects = new List<UnityEngine.Object>();
 
         try
         {
-            InvokeCleanupDuplicatePollers(new[] { poller }, obj => destroyedObjects.Add(obj));
+            InvokeCleanupDuplicatePollers(canonicalPoller, new[] { poller }, obj => destroyedObjects.Add(obj));
 
             Assert.Single(destroyedObjects);
             Assert.Same(pollerObject, destroyedObjects.Single());
         }
         finally
         {
+            UnityEngine.Object.DestroyImmediate(canonicalObject);
             UnityEngine.Object.DestroyImmediate(pollerObject);
         }
     }
@@ -228,6 +231,8 @@ public class NetLifecycleTeardownTests
     [Fact]
     public void CleanupDuplicatePollers_DestroysOnlyPollerComponent_WhenDuplicateHasOtherComponents()
     {
+        var canonicalObject = new GameObject("canonical-poller");
+        var canonicalPoller = canonicalObject.AddComponent<NetworkingPoller>();
         var pollerObject = new GameObject("duplicate-poller-with-extra");
         var poller = pollerObject.AddComponent<NetworkingPoller>();
         pollerObject.AddComponent<ExtraMarkerComponent>();
@@ -235,13 +240,71 @@ public class NetLifecycleTeardownTests
 
         try
         {
-            InvokeCleanupDuplicatePollers(new[] { poller }, obj => destroyedObjects.Add(obj));
+            InvokeCleanupDuplicatePollers(canonicalPoller, new[] { poller }, obj => destroyedObjects.Add(obj));
 
             Assert.Single(destroyedObjects);
             Assert.Same(poller, destroyedObjects.Single());
         }
         finally
         {
+            UnityEngine.Object.DestroyImmediate(canonicalObject);
+            UnityEngine.Object.DestroyImmediate(pollerObject);
+        }
+    }
+
+    [Fact]
+    public void DestroyPollerDuringStartup_UsesDestroy_WhenApplicationIsPlaying()
+    {
+        var pollerObject = new GameObject("startup-destroy-play");
+        var poller = pollerObject.AddComponent<NetworkingPoller>();
+        UnityEngine.Object? destroyedWithDestroy = null;
+        UnityEngine.Object? destroyedWithImmediate = null;
+        var originalEnabled = poller.enabled;
+
+        Net.IsApplicationPlaying = () => true;
+        Net.DestroyObject = obj => destroyedWithDestroy = obj;
+        Net.DestroyObjectImmediate = obj => destroyedWithImmediate = obj;
+
+        try
+        {
+            InvokeDestroyPollerDuringStartup(poller);
+
+            Assert.True(originalEnabled);
+            Assert.False(poller.enabled);
+            Assert.Same(poller, destroyedWithDestroy);
+            Assert.Null(destroyedWithImmediate);
+        }
+        finally
+        {
+            Net.ResetNetworkingStartupHooks();
+            UnityEngine.Object.DestroyImmediate(pollerObject);
+        }
+    }
+
+    [Fact]
+    public void DestroyPollerDuringStartup_UsesDestroyImmediate_WhenApplicationIsNotPlaying()
+    {
+        var pollerObject = new GameObject("startup-destroy-editor");
+        UnityEngine.Object? destroyedWithDestroy = null;
+        UnityEngine.Object? destroyedWithImmediate = null;
+        var originalActive = pollerObject.activeSelf;
+
+        Net.IsApplicationPlaying = () => false;
+        Net.DestroyObject = obj => destroyedWithDestroy = obj;
+        Net.DestroyObjectImmediate = obj => destroyedWithImmediate = obj;
+
+        try
+        {
+            InvokeDestroyPollerDuringStartup(pollerObject);
+
+            Assert.True(originalActive);
+            Assert.False(pollerObject.activeSelf);
+            Assert.Same(pollerObject, destroyedWithImmediate);
+            Assert.Null(destroyedWithDestroy);
+        }
+        finally
+        {
+            Net.ResetNetworkingStartupHooks();
             UnityEngine.Object.DestroyImmediate(pollerObject);
         }
     }
@@ -268,9 +331,15 @@ public class NetLifecycleTeardownTests
         typeof(Net).GetMethod("OnDestroy", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(net, null);
     }
 
-    static void InvokeCleanupDuplicatePollers(IEnumerable<NetworkingPoller> pollers, Action<UnityEngine.Object> destroyAction)
+    static void InvokeCleanupDuplicatePollers(NetworkingPoller canonicalPoller, IEnumerable<NetworkingPoller> pollers, Action<UnityEngine.Object> destroyAction)
     {
         typeof(Net).GetMethod("CleanupDuplicatePollers", BindingFlags.Static | BindingFlags.NonPublic)!
-            .Invoke(null, new object[] { pollers, destroyAction });
+            .Invoke(null, new object[] { canonicalPoller, pollers, destroyAction });
+    }
+
+    static void InvokeDestroyPollerDuringStartup(UnityEngine.Object target)
+    {
+        typeof(Net).GetMethod("DestroyPollerDuringStartup", BindingFlags.Static | BindingFlags.NonPublic)!
+            .Invoke(null, new object[] { target });
     }
 }

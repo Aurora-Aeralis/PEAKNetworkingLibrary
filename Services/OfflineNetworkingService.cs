@@ -5,7 +5,6 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using NetworkingLibrary.Modules;
-using NetworkingLibrary.Services;
 
 namespace NetworkingLibrary.Services
 {

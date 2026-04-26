@@ -171,6 +171,57 @@ public class FileManagerConfigMigrationTests
         Assert.DoesNotContain("Current Version = 1", configText, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("Current Version=1")]
+    [InlineData("Current Version    =    1")]
+    [InlineData("    Current Version = 1")]
+    public void MigrateConfigIfNeeded_LegacyVersionSpacingVariants_ParsesAndClearsOrRemovesKey(string legacyLine)
+    {
+        using var scope = new TempConfigScope();
+        File.WriteAllText(scope.ConfigPath,
+            "[Version]\n" +
+            $"{legacyLine}\n");
+
+        var config = new ConfigFile(scope.ConfigPath, true);
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        var configText = File.ReadAllText(scope.ConfigPath);
+
+        Assert.Equal("1", schemaVersion);
+        Assert.True(IsLegacyVersionClearedOrRemoved(configText));
+    }
+
+    static bool IsLegacyVersionClearedOrRemoved(string configText)
+    {
+        var inVersionSection = false;
+        foreach (var line in configText.Split('\n', StringSplitOptions.None))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith("[", StringComparison.Ordinal) && trimmed.EndsWith("]", StringComparison.Ordinal))
+            {
+                inVersionSection = string.Equals(trimmed[1..^1].Trim(), "Version", StringComparison.Ordinal);
+                continue;
+            }
+
+            if (!inVersionSection || string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#", StringComparison.Ordinal) || trimmed.StartsWith(";", StringComparison.Ordinal))
+                continue;
+
+            var separatorIndex = line.IndexOf('=');
+            if (separatorIndex <= 0)
+                continue;
+
+            var key = line[..separatorIndex].Trim();
+            if (!string.Equals(key, "Current Version", StringComparison.Ordinal))
+                continue;
+
+            if (!string.IsNullOrWhiteSpace(line[(separatorIndex + 1)..]))
+                return false;
+        }
+
+        return true;
+    }
+
     sealed class TrackingRemoveConfigFile : ConfigFile
     {
         internal int RemoveCalls { get; private set; }

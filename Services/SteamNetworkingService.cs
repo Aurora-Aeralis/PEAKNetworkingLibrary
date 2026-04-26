@@ -1016,7 +1016,10 @@ namespace NetworkingLibrary.Services
             if (!InLobby) { NetLog.Error(LogSource, "RPC called while not in lobby"); return; }
             var msg = BuildMessage(modId, methodName, 0, parameters, null);
             if (msg == null) return;
-            TryGetLocalSteamId(out var localSteamId, LocalSteamIdDebugCooldownKey, "RPC");
+            if (!TryGetLocalSteamId(out var localSteamId, LocalSteamIdDebugCooldownKey, "RPC"))
+            {
+                return;
+            }
 
             foreach (var p in players)
             {
@@ -1035,7 +1038,10 @@ namespace NetworkingLibrary.Services
             if (!InLobby) { NetLog.Error(LogSource, "RPC called while not in lobby"); return; }
             var msg = BuildMessage(modId, methodName, 0, parameters, parameterTypes);
             if (msg == null) return;
-            TryGetLocalSteamId(out var localSteamId, LocalSteamIdDebugCooldownKey, "RPC");
+            if (!TryGetLocalSteamId(out var localSteamId, LocalSteamIdDebugCooldownKey, "RPC"))
+            {
+                return;
+            }
 
             foreach (var p in players)
             {

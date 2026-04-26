@@ -623,6 +623,30 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void RPC_WhenLocalSteamIdLookupThrows_DoesNotInvokeLoopback_AndHitsStableThrottleKey()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new RpcReceiver();
+        NetLog.ResetForTests();
+        try
+        {
+            service.RegisterNetworkObject(receiver, TestModId, mask: 0);
+            SetInLobby(service, true);
+            SetField(service, "getLocalSteamId", (Func<CSteamID>)(() => throw new InvalidOperationException("steam id unavailable")));
+
+            var exception = Record.Exception(() => service.RPC(TestModId, nameof(RpcReceiver.OnPing), ReliableType.Reliable, 7));
+
+            Assert.Null(exception);
+            Assert.Equal(0, receiver.CallCount);
+            Assert.False(NetLog.TryEnterCooldown("SteamNetworkingService.LocalSteamId", 2d));
+        }
+        finally
+        {
+            NetLog.ResetForTests();
+        }
+    }
+
+    [Fact]
     public void ReceiveMessages_ProcessIncomingFrameException_UsesStableThrottleKey()
     {
         NetLog.ResetForTests();

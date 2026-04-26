@@ -21,6 +21,7 @@ namespace NetworkingLibrary.Modules
         internal const double defaultMaxFrameWorkMilliseconds = 4.0d;
         internal const int defaultBacklogWarningFrameThreshold = 120;
         static readonly TimeSpan overflowWarningCooldown = TimeSpan.FromSeconds(5);
+        const double enqueueRejectionLogCooldownSeconds = 2d;
         static UnityMainThreadDispatcher? instance;
         static readonly object instanceLock = new();
         static readonly Queue<Action> queue = new Queue<Action>();
@@ -191,13 +192,17 @@ namespace NetworkingLibrary.Modules
         {
             if (a == null) throw new ArgumentNullException(nameof(a));
             EnqueueRejectionInfo? rejection;
-            var accepted = delaySeconds > 0f
+            var delayed = delaySeconds > 0f;
+            var accepted = delayed
                 ? TryEnqueueBounded(CreateDelayedEnqueueAction(a, delaySeconds), delayed: true, out rejection)
                 : TryEnqueueBounded(a, delayed: false, out rejection);
             if (accepted || rejection == null) return;
 
             var message = FormatEnqueueRejectionMessage(rejection.Value);
             if (throwOnRejection) throw new InvalidOperationException(message);
+            if (delayed) NotifyDelayedEnqueueRejected(rejection.Value);
+            if (!NetLog.TryEnterCooldown("UnityMainThreadDispatcher.EnqueueRejected", enqueueRejectionLogCooldownSeconds)) return;
+            Net.Logger?.LogWarning(message);
         }
 
         Action CreateDelayedEnqueueAction(Action action, float delaySeconds)

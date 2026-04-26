@@ -21,6 +21,14 @@ namespace NetworkingLibrary.Services
     {
         const string LogSource = "NetworkingServiceFactory";
         const float ProbeDebugLogCooldownSeconds = 2f;
+        static readonly string[] SteamManagerCandidateTypeNames =
+        {
+            "pworld.Scripts.SteamManager, Assembly-CSharp",
+            "SteamManager, Assembly-CSharp",
+            "SteamManager"
+        };
+        static Type? cachedSteamManagerType;
+        static int cachedSteamManagerTypeResolved;
 
 #if !UNITY_EDITOR
         internal static Func<bool> IsSteamClientRunning = () => SteamAPI.IsSteamRunning();
@@ -101,13 +109,7 @@ namespace NetworkingLibrary.Services
 
             try
             {
-                var candidateTypeNames = new[]
-                {
-                    "pworld.Scripts.SteamManager, Assembly-CSharp",
-                    "SteamManager, Assembly-CSharp",
-                    "SteamManager"
-                };
-                foreach (var candidateTypeName in candidateTypeNames)
+                foreach (var candidateTypeName in SteamManagerCandidateTypeNames)
                 {
                     var steamManagerType = ResolveType(candidateTypeName);
                     if (steamManagerType == null) continue;
@@ -129,6 +131,9 @@ namespace NetworkingLibrary.Services
 
         static Type? ResolveLoadedSteamManagerType()
         {
+            if (System.Threading.Volatile.Read(ref cachedSteamManagerTypeResolved) == 1)
+                return cachedSteamManagerType;
+
             const BindingFlags AnyStaticVisibility = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
             var assemblies = AppDomain.CurrentDomain.GetAssemblies();
             Type? fallbackCandidate = null;
@@ -161,7 +166,11 @@ namespace NetworkingLibrary.Services
                         continue;
 
                     if (IsPreferredSteamManagerType(candidate))
+                    {
+                        cachedSteamManagerType = candidate;
+                        System.Threading.Volatile.Write(ref cachedSteamManagerTypeResolved, 1);
                         return candidate;
+                    }
 
                     if (fallbackCandidate == null)
                     {
@@ -175,7 +184,9 @@ namespace NetworkingLibrary.Services
                 }
             }
 
-            return hasAmbiguousFallbackCandidates ? null : fallbackCandidate;
+            cachedSteamManagerType = hasAmbiguousFallbackCandidates ? null : fallbackCandidate;
+            System.Threading.Volatile.Write(ref cachedSteamManagerTypeResolved, 1);
+            return cachedSteamManagerType;
         }
 
         static Type[] GetLoadableTypes(ReflectionTypeLoadException exception)
@@ -241,6 +252,8 @@ namespace NetworkingLibrary.Services
             CreateOfflineService = () => new OfflineNetworkingService();
             ResolveType = Type.GetType;
             UnscaledTimeProvider = () => Time.unscaledTime;
+            cachedSteamManagerType = null;
+            System.Threading.Volatile.Write(ref cachedSteamManagerTypeResolved, 0);
         }
 #endif
     }

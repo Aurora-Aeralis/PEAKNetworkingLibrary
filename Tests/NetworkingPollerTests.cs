@@ -1,6 +1,8 @@
 using NetworkingLibrary.Modules;
 using NetworkingLibrary.Services;
+using BepInEx.Logging;
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.Serialization;
 using Xunit;
@@ -9,6 +11,34 @@ namespace NetworkingLibrary.Tests;
 
 public class NetworkingPollerTests : IDisposable
 {
+    sealed class ScopeAction : IDisposable
+    {
+        Action? onDispose;
+        public ScopeAction(Action onDispose) => this.onDispose = onDispose;
+        public void Dispose()
+        {
+            var action = onDispose;
+            if (action == null) return;
+            onDispose = null;
+            action();
+        }
+    }
+
+    sealed class TestLogListener : ILogListener
+    {
+        readonly List<string> infos = new();
+        readonly List<string> errors = new();
+        public IReadOnlyList<string> Infos => infos;
+        public IReadOnlyList<string> Errors => errors;
+        public void LogEvent(object sender, LogEventArgs eventArgs)
+        {
+            var message = eventArgs.Data?.ToString() ?? string.Empty;
+            if (eventArgs.Level == LogLevel.Info) infos.Add(message);
+            if (eventArgs.Level == LogLevel.Error) errors.Add(message);
+        }
+        public void Dispose() { }
+    }
+
     sealed class PollTrackingService : INetworkingService
     {
         public int PollReceiveCalls { get; private set; }
@@ -98,6 +128,53 @@ public class NetworkingPollerTests : IDisposable
             UnityMainThreadDispatcher.CreateInstanceOnMainThreadFactory = originalFactory;
             createRequestQueuedField.SetValue(null, 0);
         }
+    }
+
+    [Fact]
+    public void PollGuarded_RecoveryMessage_IncludesSuppressedCount_AfterThrottledBurst()
+    {
+        var listener = new TestLogListener();
+        using var _ = WithNetLogger(listener);
+
+        var lastErrorLogTime = float.NegativeInfinity;
+        var hadFault = false;
+        var suppressedFault = false;
+        var suppressedExceptionCount = 0;
+        var pollGuarded = typeof(NetworkingPoller).GetMethod("PollGuarded", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var args = new object[] {
+            new Action(() => throw new InvalidOperationException("burst-1")),
+            "PollReceive",
+            lastErrorLogTime,
+            hadFault,
+            suppressedFault,
+            suppressedExceptionCount
+        };
+
+        pollGuarded.Invoke(null, args);
+        args[0] = new Action(() => throw new InvalidOperationException("burst-2"));
+        pollGuarded.Invoke(null, args);
+        args[0] = new Action(() => { });
+        pollGuarded.Invoke(null, args);
+
+        Assert.Single(listener.Errors);
+        Assert.Contains("PollReceive recovered after repeated failures.", listener.Infos[0]);
+        Assert.Contains("Suppressed 1 errors since last emitted error.", listener.Infos[0]);
+    }
+
+    static IDisposable WithNetLogger(TestLogListener listener)
+    {
+        var loggerField = typeof(Net).GetField("<Logger>k__BackingField", BindingFlags.Static | BindingFlags.NonPublic);
+        if (loggerField == null) return new ScopeAction(() => { });
+        var original = loggerField.GetValue(null);
+        var logger = new ManualLogSource("NetworkingPollerTests");
+        Logger.Listeners.Add(listener);
+        loggerField.SetValue(null, logger);
+        return new ScopeAction(() =>
+        {
+            loggerField.SetValue(null, original);
+            Logger.Listeners.Remove(listener);
+            logger.Dispose();
+        });
     }
 
     static void SetService(INetworkingService? service)

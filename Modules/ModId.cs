@@ -7,13 +7,6 @@ namespace NetworkingLibrary.Modules
 {
     public static class ModId
     {
-        /// <summary>
-        /// Derives a 32-bit mod id from a GUID using the legacy MD5-based strategy.
-        /// </summary>
-        /// <remarks>
-        /// This method is kept for wire compatibility with existing deployments.
-        /// Use <see cref="FromGuidV2"/> for new systems that can safely migrate to the SHA-256-based derivation.
-        /// </remarks>
         public static uint FromGuid(string guid)
         {
             var guidValue = ParseGuid(guid);
@@ -22,16 +15,6 @@ namespace NetworkingLibrary.Modules
             return BinaryPrimitives.ReadUInt32LittleEndian(bytes);
         }
 
-        /// <summary>
-        /// Derives a 32-bit mod id from a GUID using SHA-256 over the normalized GUID text and XOR-folding to 32 bits.
-        /// </summary>
-        /// <remarks>
-        /// Migration guidance:
-        /// <list type="bullet">
-        /// <item><description>Keep using <see cref="FromGuid"/> when peers still exchange legacy ids on the wire.</description></item>
-        /// <item><description>Adopt <see cref="FromGuidV2"/> only after all producers/consumers agree on the v2 derivation strategy.</description></item>
-        /// </list>
-        /// </remarks>
         public static uint FromGuidV2(string guid)
         {
             var guidValue = ParseGuid(guid);

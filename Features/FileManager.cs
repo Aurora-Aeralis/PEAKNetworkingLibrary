@@ -130,8 +130,10 @@ namespace NetworkingLibrary.Features
                 if (!inVersionSection)
                     continue;
 
-                if (line.StartsWith($"{LegacyVersionKey} = ", StringComparison.Ordinal))
-                    return line[(LegacyVersionKey.Length + 3)..].Trim();
+                if (!trimmed.StartsWith($"{LegacyVersionKey} = ", StringComparison.Ordinal))
+                    continue;
+
+                return trimmed[(LegacyVersionKey.Length + 3)..].Trim();
             }
 
             return string.Empty;
@@ -196,10 +198,10 @@ namespace NetworkingLibrary.Features
                 if (!inVersionSection)
                     continue;
 
-                if (!lines[i].StartsWith($"{LegacyVersionKey} = ", StringComparison.Ordinal))
+                if (!trimmed.StartsWith($"{LegacyVersionKey} = ", StringComparison.Ordinal))
                     continue;
 
-                lines[i] = $"{LegacyVersionKey} =";
+                lines[i] = string.Empty;
                 changed = true;
             }
 

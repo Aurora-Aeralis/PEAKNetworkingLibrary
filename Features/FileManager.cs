@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Globalization;
 using System.IO;
 using BepInEx.Configuration;
 using BepInEx;
@@ -84,7 +85,9 @@ namespace NetworkingLibrary.Features
         static bool TryParseSchemaVersion(string version, out int schemaVersion)
         {
             schemaVersion = 0;
-            return !string.IsNullOrWhiteSpace(version) && int.TryParse(version, out schemaVersion);
+            return !string.IsNullOrWhiteSpace(version)
+                && int.TryParse(version, NumberStyles.None, CultureInfo.InvariantCulture, out schemaVersion)
+                && schemaVersion >= 0;
         }
 
         static void Migrate_0_to_1(ConfigEntry<string> schemaVersionEntry, ConfigEntry<string> legacyVersionEntry)

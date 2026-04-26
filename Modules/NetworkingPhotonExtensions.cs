@@ -15,6 +15,7 @@ namespace NetworkingLibrary.Modules
         const int UnresolvedMappingWarningThrottleMaxEntries = 2048;
         static readonly Dictionary<string, DateTime> UnresolvedMappingWarningThrottle = new Dictionary<string, DateTime>(StringComparer.Ordinal);
         static readonly object UnresolvedMappingWarningThrottleLock = new object();
+        static DateTime UnresolvedMappingWarningNextPruneUtc = DateTime.MinValue;
         static readonly string[] StableIdPropertyKeys =
         {
             "steam64", "steamid64", "steam_id64", "steamid", "steam_id", "steam", "authid", "auth_id", "userid", "user_id"
@@ -179,7 +180,11 @@ namespace NetworkingLibrary.Modules
             var key = BuildUnresolvedMappingWarningKey(actorNumber, issueText);
             lock (UnresolvedMappingWarningThrottleLock)
             {
-                PruneUnresolvedMappingWarningThrottle(nowUtc);
+                if (nowUtc >= UnresolvedMappingWarningNextPruneUtc)
+                {
+                    PruneUnresolvedMappingWarningThrottle(nowUtc);
+                    UnresolvedMappingWarningNextPruneUtc = nowUtc + UnresolvedMappingWarningCooldown;
+                }
                 if (UnresolvedMappingWarningThrottle.TryGetValue(key, out var previous) && nowUtc - previous < UnresolvedMappingWarningCooldown) return false;
                 UnresolvedMappingWarningThrottle[key] = nowUtc;
                 CapUnresolvedMappingWarningThrottle();
@@ -189,7 +194,11 @@ namespace NetworkingLibrary.Modules
 
         internal static void ResetUnresolvedMappingWarningThrottleForTests()
         {
-            lock (UnresolvedMappingWarningThrottleLock) UnresolvedMappingWarningThrottle.Clear();
+            lock (UnresolvedMappingWarningThrottleLock)
+            {
+                UnresolvedMappingWarningThrottle.Clear();
+                UnresolvedMappingWarningNextPruneUtc = DateTime.MinValue;
+            }
         }
 
         internal static int GetUnresolvedMappingWarningThrottleCountForTests()

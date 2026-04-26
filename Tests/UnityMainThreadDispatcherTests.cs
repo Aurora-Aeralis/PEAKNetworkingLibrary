@@ -143,6 +143,50 @@ public class UnityMainThreadDispatcherTests : IDisposable
     }
 
     [Fact]
+    public void Enqueue_WhenQueueLimitReached_EmitsRejectionDiagnostics()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 1;
+        UnityMainThreadDispatcher.QueueOverflowBehaviorProvider = () => UnityMainThreadDispatcher.QueueOverflowBehavior.RejectNewWork;
+
+        dispatcher.Enqueue(() => { });
+        dispatcher.Enqueue(() => { }, 1f);
+
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
+        Assert.Contains("enqueue rejected delayed work", UnityMainThreadDispatcher.TestHooks.LastOverflowWarningMessageForTests);
+        Assert.Contains("overflowBehavior=RejectNewWork", UnityMainThreadDispatcher.TestHooks.LastOverflowWarningMessageForTests);
+        Assert.Contains("queueDepth=1, maxDepth=1", UnityMainThreadDispatcher.TestHooks.LastOverflowWarningMessageForTests);
+    }
+
+    [Fact]
+    public void Enqueue_StrictMode_WhenRejected_ThrowsInvalidOperationException()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 1;
+        UnityMainThreadDispatcher.QueueOverflowBehaviorProvider = () => UnityMainThreadDispatcher.QueueOverflowBehavior.RejectNewWork;
+
+        dispatcher.Enqueue(() => { });
+        var error = Assert.Throws<InvalidOperationException>(() => dispatcher.Enqueue(() => { }, 0f, throwOnRejection: true));
+
+        Assert.Contains("enqueue rejected immediate work", error.Message);
+        Assert.Contains("overflowBehavior=RejectNewWork", error.Message);
+    }
+
+    [Fact]
+    public void Enqueue_WhenAccepted_DoesNotEmitRejectionDiagnostics()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 2;
+        UnityMainThreadDispatcher.QueueOverflowBehaviorProvider = () => UnityMainThreadDispatcher.QueueOverflowBehavior.RejectNewWork;
+
+        dispatcher.Enqueue(() => { });
+
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
+        Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.EmittedOverflowWarningCountForTests);
+        Assert.Null(UnityMainThreadDispatcher.TestHooks.LastOverflowWarningMessageForTests);
+    }
+
+    [Fact]
     public void Enqueue_WhenQueueLimitReached_DropsOldest()
     {
         var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));

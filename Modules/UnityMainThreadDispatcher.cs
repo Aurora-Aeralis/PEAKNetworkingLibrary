@@ -32,6 +32,7 @@ namespace NetworkingLibrary.Modules
         static int coalescedEnqueueCount;
         static int suppressedOverflowWarnings;
         static int emittedOverflowWarningCountForTests;
+        static string? lastOverflowWarningMessageForTests;
         static long lastOverflowWarningTicks;
         static int suppressedOverflowLoggerFailures;
         static long lastOverflowLoggerFailureTicks;
@@ -175,14 +176,23 @@ namespace NetworkingLibrary.Modules
         public bool TryEnqueue(Action a, float delaySeconds = 0f)
         {
             if (a == null) throw new ArgumentNullException(nameof(a));
-            if (delaySeconds <= 0f) return TryEnqueueBounded(a, delayed: false);
-
-            return TryEnqueueBounded(CreateDelayedEnqueueAction(a, delaySeconds), delayed: true);
+            if (delaySeconds <= 0f) return TryEnqueueBounded(a, delayed: false, out _);
+            return TryEnqueueBounded(CreateDelayedEnqueueAction(a, delaySeconds), delayed: true, out _);
         }
 
-        public void Enqueue(Action a, float delaySeconds = 0f)
+        public void Enqueue(Action a, float delaySeconds = 0f) => Enqueue(a, delaySeconds, throwOnRejection: false);
+
+        public void Enqueue(Action a, float delaySeconds, bool throwOnRejection)
         {
-            TryEnqueue(a, delaySeconds);
+            if (a == null) throw new ArgumentNullException(nameof(a));
+            EnqueueRejectionInfo? rejection;
+            var accepted = delaySeconds > 0f
+                ? TryEnqueueBounded(CreateDelayedEnqueueAction(a, delaySeconds), delayed: true, out rejection)
+                : TryEnqueueBounded(a, delayed: false, out rejection);
+            if (accepted || rejection == null) return;
+
+            var message = FormatEnqueueRejectionMessage(rejection.Value);
+            if (throwOnRejection) throw new InvalidOperationException(message);
         }
 
         Action CreateDelayedEnqueueAction(Action action, float delaySeconds)
@@ -195,7 +205,7 @@ namespace NetworkingLibrary.Modules
         {
             if (a == null) throw new ArgumentNullException(nameof(a));
             yield return new WaitForSeconds(d);
-            TryEnqueueBounded(a, delayed: true);
+            TryEnqueueBounded(a, delayed: true, out _);
         }
 
         sealed class DelayedEnqueueWork
@@ -225,10 +235,11 @@ namespace NetworkingLibrary.Modules
             public override int GetHashCode() => HashCode.Combine(dispatcher, action.Method, action.Target, delaySeconds);
         }
 
-        static bool TryEnqueueBounded(Action action, bool delayed)
+        static bool TryEnqueueBounded(Action action, bool delayed, out EnqueueRejectionInfo? rejection)
         {
             var maxDepth = ResolveMaxQueueDepth();
             var behavior = QueueOverflowBehaviorProvider?.Invoke() ?? QueueOverflowBehavior.DropOldest;
+            rejection = null;
             lock (queue)
             {
                 if (queue.Count < maxDepth)
@@ -251,20 +262,47 @@ namespace NetworkingLibrary.Modules
                         if (HasEquivalentPendingAction(action))
                         {
                             coalescedEnqueueCount++;
-                            EmitOverflowWarning($"UnityMainThreadDispatcher queue depth limit ({maxDepth}) reached; coalescing duplicate {(delayed ? "delayed" : "immediate")} action.");
+                            rejection = EnqueueRejectionInfo.Create(delayed, behavior, queue.Count, maxDepth, "coalesced duplicate action");
+                            EmitOverflowWarning(FormatEnqueueRejectionMessage(rejection.Value));
                             return false;
                         }
 
                         rejectedEnqueueCount++;
-                        EmitOverflowWarning($"UnityMainThreadDispatcher queue depth limit ({maxDepth}) reached; coalesce fallback rejected non-duplicate {(delayed ? "delayed" : "immediate")} action.");
+                        rejection = EnqueueRejectionInfo.Create(delayed, behavior, queue.Count, maxDepth, "coalesce fallback rejected non-duplicate action");
+                        EmitOverflowWarning(FormatEnqueueRejectionMessage(rejection.Value));
                         return false;
                     case QueueOverflowBehavior.RejectNewWork:
                     default:
                         rejectedEnqueueCount++;
-                        EmitOverflowWarning($"UnityMainThreadDispatcher queue depth limit ({maxDepth}) reached; rejecting new {(delayed ? "delayed" : "immediate")} action.");
+                        rejection = EnqueueRejectionInfo.Create(delayed, behavior, queue.Count, maxDepth, "rejected new action");
+                        EmitOverflowWarning(FormatEnqueueRejectionMessage(rejection.Value));
                         return false;
                 }
             }
+        }
+
+        static string FormatEnqueueRejectionMessage(EnqueueRejectionInfo rejection)
+            => $"UnityMainThreadDispatcher enqueue rejected {rejection.Mode} work ({rejection.Reason}); overflowBehavior={rejection.Behavior}, queueDepth={rejection.QueueDepth}, maxDepth={rejection.MaxDepth}.";
+
+        readonly struct EnqueueRejectionInfo
+        {
+            internal readonly string Mode;
+            internal readonly QueueOverflowBehavior Behavior;
+            internal readonly int QueueDepth;
+            internal readonly int MaxDepth;
+            internal readonly string Reason;
+
+            EnqueueRejectionInfo(string mode, QueueOverflowBehavior behavior, int queueDepth, int maxDepth, string reason)
+            {
+                Mode = mode;
+                Behavior = behavior;
+                QueueDepth = queueDepth;
+                MaxDepth = maxDepth;
+                Reason = reason;
+            }
+
+            internal static EnqueueRejectionInfo Create(bool delayed, QueueOverflowBehavior behavior, int queueDepth, int maxDepth, string reason)
+                => new(delayed ? "delayed" : "immediate", behavior, queueDepth, maxDepth, reason);
         }
 
         static bool HasEquivalentPendingAction(Action action)
@@ -305,6 +343,7 @@ namespace NetworkingLibrary.Modules
                 var suppressed = Interlocked.Exchange(ref suppressedOverflowWarnings, 0);
                 if (suppressed > 0) message = $"{message} Suppressed {suppressed} similar warnings.";
                 Interlocked.Increment(ref emittedOverflowWarningCountForTests);
+                Volatile.Write(ref lastOverflowWarningMessageForTests, message);
                 Net.Logger?.LogWarning(message);
             }
             catch (Exception ex)
@@ -439,6 +478,7 @@ namespace NetworkingLibrary.Modules
                     coalescedEnqueueCount = 0;
                     suppressedOverflowWarnings = 0;
                     emittedOverflowWarningCountForTests = 0;
+                    lastOverflowWarningMessageForTests = null;
                     lastOverflowWarningTicks = 0;
                     suppressedOverflowLoggerFailures = 0;
                     lastOverflowLoggerFailureTicks = 0;
@@ -472,6 +512,7 @@ namespace NetworkingLibrary.Modules
             internal static int CoalescedEnqueueCountForTests => Volatile.Read(ref coalescedEnqueueCount);
             internal static int SuppressedOverflowWarningsForTests => Volatile.Read(ref suppressedOverflowWarnings);
             internal static int EmittedOverflowWarningCountForTests => Volatile.Read(ref emittedOverflowWarningCountForTests);
+            internal static string? LastOverflowWarningMessageForTests => Volatile.Read(ref lastOverflowWarningMessageForTests);
             internal static long LastOverflowWarningTicksForTests
             {
                 get => Interlocked.Read(ref lastOverflowWarningTicks);

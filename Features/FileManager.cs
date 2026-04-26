@@ -148,10 +148,21 @@ namespace NetworkingLibrary.Features
                 if (!key.Equals(LegacyVersionKey, StringComparison.Ordinal))
                     continue;
 
-                return line[(separatorIndex + 1)..].Trim();
+                return NormalizeLegacyVersionValue(line[(separatorIndex + 1)..]);
             }
 
             return string.Empty;
+        }
+
+        static string NormalizeLegacyVersionValue(string value)
+        {
+            var normalized = value;
+            var semicolonIndex = normalized.IndexOf(';');
+            var hashIndex = normalized.IndexOf('#');
+            var commentIndex = semicolonIndex < 0 ? hashIndex : hashIndex < 0 ? semicolonIndex : Math.Min(semicolonIndex, hashIndex);
+            if (commentIndex >= 0)
+                normalized = normalized[..commentIndex];
+            return normalized.Trim();
         }
 
         static void DropLegacyVersionFromConfig(ConfigFile config)

@@ -25,6 +25,10 @@ public class MessageNullContractTests
         public int Value { get; set; }
     }
 
+    private sealed class IntList : List<int>
+    {
+    }
+
     private static Message NewMessage() => new(1u, "method", 0);
 
     private static Message Roundtrip(Message message) => new(message.ToArray());
@@ -75,6 +79,18 @@ public class MessageNullContractTests
         var read = Roundtrip(write);
         Assert.Null(read.ReadObject(typeof(Collection<int>)));
         Assert.Equal(new[] { 13, 21, 34 }, ((Collection<int>)read.ReadObject(typeof(Collection<int>))).ToArray());
+    }
+
+    [Fact]
+    public void DerivedList_RoundTrips_Null_And_Value()
+    {
+        var write = NewMessage();
+        write.WriteObject(typeof(IntList), null!);
+        write.WriteObject(typeof(IntList), new IntList { 2, 4, 8 });
+
+        var read = Roundtrip(write);
+        Assert.Null(read.ReadObject(typeof(IntList)));
+        Assert.Equal(new[] { 2, 4, 8 }, ((IntList)read.ReadObject(typeof(IntList))).ToArray());
     }
 
     [Fact]

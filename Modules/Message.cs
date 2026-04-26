@@ -220,10 +220,6 @@ namespace NetworkingLibrary.Modules
         public Message WriteVector3(Vector3 v) { WriteFloat(v.x); WriteFloat(v.y); WriteFloat(v.z); return this; }
         public Message WriteQuaternion(Quaternion q) { WriteFloat(q.x); WriteFloat(q.y); WriteFloat(q.z); WriteFloat(q.w); return this; }
 
-        /// <summary>
-        /// Serializes an object using the protocol's fixed primitive map and dynamic collection handling.
-        /// This method defines wire-format compatibility expectations for RPC payload arguments.
-        /// </summary>
         public void WriteObject(Type type, object value)
         {
             ThrowIfDisposed();
@@ -274,17 +270,13 @@ namespace NetworkingLibrary.Modules
                 return;
             }
 
-            if (typeof(IList).IsAssignableFrom(type))
+            if (typeof(IList).IsAssignableFrom(type) || ImplementsExactGenericIList(type))
             {
-                Type? elemType = null;
-                if (type.IsGenericType)
-                {
-                    var args = type.GetGenericArguments();
-                    if (args.Length == 1) elemType = args[0];
-                }
+                var elemType = TryGetGenericListElementType(type);
+                if (elemType == null)
+                    throw new NotSupportedException("Cannot serialize non-generic IList (heterogeneous lists) without explicit serializer registration.");
 
-                var list = (IList)value!;
-                if (elemType != null)
+                if (value is IList list)
                 {
                     WriteInt(list.Count);
                     for (int i = 0; i < list.Count; i++)
@@ -292,7 +284,14 @@ namespace NetworkingLibrary.Modules
                     return;
                 }
 
-                throw new NotSupportedException("Cannot serialize non-generic IList (heterogeneous lists) without explicit serializer registration.");
+                if (value is IEnumerable enumerable)
+                {
+                    var items = new List<object?>();
+                    foreach (var item in enumerable) items.Add(item);
+                    WriteInt(items.Count);
+                    for (int i = 0; i < items.Count; i++) WriteObject(elemType, items[i]!);
+                    return;
+                }
             }
 
             throw new NotSupportedException($"Unsupported type for WriteObject: {type.FullName}. Register a serializer using Message.RegisterSerializer. Null handling: reference-like types (including arrays/lists/string/byte[]) are encoded with a leading presence flag and may be null; non-null values for unsupported reference types still require registration.");
@@ -544,10 +543,6 @@ namespace NetworkingLibrary.Modules
         public Vector3 ReadVector3() => new Vector3(ReadFloat(), ReadFloat(), ReadFloat());
         public Quaternion ReadQuaternion() => new Quaternion(ReadFloat(), ReadFloat(), ReadFloat(), ReadFloat());
 
-        /// <summary>
-        /// Deserializes an object using the protocol's fixed primitive map and dynamic collection handling.
-        /// Keep this logic aligned with <see cref="WriteObject(Type, object)"/> to preserve wire compatibility.
-        /// </summary>
         public object ReadObject(Type type)
         {
             ThrowIfDisposed();
@@ -605,24 +600,21 @@ namespace NetworkingLibrary.Modules
                     }
                     return list;
                 }
+            }
 
-                var elemType = TryGetGenericListElementType(type);
-                bool isListLike = typeof(IList).IsAssignableFrom(type) || ImplementsExactGenericIList(type);
-                if (elemType != null && isListLike)
-                {
-                    int len = ReadCollectionLength(type.FullName ?? "List");
-                    var tempListType = typeof(List<>).MakeGenericType(elemType);
-                    var tempList = (IList)Activator.CreateInstance(tempListType)!;
-                    for (int i = 0; i < len; i++)
-                    {
-                        tempList.Add(ReadObject(elemType));
-                    }
+            var listElementType = TryGetGenericListElementType(type);
+            bool isListLikeType = typeof(IList).IsAssignableFrom(type) || ImplementsExactGenericIList(type);
+            if (listElementType != null && isListLikeType)
+            {
+                int len = ReadCollectionLength(type.FullName ?? "List");
+                var tempListType = typeof(List<>).MakeGenericType(listElementType);
+                var tempList = (IList)Activator.CreateInstance(tempListType)!;
+                for (int i = 0; i < len; i++) tempList.Add(ReadObject(listElementType));
 
-                    if (!IsConcreteConstructible(type)) return tempList;
-                    var target = Activator.CreateInstance(type)!;
-                    if (!TryCopyItemsToListTarget(target, elemType, tempList)) return tempList;
-                    return target;
-                }
+                if (!IsConcreteConstructible(type)) return tempList;
+                var target = Activator.CreateInstance(type)!;
+                if (!TryCopyItemsToListTarget(target, listElementType, tempList)) return tempList;
+                return target;
             }
 
             throw new NotSupportedException($"Unsupported read type {type.FullName}. Register a deserializer using Message.RegisterSerializer. Null handling: reference-like types (including arrays/lists/string/byte[]) are decoded from a leading presence flag and may be null; non-null payloads for unsupported reference types still require registration.");

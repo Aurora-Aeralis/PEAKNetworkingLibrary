@@ -182,6 +182,33 @@ public class NetworkingServiceFactoryTests
     }
 
     [Fact]
+    public void CreateDefaultService_ReturnsOfflineService_WhenApiInitializedProbeThrows()
+    {
+        var offline = new FakeService();
+        var steamFactoryCalls = 0;
+
+        NetworkingServiceFactory.IsSteamClientRunning = () => true;
+        NetworkingServiceFactory.IsSteamApiInitialized = () => throw new InvalidOperationException("api probe failed");
+        NetworkingServiceFactory.CreateSteamService = () =>
+        {
+            steamFactoryCalls++;
+            return new FakeService();
+        };
+        NetworkingServiceFactory.CreateOfflineService = () => offline;
+
+        try
+        {
+            var service = NetworkingServiceFactory.CreateDefaultService();
+            Assert.Same(offline, service);
+            Assert.Equal(0, steamFactoryCalls);
+        }
+        finally
+        {
+            NetworkingServiceFactory.ResetTestHooks();
+        }
+    }
+
+    [Fact]
     public void CreateDefaultService_DoesNotThrow_WhenNetLoggerBackingFieldIsNull()
     {
         var offline = new FakeService();

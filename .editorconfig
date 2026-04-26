@@ -1,4 +1,6 @@
-﻿[*.cs]
+[*.cs]
+charset = utf-8
+end_of_line = lf
 
 # Default severity for analyzer diagnostics with category 'CodeQuality'
 dotnet_analyzer_diagnostic.category-CodeQuality.severity = none

@@ -1,4 +1,4 @@
-﻿using Steamworks;
+using Steamworks;
 
 namespace NetworkingLibrary.Modules
 {

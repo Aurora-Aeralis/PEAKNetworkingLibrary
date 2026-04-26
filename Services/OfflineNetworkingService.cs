@@ -771,7 +771,7 @@ namespace NetworkingLibrary.Services
                         if (preferOverloadKeyMatch.Value != isPreferred) continue;
                     }
 
-                    if (!TryDeserializeForHandler(message, handler, from, out var callParams, out int unread))
+                    if (!TryDeserializeForHandler(message, handler, from, isLocalLoopback: true, out var callParams, out int unread))
                         continue;
 
                     if (unread == 0)
@@ -812,7 +812,7 @@ namespace NetworkingLibrary.Services
             catch (Exception ex) { LogError($"Invoke RPC error: {ex}"); }
         }
 
-        bool TryDeserializeForHandler(Message source, MessageHandler handler, ulong from, out object[] callParams, out int unread)
+        bool TryDeserializeForHandler(Message source, MessageHandler handler, ulong from, bool isLocalLoopback, out object[] callParams, out int unread)
         {
             callParams = null!;
             unread = int.MaxValue;
@@ -834,7 +834,7 @@ namespace NetworkingLibrary.Services
                 if (handler.TakesInfo)
                 {
                     var t = pi[pi.Length - 1].ParameterType;
-                    callParams[pi.Length - 1] = CreateRpcInfoInstance(t, from);
+                    callParams[pi.Length - 1] = CreateRpcInfoInstance(t, from, isLocalLoopback);
                 }
                 unread = source.UnreadLength();
                 return true;
@@ -860,10 +860,12 @@ namespace NetworkingLibrary.Services
             return message.SaveReadCursor();
         }
 
-        object CreateRpcInfoInstance(Type infoType, ulong from)
+        object CreateRpcInfoInstance(Type infoType, ulong from, bool isLocalLoopback)
         {
             try
             {
+                var ctorFull = infoType.GetConstructor(new[] { typeof(ulong), typeof(string), typeof(bool) });
+                if (ctorFull != null) return ctorFull.Invoke(new object[] { from, from.ToString(), isLocalLoopback });
                 var ci = infoType.GetConstructor(new[] { typeof(ulong) });
                 if (ci != null) return ci.Invoke(new object[] { from });
                 var p = Activator.CreateInstance(infoType);

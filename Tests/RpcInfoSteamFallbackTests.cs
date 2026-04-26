@@ -23,5 +23,6 @@ public class RpcInfoSteamFallbackTests
 
         Assert.Equal(sid.m_SteamID, info.SteamId64);
         Assert.Equal(sid.ToString(), info.SteamIdString);
+        Assert.False(info.IsLocalLoopback);
     }
 }

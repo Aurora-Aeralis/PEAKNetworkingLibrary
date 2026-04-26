@@ -36,6 +36,19 @@ public class OfflineNetworkingServiceTests
             CallCount++;
         }
     }
+
+    sealed class RpcInfoReceiver
+    {
+        public RPCInfo LastInfo { get; private set; }
+        public int CallCount { get; private set; }
+
+        [CustomRPC]
+        void OnInfo(RPCInfo info)
+        {
+            LastInfo = info;
+            CallCount++;
+        }
+    }
     
     sealed class StaticRpcReceiver
     {
@@ -254,6 +267,22 @@ public class OfflineNetworkingServiceTests
 
         Assert.Equal(1, receiver.CallCount);
         Assert.Equal(27, receiver.LastValue);
+    }
+
+    [Fact]
+    public void Rpc_LocalDispatch_SetsRpcInfoLoopbackTrue()
+    {
+        var service = new OfflineNetworkingService();
+        var receiver = new RpcInfoReceiver();
+
+        service.Initialize();
+        service.RegisterNetworkObject(receiver, TestModId);
+        service.CreateLobby();
+        service.RPC(TestModId, "OnInfo", ReliableType.Reliable);
+
+        Assert.Equal(1, receiver.CallCount);
+        Assert.True(receiver.LastInfo.IsLocalLoopback);
+        Assert.Equal(service.LocalSteamId, receiver.LastInfo.SteamId64);
     }
 
     [Fact]

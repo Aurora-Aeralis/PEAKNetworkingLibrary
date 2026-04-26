@@ -19,19 +19,7 @@ namespace NetworkingLibrary.Modules
         }
 
         public RPCInfo(ulong steamId64) : this(steamId64, steamId64.ToString(), false) { }
-        public RPCInfo(CSteamID sid) : this(sid.m_SteamID, sid.ToString(), IsLocalUser(sid)) { }
-
-        static bool IsLocalUser(CSteamID sid)
-        {
-            try
-            {
-                return sid == SteamUser.GetSteamID();
-            }
-            catch
-            {
-                return false;
-            }
-        }
+        public RPCInfo(CSteamID sid) : this(sid.m_SteamID, sid.ToString(), false) { }
 
     }
 }

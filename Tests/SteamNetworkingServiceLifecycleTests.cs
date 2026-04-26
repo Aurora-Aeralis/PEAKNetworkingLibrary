@@ -30,6 +30,19 @@ public class SteamNetworkingServiceLifecycleTests
         }
     }
 
+    sealed class RpcInfoReceiver
+    {
+        public RPCInfo LastInfo { get; private set; }
+        public int CallCount { get; private set; }
+
+        [CustomRPC]
+        void OnInfo(RPCInfo info)
+        {
+            LastInfo = info;
+            CallCount++;
+        }
+    }
+
     sealed class MixedRpcReceiver
     {
         [CustomRPC]
@@ -366,6 +379,36 @@ public class SteamNetworkingServiceLifecycleTests
 
         Assert.Equal(2, receiver.PublicCallCount);
         Assert.Equal(3, receiver.PrivateCallCount);
+    }
+
+    [Fact]
+    public void InvokeLocalMessage_SetsRpcInfoLoopbackTrue()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new RpcInfoReceiver();
+        using var _ = service.RegisterNetworkObject(receiver, TestModId, mask: 0);
+
+        var message = new Message(TestModId, "OnInfo", 0);
+        InvokeNonPublic(service, "InvokeLocalMessage", message, new CSteamID(1234UL));
+
+        Assert.Equal(1, receiver.CallCount);
+        Assert.True(receiver.LastInfo.IsLocalLoopback);
+        Assert.Equal(1234UL, receiver.LastInfo.SteamId64);
+    }
+
+    [Fact]
+    public void DispatchIncoming_RemoteReceive_SetsRpcInfoLoopbackFalse()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new RpcInfoReceiver();
+        using var _ = service.RegisterNetworkObject(receiver, TestModId, mask: 0);
+
+        var message = new Message(TestModId, "OnInfo", 0);
+        InvokeNonPublic(service, "DispatchIncoming", message, new CSteamID(5678UL));
+
+        Assert.Equal(1, receiver.CallCount);
+        Assert.False(receiver.LastInfo.IsLocalLoopback);
+        Assert.Equal(5678UL, receiver.LastInfo.SteamId64);
     }
 
     [Fact]

@@ -4,6 +4,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Collections.Concurrent;
+using System.Globalization;
 using BepInEx.Configuration;
 using BepInEx;
 
@@ -105,7 +106,7 @@ namespace NetworkingLibrary.Features
         static bool TryParseSchemaVersion(string version, out int schemaVersion)
         {
             schemaVersion = 0;
-            if (string.IsNullOrWhiteSpace(version) || !int.TryParse(version, out schemaVersion))
+            if (string.IsNullOrWhiteSpace(version) || !int.TryParse(version, NumberStyles.Integer, CultureInfo.InvariantCulture, out schemaVersion))
                 return false;
             return schemaVersion >= 0;
         }

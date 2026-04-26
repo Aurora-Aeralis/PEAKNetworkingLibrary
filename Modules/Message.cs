@@ -328,10 +328,11 @@ namespace NetworkingLibrary.Modules
         {
             ThrowIfDisposed();
             var value = v ?? "";
-            var payloadLength = Encoding.UTF8.GetByteCount(value);
+            var payload = Encoding.UTF8.GetBytes(value);
+            var payloadLength = payload.Length;
             EnsureCanAppend(sizeof(int) + payloadLength, nameof(WriteString));
             WriteInt32LE(payloadLength);
-            if (payloadLength > 0) buffer.AddRange(Encoding.UTF8.GetBytes(value));
+            if (payloadLength > 0) buffer.AddRange(payload);
             readableBufferDirty = true;
             return this;
         }

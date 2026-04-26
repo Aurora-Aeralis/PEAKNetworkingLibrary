@@ -1,4 +1,5 @@
 using System;
+using NetworkingLibrary.Modules;
 #if !UNITY_EDITOR
 using Steamworks;
 #endif
@@ -8,75 +9,47 @@ namespace NetworkingLibrary.Services
 {
     public static class NetworkingServiceFactory
     {
+        const string LogSource = "NetworkingServiceFactory";
         const float ProbeDebugLogCooldownSeconds = 2f;
-        static float probeLastDebugLogTime = float.NegativeInfinity;
-
-        static void LogInfo(string message)
-        {
-            try { Net.Logger?.LogInfo(message); }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[NetworkingServiceFactory] Failed to write info log. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
-            }
-        }
-
-        static void LogError(string message)
-        {
-            try { Net.Logger?.LogError(message); }
-            catch (Exception ex)
-            {
-                Debug.LogError($"[NetworkingServiceFactory] Failed to write error log. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
-            }
-        }
-
-        static void LogDebugThrottled(string message)
-        {
-            var now = Time.unscaledTime;
-            if (now - probeLastDebugLogTime < ProbeDebugLogCooldownSeconds) return;
-            probeLastDebugLogTime = now;
-            try { Net.Logger?.LogDebug(message); }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[NetworkingServiceFactory] Failed to write debug log. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
-            }
-        }
 
 #if !UNITY_EDITOR
         internal static Func<bool> IsSteamClientRunning = () => SteamAPI.IsSteamRunning();
         internal static Func<bool> IsSteamApiInitialized = ProbeSteamApiInitialized;
         internal static Func<INetworkingService> CreateSteamService = () => new SteamNetworkingService();
         internal static Func<INetworkingService> CreateOfflineService = () => new OfflineNetworkingService();
+        internal static Func<string, Type?> ResolveType = Type.GetType;
+        internal static Func<float> UnscaledTimeProvider = () => Time.unscaledTime;
 #endif
 
         public static INetworkingService CreateDefaultService()
         {
 #if UNITY_EDITOR
-            LogInfo("UNITY_EDITOR detected. Creating OfflineNetworkingService.");
+            NetLog.Info(LogSource, "UNITY_EDITOR detected. Creating OfflineNetworkingService.");
             return new OfflineNetworkingService();
 #else
             try
             {
                 var isSteamClientRunning = IsSteamClientRunning();
-                LogInfo($"Steam client running: {isSteamClientRunning}.");
+                NetLog.Info(LogSource, $"Steam client running: {isSteamClientRunning}.");
                 if (!isSteamClientRunning)
                 {
-                    LogInfo("Falling back to OfflineNetworkingService. Reason: Steam client is not running.");
+                    NetLog.Info(LogSource, "Falling back to OfflineNetworkingService. Reason: Steam client is not running.");
                     return CreateOfflineService();
                 }
 
                 var isSteamApiInitialized = IsSteamApiInitialized();
-                LogInfo($"Steam API initialized: {isSteamApiInitialized}.");
+                NetLog.Info(LogSource, $"Steam API initialized: {isSteamApiInitialized}.");
                 if (isSteamApiInitialized)
                 {
-                    LogInfo("Steam ready. Creating SteamNetworkingService.");
+                    NetLog.Info(LogSource, "Steam ready. Creating SteamNetworkingService.");
                     return CreateSteamService();
                 }
 
-                LogInfo("Falling back to OfflineNetworkingService. Reason: Steam API is not initialized.");
+                NetLog.Info(LogSource, "Falling back to OfflineNetworkingService. Reason: Steam API is not initialized.");
             }
             catch (Exception exception)
             {
-                LogError($"Steam readiness probe failed. Falling back to OfflineNetworkingService. Exception: {exception}");
+                NetLog.Error(LogSource, $"Steam readiness probe failed. Falling back to OfflineNetworkingService. Exception: {exception}");
             }
 
             return CreateOfflineService();
@@ -95,7 +68,7 @@ namespace NetworkingLibrary.Services
             }
             catch (Exception ex)
             {
-                LogDebugThrottled($"ProbeSteamApiInitialized fallback SteamUser.GetSteamID failed: {ex.GetType().Name}: {ex.Message}");
+                NetLog.DebugThrottled(LogSource, "NetworkingServiceFactory.ProbeSteamApiInitialized", ProbeDebugLogCooldownSeconds, $"ProbeSteamApiInitialized fallback SteamUser.GetSteamID failed: {ex.GetType().Name}: {ex.Message}", () => UnscaledTimeProvider(), includeOriginalMessageInFallback: true);
                 return false;
             }
         }
@@ -114,7 +87,7 @@ namespace NetworkingLibrary.Services
                 };
                 foreach (var candidateTypeName in candidateTypeNames)
                 {
-                    var steamManagerType = Type.GetType(candidateTypeName);
+                    var steamManagerType = ResolveType(candidateTypeName);
                     if (steamManagerType == null) continue;
                     if (TryReadInitializedFromType(steamManagerType, out isInitialized)) return true;
                 }
@@ -122,7 +95,7 @@ namespace NetworkingLibrary.Services
             }
             catch (Exception ex)
             {
-                LogDebugThrottled($"TryReadSteamManagerInitialized reflection probe failed: {ex.GetType().Name}: {ex.Message}");
+                NetLog.DebugThrottled(LogSource, "NetworkingServiceFactory.TryReadSteamManagerInitialized", ProbeDebugLogCooldownSeconds, $"TryReadSteamManagerInitialized reflection probe failed: {ex.GetType().Name}: {ex.Message}", () => UnscaledTimeProvider(), includeOriginalMessageInFallback: true);
                 return false;
             }
         }
@@ -154,6 +127,8 @@ namespace NetworkingLibrary.Services
             IsSteamApiInitialized = ProbeSteamApiInitialized;
             CreateSteamService = () => new SteamNetworkingService();
             CreateOfflineService = () => new OfflineNetworkingService();
+            ResolveType = Type.GetType;
+            UnscaledTimeProvider = () => Time.unscaledTime;
         }
 #endif
     }

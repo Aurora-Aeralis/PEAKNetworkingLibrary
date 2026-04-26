@@ -7,6 +7,7 @@ namespace NetworkingLibrary.Modules
 {
     public class SteamCallbackPump : MonoBehaviour
     {
+        const string LogSource = "SteamCallbackPump";
         const float ErrorLogCooldownSeconds = 2f;
 
         public static bool CallbackPumpingEnabled { get; private set; }
@@ -15,10 +16,6 @@ namespace NetworkingLibrary.Modules
 
         string? lastSkipReason;
         bool runCallbacksFaulted;
-        static float probeSteamReadyLastErrorLogTime = float.NegativeInfinity;
-        static bool probeSteamReadySuppressedFault;
-        float isSteamReadyHookLastErrorLogTime = float.NegativeInfinity;
-        bool isSteamReadyHookSuppressedFault;
 
         public static void EnablePumping() => CallbackPumpingEnabled = true;
         public static void DisablePumping() => CallbackPumpingEnabled = false;
@@ -80,7 +77,7 @@ namespace NetworkingLibrary.Modules
             {
                 if (runCallbacksFaulted) return;
                 runCallbacksFaulted = true;
-                TryLogError($"SteamAPI.RunCallbacks error (logging once until recovery): {ex}");
+                NetLog.Error(LogSource, $"SteamAPI.RunCallbacks error (logging once until recovery): {ex}");
             }
         }
 
@@ -95,10 +92,7 @@ namespace NetworkingLibrary.Modules
             }
             catch (Exception ex)
             {
-                LogExceptionWithCooldownStatic(
-                    ref probeSteamReadyLastErrorLogTime,
-                    ref probeSteamReadySuppressedFault,
-                    $"ProbeSteamReady failed while checking Steam readiness. Exception: {ex.GetType().Name}: {ex.Message}");
+                LogExceptionWithCooldown("ProbeSteamReady", $"ProbeSteamReady failed while checking Steam readiness. Exception: {ex.GetType().Name}: {ex.Message}");
                 return false;
             }
 #endif
@@ -114,40 +108,15 @@ namespace NetworkingLibrary.Modules
             }
             catch (Exception ex)
             {
-                LogExceptionWithCooldown(
-                    ref isSteamReadyHookLastErrorLogTime,
-                    ref isSteamReadyHookSuppressedFault,
-                    $"TryIsSteamReady failed while invoking IsSteamReady hook. Exception: {ex.GetType().Name}: {ex.Message}");
+                LogExceptionWithCooldown($"TryIsSteamReady:{GetHashCode()}", $"TryIsSteamReady failed while invoking IsSteamReady hook. Exception: {ex.GetType().Name}: {ex.Message}");
                 return false;
             }
         }
 
-        void LogExceptionWithCooldown(ref float lastErrorLogTime, ref bool suppressedFault, string message)
+        static void LogExceptionWithCooldown(string key, string message)
         {
-            var now = TimeProvider();
-            if (now - lastErrorLogTime >= ErrorLogCooldownSeconds)
-            {
-                lastErrorLogTime = now;
-                suppressedFault = false;
-                TryLogError(message);
-                return;
-            }
-
-            suppressedFault = true;
-        }
-
-        static void LogExceptionWithCooldownStatic(ref float lastErrorLogTime, ref bool suppressedFault, string message)
-        {
-            var now = TimeProvider();
-            if (now - lastErrorLogTime >= ErrorLogCooldownSeconds)
-            {
-                lastErrorLogTime = now;
-                suppressedFault = false;
-                TryLogError(message);
-                return;
-            }
-
-            suppressedFault = true;
+            if (!NetLog.TryEnterCooldown($"SteamCallbackPump.{key}", ErrorLogCooldownSeconds, TimeProvider())) return;
+            NetLog.Error(LogSource, message);
         }
 
         void LogSkipReasonOnce(string message)
@@ -155,25 +124,7 @@ namespace NetworkingLibrary.Modules
             if (lastSkipReason == message) return;
             lastSkipReason = message;
             runCallbacksFaulted = false;
-            TryLogInfo(message);
-        }
-
-        static void TryLogError(string message)
-        {
-            try { NetworkingLibrary.Net.Logger.LogError(message); }
-            catch (Exception ex)
-            {
-                Debug.LogError($"[SteamCallbackPump] Failed to write error log. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
-            }
-        }
-
-        static void TryLogInfo(string message)
-        {
-            try { NetworkingLibrary.Net.Logger.LogInfo(message); }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[SteamCallbackPump] Failed to write info log. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
-            }
+            NetLog.Info(LogSource, message);
         }
     }
 }

@@ -16,6 +16,7 @@ public class SteamCallbackPumpTests : IDisposable
         SteamCallbackPump.IsSteamReady = originalIsSteamReady;
         SteamCallbackPump.TimeProvider = originalTimeProvider;
         SteamCallbackPump.DisablePumping();
+        NetLog.ResetForTests();
     }
 
     [Fact]
@@ -36,6 +37,24 @@ public class SteamCallbackPumpTests : IDisposable
         exception = Record.Exception(() => InvokeUpdate(pump));
         Assert.Null(exception);
         Assert.False(ReadPrivateBool(pump, "runCallbacksFaulted"));
+    }
+
+    [Fact]
+    public void Update_WhenIsSteamReadyHookThrows_ThrottlesRepeatedErrorEmissionByPump()
+    {
+        var pump = (SteamCallbackPump)FormatterServices.GetUninitializedObject(typeof(SteamCallbackPump));
+        var simulatedTime = 50f;
+        SteamCallbackPump.TimeProvider = () => simulatedTime;
+        SteamCallbackPump.IsSteamReady = () => throw new InvalidOperationException("hook failed");
+        SteamCallbackPump.EnablePumping();
+
+        InvokeUpdate(pump);
+        simulatedTime += 0.25f;
+        InvokeUpdate(pump);
+
+        var cooldownKey = $"SteamCallbackPump.TryIsSteamReady:{pump.GetHashCode()}";
+        Assert.False(NetLog.TryEnterCooldown(cooldownKey, 2d, simulatedTime));
+        Assert.True(NetLog.TryEnterCooldown(cooldownKey, 2d, simulatedTime + 2.1f));
     }
 
     static void InvokeUpdate(SteamCallbackPump pump)

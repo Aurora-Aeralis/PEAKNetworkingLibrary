@@ -417,10 +417,22 @@ namespace NetworkingLibrary.Modules
             readCasters.TryRemove(typeof(T), out _);
         }
 
+        internal static void ResetSerializersForTests()
+        {
+            writeCasters.Clear();
+            readCasters.Clear();
+            RegisterBuiltInSerializers();
+        }
+
         private static readonly ConcurrentDictionary<Type, Action<Message, object>> writeCasters = new();
         private static readonly ConcurrentDictionary<Type, Func<Message, object>> readCasters = new();
 
         static Message()
+        {
+            RegisterBuiltInSerializers();
+        }
+
+        private static void RegisterBuiltInSerializers()
         {
             writeCasters[typeof(byte)] = (m, o) => m.WriteByte((byte)o);
             writeCasters[typeof(byte[])] = (m, o) => m.WriteBytes((byte[])o);

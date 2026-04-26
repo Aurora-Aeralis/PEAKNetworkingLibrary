@@ -1,4 +1,5 @@
 using HarmonyLib;
+using NetworkingLibrary.Modules;
 using NetworkingLibrary.Services;
 using System;
 using System.Collections.Generic;
@@ -10,9 +11,13 @@ using Xunit;
 
 namespace NetworkingLibrary.Tests;
 
-public class NetLifecycleTeardownTests
+public class NetLifecycleTeardownTests : IDisposable
 {
     sealed class ExtraMarkerComponent : MonoBehaviour { }
+    sealed class SerializerProbe
+    {
+        public int Value { get; set; }
+    }
 
     sealed class FakeNetworkingService : INetworkingService
     {
@@ -93,6 +98,16 @@ public class NetLifecycleTeardownTests
         {
             TeardownPatchTarget.Calls += 100;
         }
+    }
+
+    public NetLifecycleTeardownTests()
+    {
+        Message.ResetSerializersForTests();
+    }
+
+    public void Dispose()
+    {
+        Message.ResetSerializersForTests();
     }
 
     [Fact]
@@ -191,6 +206,26 @@ public class NetLifecycleTeardownTests
         Assert.Null(ex);
         Assert.True(service.ShutdownCalled);
         Assert.Null(GetService());
+    }
+
+    [Fact]
+    public void OnDestroy_Resets_MessageSerializer_Overrides()
+    {
+        Message.RegisterSerializer<SerializerProbe>(
+            (m, probe) => m.WriteInt(probe.Value),
+            m => new SerializerProbe { Value = m.ReadInt() });
+        var writeBefore = new Message(1u, "method", 0);
+        writeBefore.WriteObject(typeof(SerializerProbe), new SerializerProbe { Value = 7 });
+        var readBefore = new Message(writeBefore.ToArray());
+        Assert.Equal(7, ((SerializerProbe)readBefore.ReadObject(typeof(SerializerProbe))).Value);
+
+        SetService(new FakeNetworkingService());
+        var net = (Net)FormatterServices.GetUninitializedObject(typeof(Net));
+        InvokeOnDestroy(net);
+
+        var ex = Assert.Throws<NotSupportedException>(() =>
+            new Message(1u, "method", 0).WriteObject(typeof(SerializerProbe), new SerializerProbe { Value = 7 }));
+        Assert.Contains("RegisterSerializer", ex.Message);
     }
 
     [Fact]

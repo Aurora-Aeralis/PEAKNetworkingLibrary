@@ -40,31 +40,31 @@ namespace NetworkingLibrary.Features
         internal static void MigrateConfigIfNeeded(ConfigFile config, string currentVersion)
         {
             var schemaVersionEntry = BindSchemaVersion(config, string.Empty);
-            var legacyVersionEntry = BindLegacyVersion(config);
-            var storedVersion = GetStoredVersion(schemaVersionEntry, legacyVersionEntry);
-            var needsNormalization = string.IsNullOrWhiteSpace(schemaVersionEntry.Value) && !string.IsNullOrWhiteSpace(legacyVersionEntry.Value);
+            var legacyVersion = ReadLegacyVersion(config);
+            var storedVersion = GetStoredVersion(schemaVersionEntry.Value, legacyVersion);
+            var needsNormalization = string.IsNullOrWhiteSpace(schemaVersionEntry.Value) && !string.IsNullOrWhiteSpace(legacyVersion);
             if (storedVersion == currentVersion && !needsNormalization)
                 return;
 
-            MigrateConfig(schemaVersionEntry, legacyVersionEntry, storedVersion, currentVersion);
+            MigrateConfig(schemaVersionEntry, storedVersion, currentVersion, legacyVersion);
             schemaVersionEntry.Value = currentVersion;
+            ClearLegacyVersion(config);
             config.Save();
         }
 
-        static string GetStoredVersion(ConfigEntry<string> schemaVersionEntry, ConfigEntry<string> legacyVersionEntry)
+        static string GetStoredVersion(string schemaVersion, string legacyVersion)
         {
-            var version = schemaVersionEntry.Value;
-            if (!string.IsNullOrWhiteSpace(version))
-                return version;
-            return legacyVersionEntry.Value;
+            if (!string.IsNullOrWhiteSpace(schemaVersion))
+                return schemaVersion;
+            return legacyVersion;
         }
 
-        static void MigrateConfig(ConfigEntry<string> schemaVersionEntry, ConfigEntry<string> legacyVersionEntry, string previousVersion, string currentVersion)
+        static void MigrateConfig(ConfigEntry<string> schemaVersionEntry, string previousVersion, string currentVersion, string legacyVersion)
         {
             if (!TryParseSchemaVersion(currentVersion, out var targetVersion))
                 throw new InvalidOperationException($"Current config schema version '{currentVersion}' is not a valid schema identifier.");
 
-            var sourceVersion = string.IsNullOrWhiteSpace(schemaVersionEntry.Value) ? legacyVersionEntry.Value : previousVersion;
+            var sourceVersion = string.IsNullOrWhiteSpace(schemaVersionEntry.Value) ? legacyVersion : previousVersion;
             if (!TryParseSchemaVersion(sourceVersion, out var startVersion))
                 startVersion = 0;
 
@@ -73,7 +73,7 @@ namespace NetworkingLibrary.Features
                 switch (schemaVersion)
                 {
                     case 0:
-                        Migrate_0_to_1(schemaVersionEntry, legacyVersionEntry);
+                        Migrate_0_to_1(schemaVersionEntry, legacyVersion);
                         break;
                     default:
                         throw new InvalidOperationException($"No migration path exists from schema {schemaVersion} to {schemaVersion + 1}.");
@@ -87,10 +87,10 @@ namespace NetworkingLibrary.Features
             return !string.IsNullOrWhiteSpace(version) && int.TryParse(version, out schemaVersion);
         }
 
-        static void Migrate_0_to_1(ConfigEntry<string> schemaVersionEntry, ConfigEntry<string> legacyVersionEntry)
+        static void Migrate_0_to_1(ConfigEntry<string> schemaVersionEntry, string legacyVersion)
         {
-            if (string.IsNullOrWhiteSpace(schemaVersionEntry.Value) && !string.IsNullOrWhiteSpace(legacyVersionEntry.Value))
-                schemaVersionEntry.Value = legacyVersionEntry.Value;
+            if (string.IsNullOrWhiteSpace(schemaVersionEntry.Value) && !string.IsNullOrWhiteSpace(legacyVersion))
+                schemaVersionEntry.Value = legacyVersion;
         }
 
         static ConfigEntry<string> BindSchemaVersion(ConfigFile config, string value)
@@ -98,9 +98,40 @@ namespace NetworkingLibrary.Features
             return config.Bind(VersionSection, VersionKey, value, SchemaVersionInfo);
         }
 
-        static ConfigEntry<string> BindLegacyVersion(ConfigFile config)
+        static string ReadLegacyVersion(ConfigFile config)
         {
-            return config.Bind(VersionSection, LegacyVersionKey, string.Empty, string.Empty);
+            var configPath = config.ConfigFilePath;
+            if (!File.Exists(configPath))
+                return string.Empty;
+
+            foreach (var line in File.ReadLines(configPath))
+            {
+                if (line.StartsWith($"{LegacyVersionKey} = ", StringComparison.Ordinal))
+                    return line[(LegacyVersionKey.Length + 3)..].Trim();
+            }
+
+            return string.Empty;
+        }
+
+        static void ClearLegacyVersion(ConfigFile config)
+        {
+            var configPath = config.ConfigFilePath;
+            if (!File.Exists(configPath))
+                return;
+
+            var lines = File.ReadAllLines(configPath);
+            var changed = false;
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (!lines[i].StartsWith($"{LegacyVersionKey} = ", StringComparison.Ordinal))
+                    continue;
+
+                lines[i] = $"{LegacyVersionKey} =";
+                changed = true;
+            }
+
+            if (changed)
+                File.WriteAllLines(configPath, lines);
         }
 
         static ConfigEntry<string> BindPluginVersion(ConfigFile config, string value)

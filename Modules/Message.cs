@@ -177,20 +177,21 @@ namespace NetworkingLibrary.Modules
             return Length() - readPos;
         }
 
+        /// <summary>
+        /// Resets this message instance.
+        /// </summary>
+        /// <param name="zero">
+        /// When <see langword="true"/>, clears all buffered bytes and resets the read cursor.
+        /// When <see langword="false"/>, this method intentionally performs no operation for compatibility with older callers.
+        /// </param>
         public void Reset(bool zero = true)
         {
             ThrowIfDisposed();
-            if (zero)
-            {
-                buffer.Clear();
-                readableBuffer = Array.Empty<byte>();
-                readableBufferDirty = true;
-                readPos = 0;
-            }
-            else
-            {
-                readPos = Math.Max(0, readPos - 4);
-            }
+            if (!zero) return;
+            buffer.Clear();
+            readableBuffer = Array.Empty<byte>();
+            readableBufferDirty = true;
+            readPos = 0;
         }
 
         #region Write helpers

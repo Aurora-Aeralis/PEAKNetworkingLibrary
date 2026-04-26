@@ -796,9 +796,9 @@ namespace NetworkingLibrary.Services
 
         class SlidingWindowRateLimiter
         {
-            readonly int limit; readonly TimeSpan window; readonly Queue<DateTime> q = new();
+            readonly int limit; readonly TimeSpan window; readonly Queue<DateTime> q = new(); readonly object qLock = new();
             public SlidingWindowRateLimiter(int limit, TimeSpan window) { this.limit = limit; this.window = window; }
-            public bool IncomingAllowed() { var now = DateTime.UtcNow; while (q.Count > 0 && now - q.Peek() > window) q.Dequeue(); if (q.Count >= limit) return false; q.Enqueue(now); return true; }
+            public bool IncomingAllowed() { lock (qLock) { var now = DateTime.UtcNow; while (q.Count > 0 && now - q.Peek() > window) q.Dequeue(); if (q.Count >= limit) return false; q.Enqueue(now); return true; } }
         }
 
         class MessageHandler { public object Target = null!; public MethodInfo Method = null!; public ParameterInfo[] Parameters = null!; public bool TakesInfo; public int Mask; }

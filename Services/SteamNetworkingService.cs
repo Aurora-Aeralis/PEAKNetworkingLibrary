@@ -240,6 +240,7 @@ namespace NetworkingLibrary.Services
             SteamCallbackPump? createdPumpComponent = null;
             var pumpingWasEnabledBeforeInitialize = SteamCallbackPump.CallbackPumpingEnabled;
             var enabledPumpingInThisInitialize = false;
+            var pumpSetupSucceeded = !Application.isPlaying;
             if (Application.isPlaying)
             {
                 try
@@ -272,11 +273,39 @@ namespace NetworkingLibrary.Services
 
                     SteamCallbackPump.EnablePumping();
                     enabledPumpingInThisInitialize = true;
+                    pumpSetupSucceeded = true;
                 }
                 catch (Exception ex)
                 {
                     LogError($"Failed to create SteamCallbackPump: {ex}");
                 }
+            }
+
+            if (!pumpSetupSucceeded)
+            {
+                if (enabledPumpingInThisInitialize && !pumpingWasEnabledBeforeInitialize)
+                {
+                    try { SteamCallbackPump.DisablePumping(); } catch { }
+                }
+                try
+                {
+                    if (createdPumpGameObject != null)
+                    {
+                        if (Application.isPlaying) UnityEngine.Object.Destroy(createdPumpGameObject);
+                        else UnityEngine.Object.DestroyImmediate(createdPumpGameObject);
+                    }
+                    else if (createdPumpComponent != null)
+                    {
+                        if (Application.isPlaying) UnityEngine.Object.Destroy(createdPumpComponent);
+                        else UnityEngine.Object.DestroyImmediate(createdPumpComponent);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogError($"Failed to cleanup created SteamCallbackPump after initialization failure: {ex}");
+                }
+                IsInitialized = false;
+                return;
             }
 
             if (!TryInitializeSteamCallbacksAndCrypto())

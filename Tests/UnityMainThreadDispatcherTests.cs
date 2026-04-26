@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,6 +19,13 @@ public class UnityMainThreadDispatcherTests : IDisposable
     }
 
     public void Dispose() => UnityMainThreadDispatcher.TestHooks.ResetForTests();
+
+    static void RunDispatcherUpdate(UnityMainThreadDispatcher dispatcher)
+    {
+        var update = typeof(UnityMainThreadDispatcher).GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(update);
+        update!.Invoke(dispatcher, null);
+    }
 
     [Fact]
     public void Instance_FromWorkerThread_QueuesCreationRequestWithoutCreatingOnWorker()
@@ -121,5 +129,27 @@ public class UnityMainThreadDispatcherTests : IDisposable
         var instance = await workerTask;
         Assert.NotNull(instance);
         Assert.Equal(1, createCalls);
+    }
+
+    [Fact]
+    public void Update_WithActionCountBudget_ProcessesRemainingActionsInLaterFrames()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        var executed = new ConcurrentQueue<int>();
+
+        UnityMainThreadDispatcher.TestHooks.OverrideExecutionBudgetForTests(maxActionsPerFrame: 2);
+        dispatcher.Enqueue(() => executed.Enqueue(1));
+        dispatcher.Enqueue(() => executed.Enqueue(2));
+        dispatcher.Enqueue(() => executed.Enqueue(3));
+
+        RunDispatcherUpdate(dispatcher);
+
+        Assert.Equal(new[] { 1, 2 }, executed.ToArray());
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
+
+        RunDispatcherUpdate(dispatcher);
+
+        Assert.Equal(new[] { 1, 2, 3 }, executed.ToArray());
+        Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
     }
 }

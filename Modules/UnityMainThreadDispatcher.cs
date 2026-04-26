@@ -15,9 +15,13 @@ namespace NetworkingLibrary.Modules
         static int createRequestQueued;
         static readonly ManualResetEventSlim instanceReady = new(false);
         static readonly TimeSpan defaultBackgroundThreadWaitTimeout = TimeSpan.FromSeconds(2);
+        const int defaultMaxActionsPerFrame = int.MaxValue;
+        static readonly TimeSpan defaultMaxExecutionTimePerFrame = TimeSpan.Zero;
 
         internal static Func<UnityMainThreadDispatcher> CreateInstanceOnMainThreadFactory = CreateOrFindDispatcherOnMainThread;
         internal static TimeSpan BackgroundThreadInstanceWaitTimeout = defaultBackgroundThreadWaitTimeout;
+        internal static int MaxActionsPerFrame = defaultMaxActionsPerFrame;
+        internal static TimeSpan MaxExecutionTimePerFrame = defaultMaxExecutionTimePerFrame;
 
         public static UnityMainThreadDispatcher Instance()
         {
@@ -164,14 +168,25 @@ namespace NetworkingLibrary.Modules
 
         void Update()
         {
+            var maxActions = Volatile.Read(ref MaxActionsPerFrame);
+            if (maxActions < 1) maxActions = 1;
+            var maxExecutionTime = MaxExecutionTimePerFrame;
+            var enforceTimeBudget = maxExecutionTime > TimeSpan.Zero;
+            var frameStart = enforceTimeBudget ? DateTime.UtcNow : DateTime.MinValue;
+            var processed = 0;
+
             while (true)
             {
+                if (processed >= maxActions) break;
+                if (enforceTimeBudget && DateTime.UtcNow - frameStart >= maxExecutionTime) break;
+
                 Action a = null!;
                 lock (queue)
                 {
                     if (queue.Count > 0) a = queue.Dequeue();
                     else break;
                 }
+                processed++;
                 try { a?.Invoke(); } catch (Exception ex) { Debug.LogError($"Dispatcher action error: {ex}"); }
             }
         }
@@ -192,6 +207,8 @@ namespace NetworkingLibrary.Modules
                     instanceReady.Reset();
                     CreateInstanceOnMainThreadFactory = CreateOrFindDispatcherOnMainThread;
                     BackgroundThreadInstanceWaitTimeout = defaultBackgroundThreadWaitTimeout;
+                    MaxActionsPerFrame = defaultMaxActionsPerFrame;
+                    MaxExecutionTimePerFrame = defaultMaxExecutionTimePerFrame;
                 }
             }
 
@@ -204,6 +221,17 @@ namespace NetworkingLibrary.Modules
                 {
                     lock (queue) return queue.Count;
                 }
+            }
+            internal static void OverrideExecutionBudgetForTests(int? maxActionsPerFrame = null, TimeSpan? maxExecutionTimePerFrame = null)
+            {
+                if (maxActionsPerFrame.HasValue) MaxActionsPerFrame = maxActionsPerFrame.Value;
+                if (maxExecutionTimePerFrame.HasValue) MaxExecutionTimePerFrame = maxExecutionTimePerFrame.Value;
+            }
+
+            internal static void ResetExecutionBudgetForTests()
+            {
+                MaxActionsPerFrame = defaultMaxActionsPerFrame;
+                MaxExecutionTimePerFrame = defaultMaxExecutionTimePerFrame;
             }
         }
     }

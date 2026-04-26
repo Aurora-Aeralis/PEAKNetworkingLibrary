@@ -699,6 +699,22 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
+    public void InviteToLobby_LocalSteamId_IsNoOpWithoutSyntheticPlayerGrowth()
+    {
+        var service = new OfflineNetworkingService();
+        var playerEnteredCount = 0;
+
+        service.PlayerEntered += _ => playerEnteredCount++;
+
+        service.Initialize();
+        service.CreateLobby();
+        service.InviteToLobby(service.LocalSteamId);
+
+        Assert.Equal(new[] { service.LocalSteamId }, service.GetLobbyMemberSteamIds());
+        Assert.Equal(1, playerEnteredCount);
+    }
+
+    [Fact]
     public void LeaveLobby_ThenCreateLobby_AfterInitialize_KeepsConsistentState()
     {
         var service = new OfflineNetworkingService();

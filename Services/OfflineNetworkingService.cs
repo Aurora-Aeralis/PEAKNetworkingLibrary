@@ -350,6 +350,7 @@ namespace NetworkingLibrary.Services
             globalSharedSecret = null;
         }
 
+        // Offline mode is strict single-peer loopback; invite is a compatibility no-op for the local peer.
         public void InviteToLobby(ulong steamId64)
         {
             if (!IsInitialized)
@@ -366,17 +367,11 @@ namespace NetworkingLibrary.Services
             }
             if (steamId64 != LocalSteamId)
             {
-                LogWarning($"Offline mode supports strict local loopback only; invite target {steamId64} is ignored and lobby capacity checks are bypassed.");
+                LogWarning($"Offline mode is strict local loopback only; invite target {steamId64} is ignored and offline invite does not simulate adding remote peers.");
                 return;
             }
-            if (perPlayerData.ContainsKey(steamId64)) return;
-            if (perPlayerData.Count >= offlineLobbyCapacity)
-            {
-                LogWarning($"Offline lobby is at capacity ({offlineLobbyCapacity}); cannot add player {steamId64}.");
-                return;
-            }
-            perPlayerData[steamId64] = new Dictionary<string, string>();
-            PlayerEntered?.Invoke(steamId64);
+
+            // Local peer is already present from CreateLobby/JoinLobby; keep invite as a no-op.
         }
 
         void EnsureLocalPeerKey()

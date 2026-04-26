@@ -100,6 +100,7 @@ namespace NetworkingLibrary.Services
         }
 
         bool offlineIsHost = false;
+        int offlineLobbyCapacity = 8;
         public bool IsHost => offlineIsHost;
 
         public OfflineNetworkingService(MessageSizePolicy? messageSizePolicy = null)
@@ -121,6 +122,7 @@ namespace NetworkingLibrary.Services
 
             IsInitialized = false;
             offlineIsHost = false;
+            offlineLobbyCapacity = 8;
             HostSteamId64 = LocalSteamId;
             lock (rpcLock)
             {
@@ -146,6 +148,11 @@ namespace NetworkingLibrary.Services
                 LogError("CreateLobby called before OfflineNetworkingService.Initialize.");
                 return;
             }
+            if (maxPlayers <= 0)
+            {
+                LogWarning($"CreateLobby maxPlayers {maxPlayers} is invalid. Clamping to 1.");
+                maxPlayers = 1;
+            }
             if (InLobby)
             {
                 LogWarning("CreateLobby called while already in a lobby. Leaving current lobby before creating a new one.");
@@ -153,6 +160,7 @@ namespace NetworkingLibrary.Services
             }
 
             EnsureLocalPeerKey();
+            offlineLobbyCapacity = maxPlayers;
             InLobby = true;
             HostSteamId64 = LocalSteamId;
             lobbyData.Clear();
@@ -183,6 +191,7 @@ namespace NetworkingLibrary.Services
             }
 
             EnsureLocalPeerKey();
+            offlineLobbyCapacity = 8;
             InLobby = true;
             if (lobbySteamId64 != LocalSteamId)
                 LogWarning($"Offline single-peer host simulation uses local peer {LocalSteamId} as host identity; lobby id {lobbySteamId64} is compatibility-only.");
@@ -201,6 +210,7 @@ namespace NetworkingLibrary.Services
 
             InLobby = false;
             HostSteamId64 = LocalSteamId;
+            offlineLobbyCapacity = 8;
             lobbyData.Clear();
             perPlayerData.Clear();
             lobbyKeys.Clear();
@@ -245,10 +255,15 @@ namespace NetworkingLibrary.Services
             }
             if (steamId64 != LocalSteamId)
             {
-                LogWarning($"Offline mode supports strict local loopback only; invite target {steamId64} is ignored.");
+                LogWarning($"Offline mode supports strict local loopback only; invite target {steamId64} is ignored and lobby capacity checks are bypassed.");
                 return;
             }
             if (perPlayerData.ContainsKey(steamId64)) return;
+            if (perPlayerData.Count >= offlineLobbyCapacity)
+            {
+                LogWarning($"Offline lobby is at capacity ({offlineLobbyCapacity}); cannot add player {steamId64}.");
+                return;
+            }
             perPlayerData[steamId64] = new Dictionary<string, string>();
             PlayerEntered?.Invoke(steamId64);
         }

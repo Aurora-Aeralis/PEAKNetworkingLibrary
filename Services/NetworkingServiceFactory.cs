@@ -110,8 +110,6 @@ namespace NetworkingLibrary.Services
         static Type? ResolveLoadedSteamManagerType()
         {
             const BindingFlags AnyStaticVisibility = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-            var fallbackSteamManagerType = default(Type);
-            var fallbackMatchCount = 0;
             var assemblies = AppDomain.CurrentDomain.GetAssemblies();
             for (var index = 0; index < assemblies.Length; index++)
             {
@@ -143,13 +141,8 @@ namespace NetworkingLibrary.Services
                     if (IsPreferredSteamManagerType(candidate))
                         return candidate;
 
-                    fallbackSteamManagerType = candidate;
-                    fallbackMatchCount++;
                 }
             }
-
-            if (fallbackMatchCount == 1)
-                return fallbackSteamManagerType;
 
             return null;
         }

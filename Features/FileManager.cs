@@ -62,7 +62,10 @@ namespace NetworkingLibrary.Features
                 if (storedVersion == currentVersion && !needsNormalization)
                     return;
 
-                MigrateConfig(schemaVersionEntry, storedVersion, currentVersion, legacyVersion);
+                var shouldPersistTargetVersion = MigrateConfig(schemaVersionEntry, storedVersion, currentVersion, legacyVersion);
+                if (!shouldPersistTargetVersion)
+                    return;
+
                 schemaVersionEntry.Value = currentVersion;
                 DropLegacyVersionFromConfig(config);
                 config.Save();
@@ -76,7 +79,7 @@ namespace NetworkingLibrary.Features
             return legacyVersion;
         }
 
-        static void MigrateConfig(ConfigEntry<string> schemaVersionEntry, string previousVersion, string currentVersion, string legacyVersion)
+        static bool MigrateConfig(ConfigEntry<string> schemaVersionEntry, string previousVersion, string currentVersion, string legacyVersion)
         {
             if (!TryParseSchemaVersion(currentVersion, out var targetVersion))
                 throw new InvalidOperationException($"Current config schema version '{currentVersion}' is not a valid schema identifier.");
@@ -91,7 +94,7 @@ namespace NetworkingLibrary.Features
             else if (startVersion > targetVersion)
             {
                 Net.Logger?.LogWarning($"Config schema version downgrade detected ({startVersion} -> {targetVersion}). Skipping downgrade migrations and retaining existing schema data.");
-                return;
+                return false;
             }
 
             for (var fromSchemaVersion = startVersion; fromSchemaVersion < targetVersion; fromSchemaVersion++)
@@ -105,6 +108,8 @@ namespace NetworkingLibrary.Features
                         throw new InvalidOperationException($"No migration path exists from schema {fromSchemaVersion} to {fromSchemaVersion + 1}.");
                 }
             }
+
+            return true;
         }
 
         static bool TryParseSchemaVersion(string version, out int schemaVersion)

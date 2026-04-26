@@ -130,8 +130,18 @@ namespace NetworkingLibrary.Features
                 if (!inVersionSection)
                     continue;
 
-                if (line.StartsWith($"{LegacyVersionKey} = ", StringComparison.Ordinal))
-                    return line[(LegacyVersionKey.Length + 3)..].Trim();
+                if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#", StringComparison.Ordinal) || trimmed.StartsWith(";", StringComparison.Ordinal))
+                    continue;
+
+                var separatorIndex = line.IndexOf('=');
+                if (separatorIndex <= 0)
+                    continue;
+
+                var key = line[..separatorIndex].Trim();
+                if (!key.Equals(LegacyVersionKey, StringComparison.Ordinal))
+                    continue;
+
+                return line[(separatorIndex + 1)..].Trim();
             }
 
             return string.Empty;
@@ -196,10 +206,18 @@ namespace NetworkingLibrary.Features
                 if (!inVersionSection)
                     continue;
 
-                if (!lines[i].StartsWith($"{LegacyVersionKey} = ", StringComparison.Ordinal))
+                if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#", StringComparison.Ordinal) || trimmed.StartsWith(";", StringComparison.Ordinal))
                     continue;
 
-                lines[i] = $"{LegacyVersionKey} =";
+                var separatorIndex = lines[i].IndexOf('=');
+                if (separatorIndex <= 0)
+                    continue;
+
+                var key = lines[i][..separatorIndex].Trim();
+                if (!key.Equals(LegacyVersionKey, StringComparison.Ordinal))
+                    continue;
+
+                lines[i] = lines[i][..(separatorIndex + 1)];
                 changed = true;
             }
 

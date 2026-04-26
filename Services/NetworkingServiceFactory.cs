@@ -9,6 +9,15 @@ using UnityEngine;
 
 namespace NetworkingLibrary.Services
 {
+    public enum DefaultServiceSelectionReason
+    {
+        SteamReady,
+        SteamClientNotRunning,
+        SteamApiNotReady,
+        ProbeFailed,
+        UnityEditorOffline
+    }
+
     public static class NetworkingServiceFactory
     {
         const string LogSource = "NetworkingServiceFactory";
@@ -25,7 +34,13 @@ namespace NetworkingLibrary.Services
 
         public static INetworkingService CreateDefaultService()
         {
+            return CreateDefaultServiceWithReason(out _);
+        }
+
+        internal static INetworkingService CreateDefaultServiceWithReason(out DefaultServiceSelectionReason reason)
+        {
 #if UNITY_EDITOR
+            reason = DefaultServiceSelectionReason.UnityEditorOffline;
             NetLog.Info(LogSource, "UNITY_EDITOR detected. Creating OfflineNetworkingService.");
             return new OfflineNetworkingService();
 #else
@@ -35,6 +50,7 @@ namespace NetworkingLibrary.Services
                 NetLog.Info(LogSource, $"Steam client running: {isSteamClientRunning}.");
                 if (!isSteamClientRunning)
                 {
+                    reason = DefaultServiceSelectionReason.SteamClientNotRunning;
                     NetLog.Info(LogSource, "Falling back to OfflineNetworkingService. Reason: Steam client is not running.");
                     return CreateOfflineService();
                 }
@@ -43,17 +59,22 @@ namespace NetworkingLibrary.Services
                 NetLog.Info(LogSource, $"Steam API initialized: {isSteamApiInitialized}.");
                 if (isSteamApiInitialized)
                 {
+                    reason = DefaultServiceSelectionReason.SteamReady;
                     NetLog.Info(LogSource, "Steam ready. Creating SteamNetworkingService.");
                     return CreateSteamService();
                 }
 
+                reason = DefaultServiceSelectionReason.SteamApiNotReady;
                 NetLog.Info(LogSource, "Falling back to OfflineNetworkingService. Reason: Steam API is not initialized.");
             }
             catch (Exception exception)
             {
+                reason = DefaultServiceSelectionReason.ProbeFailed;
                 NetLog.Error(LogSource, $"Steam readiness probe failed. Falling back to OfflineNetworkingService. Exception: {exception}");
+                return CreateOfflineService();
             }
 
+            reason = DefaultServiceSelectionReason.SteamApiNotReady;
             return CreateOfflineService();
 #endif
         }

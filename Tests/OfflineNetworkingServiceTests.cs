@@ -671,6 +671,34 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
+    public void CopyRuntimeStateTo_PreservesRegistrationDisposableAcrossServicePromotion()
+    {
+        var source = new OfflineNetworkingService();
+        var target = new OfflineNetworkingService();
+        var receiver = new RpcReceiver();
+
+        source.Initialize();
+        source.CreateLobby();
+        target.Initialize();
+        target.CreateLobby();
+
+        var registration = source.RegisterNetworkObject(receiver, TestModId);
+
+        ((INetworkingServiceStateTransfer)source).CopyRuntimeStateTo(target);
+        source.Shutdown();
+
+        target.RPC(TestModId, "OnPing", ReliableType.Reliable, 5);
+        Assert.Equal(1, receiver.CallCount);
+        Assert.Equal(5, receiver.LastValue);
+
+        registration.Dispose();
+
+        target.RPC(TestModId, "OnPing", ReliableType.Reliable, 9);
+        Assert.Equal(1, receiver.CallCount);
+        Assert.Equal(5, receiver.LastValue);
+    }
+
+    [Fact]
     public void LobbyLifecycleMethods_BeforeInitialize_AreNoOps()
     {
         var service = new OfflineNetworkingService();

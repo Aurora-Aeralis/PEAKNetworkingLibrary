@@ -82,6 +82,177 @@ public class NetLifecycleTeardownTests : IDisposable
         }
     }
 
+    sealed class RetryService : INetworkingService
+    {
+        public bool IsInitialized { get; private set; }
+        public bool InLobby { get; set; }
+        public ulong HostSteamId64 => 0;
+        public string HostIdString => string.Empty;
+        public bool IsHost => false;
+        public int InitializeCallCount { get; private set; }
+        public int ShutdownCallCount { get; private set; }
+        public Func<Modules.Message, ulong, bool>? IncomingValidator { get; set; }
+
+        public event Action? LobbyCreated;
+        public event Action? LobbyEntered;
+        public event Action? LobbyLeft;
+        public event Action<ulong>? PlayerEntered;
+        public event Action<ulong>? PlayerLeft;
+        public event Action<string[]>? LobbyDataChanged;
+        public event Action<ulong, string[]>? PlayerDataChanged;
+
+        public void Initialize()
+        {
+            InitializeCallCount++;
+            IsInitialized = true;
+        }
+
+        public void Shutdown()
+        {
+            ShutdownCallCount++;
+            IsInitialized = false;
+        }
+
+        public void CreateLobby(int maxPlayers = 8) { }
+        public void JoinLobby(ulong lobbySteamId64) { }
+        public void LeaveLobby() { }
+        public void InviteToLobby(ulong steamId64) { }
+        public IDisposable RegisterNetworkObject(object instance, uint modId, int mask = 0) => new NoopDisposable();
+        public IDisposable RegisterNetworkType(Type type, uint modId, int mask = 0) => new NoopDisposable();
+        public void DeregisterNetworkObject(object instance, uint modId, int mask = 0) { }
+        public void DeregisterNetworkType(Type type, uint modId, int mask = 0) { }
+        public void RPC(uint modId, string methodName, ReliableType reliable, params object[] parameters) { }
+        public void RPC(uint modId, string methodName, ReliableType reliable, Type[] parameterTypes, params object?[] parameters) { }
+        public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, params object[] parameters) { }
+        public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, Type[] parameterTypes, params object?[] parameters) { }
+        public void RPCToHost(uint modId, string methodName, ReliableType reliable, params object[] parameters) { }
+        public void RegisterLobbyDataKey(string key) { }
+        public void SetLobbyData(string key, object value) { }
+        public T GetLobbyData<T>(string key) => default!;
+        public void RegisterPlayerDataKey(string key) { }
+        public void SetPlayerData(string key, object value) { }
+        public T GetPlayerData<T>(ulong steamId64, string key) => default!;
+        public void PollReceive() { }
+        public void RegisterModSigner(uint modId, Func<byte[], byte[]> signerDelegate) { }
+        public void RegisterModPublicKey(uint modId, System.Security.Cryptography.RSAParameters pub) { }
+        public ulong GetLocalSteam64() => 0;
+        public ulong[] GetLobbyMemberSteamIds() => Array.Empty<ulong>();
+
+        sealed class NoopDisposable : IDisposable
+        {
+            public void Dispose() { }
+        }
+    }
+
+    sealed class CapturingService : INetworkingService
+    {
+        public bool IsInitialized => true;
+        public bool InLobby => false;
+        public ulong HostSteamId64 => 0;
+        public string HostIdString => string.Empty;
+        public bool IsHost => false;
+        public Func<Modules.Message, ulong, bool>? IncomingValidator { get; set; }
+        public int RegisterLobbyDataKeyCalls { get; private set; }
+        public int ShutdownCallCount { get; private set; }
+
+        public event Action? LobbyCreated;
+        public event Action? LobbyEntered;
+        public event Action? LobbyLeft;
+        public event Action<ulong>? PlayerEntered;
+        public event Action<ulong>? PlayerLeft;
+        public event Action<string[]>? LobbyDataChanged;
+        public event Action<ulong, string[]>? PlayerDataChanged;
+
+        public void Initialize() { }
+        public void Shutdown() => ShutdownCallCount++;
+        public void CreateLobby(int maxPlayers = 8) { }
+        public void JoinLobby(ulong lobbySteamId64) { }
+        public void LeaveLobby() { }
+        public void InviteToLobby(ulong steamId64) { }
+        public IDisposable RegisterNetworkObject(object instance, uint modId, int mask = 0) => new NoopDisposable();
+        public IDisposable RegisterNetworkType(Type type, uint modId, int mask = 0) => new NoopDisposable();
+        public void DeregisterNetworkObject(object instance, uint modId, int mask = 0) { }
+        public void DeregisterNetworkType(Type type, uint modId, int mask = 0) { }
+        public void RPC(uint modId, string methodName, ReliableType reliable, params object[] parameters) { }
+        public void RPC(uint modId, string methodName, ReliableType reliable, Type[] parameterTypes, params object?[] parameters) { }
+        public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, params object[] parameters) { }
+        public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, Type[] parameterTypes, params object?[] parameters) { }
+        public void RPCToHost(uint modId, string methodName, ReliableType reliable, params object[] parameters) { }
+        public void RegisterLobbyDataKey(string key) => RegisterLobbyDataKeyCalls++;
+        public void SetLobbyData(string key, object value) { }
+        public T GetLobbyData<T>(string key) => default!;
+        public void RegisterPlayerDataKey(string key) { }
+        public void SetPlayerData(string key, object value) { }
+        public T GetPlayerData<T>(ulong steamId64, string key) => default!;
+        public void PollReceive() { }
+        public void RegisterModSigner(uint modId, Func<byte[], byte[]> signerDelegate) { }
+        public void RegisterModPublicKey(uint modId, System.Security.Cryptography.RSAParameters pub) { }
+        public ulong GetLocalSteam64() => 0;
+        public ulong[] GetLobbyMemberSteamIds() => Array.Empty<ulong>();
+
+        sealed class NoopDisposable : IDisposable
+        {
+            public void Dispose() { }
+        }
+    }
+
+    sealed class TransferSourceService : INetworkingService, INetworkingServiceStateTransfer
+    {
+        public bool IsInitialized => true;
+        public bool InLobby => false;
+        public ulong HostSteamId64 => 0;
+        public string HostIdString => string.Empty;
+        public bool IsHost => false;
+        public Func<Modules.Message, ulong, bool>? IncomingValidator { get; set; }
+        public int ShutdownCallCount { get; private set; }
+        public bool CopyCalled { get; private set; }
+
+        public event Action? LobbyCreated;
+        public event Action? LobbyEntered;
+        public event Action? LobbyLeft;
+        public event Action<ulong>? PlayerEntered;
+        public event Action<ulong>? PlayerLeft;
+        public event Action<string[]>? LobbyDataChanged;
+        public event Action<ulong, string[]>? PlayerDataChanged;
+
+        public void Initialize() { }
+        public void Shutdown() => ShutdownCallCount++;
+        public void CreateLobby(int maxPlayers = 8) { }
+        public void JoinLobby(ulong lobbySteamId64) { }
+        public void LeaveLobby() { }
+        public void InviteToLobby(ulong steamId64) { }
+        public IDisposable RegisterNetworkObject(object instance, uint modId, int mask = 0) => new NoopDisposable();
+        public IDisposable RegisterNetworkType(Type type, uint modId, int mask = 0) => new NoopDisposable();
+        public void DeregisterNetworkObject(object instance, uint modId, int mask = 0) { }
+        public void DeregisterNetworkType(Type type, uint modId, int mask = 0) { }
+        public void RPC(uint modId, string methodName, ReliableType reliable, params object[] parameters) { }
+        public void RPC(uint modId, string methodName, ReliableType reliable, Type[] parameterTypes, params object?[] parameters) { }
+        public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, params object[] parameters) { }
+        public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, Type[] parameterTypes, params object?[] parameters) { }
+        public void RPCToHost(uint modId, string methodName, ReliableType reliable, params object[] parameters) { }
+        public void RegisterLobbyDataKey(string key) { }
+        public void SetLobbyData(string key, object value) { }
+        public T GetLobbyData<T>(string key) => default!;
+        public void RegisterPlayerDataKey(string key) { }
+        public void SetPlayerData(string key, object value) { }
+        public T GetPlayerData<T>(ulong steamId64, string key) => default!;
+        public void PollReceive() { }
+        public void RegisterModSigner(uint modId, Func<byte[], byte[]> signerDelegate) { }
+        public void RegisterModPublicKey(uint modId, System.Security.Cryptography.RSAParameters pub) { }
+        public ulong GetLocalSteam64() => 0;
+        public ulong[] GetLobbyMemberSteamIds() => Array.Empty<ulong>();
+        public void CopyRuntimeStateTo(INetworkingService target)
+        {
+            CopyCalled = true;
+            target.RegisterLobbyDataKey("persisted");
+        }
+
+        sealed class NoopDisposable : IDisposable
+        {
+            public void Dispose() { }
+        }
+    }
+
     static class TeardownPatchTarget
     {
         public static int Calls;
@@ -234,7 +405,7 @@ public class NetLifecycleTeardownTests : IDisposable
         var defaultService = new FakeNetworkingService { ThrowOnInitialize = true };
         var fallbackService = new FakeNetworkingService();
 
-        Net.CreateDefaultNetworkingService = () => defaultService;
+        Net.CreateDefaultNetworkingServiceWithReason = () => (defaultService, DefaultServiceSelectionReason.SteamReady);
         Net.CreateOfflineNetworkingService = () => fallbackService;
 
         try
@@ -258,7 +429,7 @@ public class NetLifecycleTeardownTests : IDisposable
         var defaultService = new FakeNetworkingService { ThrowOnInitialize = true };
         var fallbackService = new FakeNetworkingService { ThrowOnInitialize = true };
 
-        Net.CreateDefaultNetworkingService = () => defaultService;
+        Net.CreateDefaultNetworkingServiceWithReason = () => (defaultService, DefaultServiceSelectionReason.SteamReady);
         Net.CreateOfflineNetworkingService = () => fallbackService;
 
         try
@@ -380,6 +551,130 @@ public class NetLifecycleTeardownTests : IDisposable
         }
     }
 
+    [Fact]
+    public void RetrySteamInitializationForStartupWindow_TransitionsOfflineToSteam_AndShutsDownPreviousService()
+    {
+        var offline = new RetryService();
+        offline.Initialize();
+        var steam = new RetryService();
+        var defaultCreateCalls = 0;
+        SetService(offline);
+
+        Net.CreateDefaultNetworkingServiceWithReason = () =>
+        {
+            defaultCreateCalls++;
+            if (defaultCreateCalls < 3)
+                return (new RetryService(), DefaultServiceSelectionReason.SteamApiNotReady);
+            return (steam, DefaultServiceSelectionReason.SteamReady);
+        };
+        Net.RealtimeSinceStartupProvider = () => defaultCreateCalls;
+        Net.WaitForSecondsRealtimeFactory = _ => null!;
+
+        try
+        {
+            var net = (Net)FormatterServices.GetUninitializedObject(typeof(Net));
+            var routine = InvokeRetrySteamInitializationForStartupWindow(net, 10f);
+            while (routine.MoveNext()) { }
+
+            Assert.Same(steam, GetService());
+            Assert.Equal(1, steam.InitializeCallCount);
+            Assert.Equal(1, offline.ShutdownCallCount);
+        }
+        finally
+        {
+            SetService(null);
+            Net.ResetNetworkingStartupHooks();
+        }
+    }
+
+    [Fact]
+    public void RetrySteamInitializationForStartupWindow_DoesNotLeakCandidateServices_WhenSteamNotReady()
+    {
+        var offline = new RetryService();
+        offline.Initialize();
+        var candidates = new List<RetryService>();
+        SetService(offline);
+
+        Net.CreateDefaultNetworkingServiceWithReason = () =>
+        {
+            var candidate = new RetryService();
+            candidates.Add(candidate);
+            return (candidate, DefaultServiceSelectionReason.SteamApiNotReady);
+        };
+        var now = 0f;
+        Net.RealtimeSinceStartupProvider = () => now += 1.5f;
+        Net.WaitForSecondsRealtimeFactory = _ => null!;
+
+        try
+        {
+            var net = (Net)FormatterServices.GetUninitializedObject(typeof(Net));
+            var routine = InvokeRetrySteamInitializationForStartupWindow(net, 4f);
+            while (routine.MoveNext()) { }
+
+            Assert.Same(offline, GetService());
+            Assert.All(candidates, candidate => Assert.Equal(1, candidate.ShutdownCallCount));
+            Assert.Equal(0, offline.ShutdownCallCount);
+        }
+        finally
+        {
+            SetService(null);
+            Net.ResetNetworkingStartupHooks();
+        }
+    }
+
+    [Fact]
+    public void RetrySteamInitializationForStartupWindow_DoesNotReplaceService_WhenPreviousServiceIsInLobby()
+    {
+        var offline = new RetryService { InLobby = true };
+        offline.Initialize();
+        var steam = new RetryService();
+        SetService(offline);
+
+        Net.CreateDefaultNetworkingServiceWithReason = () => (steam, DefaultServiceSelectionReason.SteamReady);
+        var now = 0f;
+        Net.RealtimeSinceStartupProvider = () => now += 1f;
+        Net.WaitForSecondsRealtimeFactory = _ => null!;
+
+        try
+        {
+            var net = (Net)FormatterServices.GetUninitializedObject(typeof(Net));
+            var routine = InvokeRetrySteamInitializationForStartupWindow(net, 3f);
+            while (routine.MoveNext()) { }
+
+            Assert.Same(offline, GetService());
+            Assert.Equal(0, offline.ShutdownCallCount);
+            Assert.True(steam.InitializeCallCount > 0);
+            Assert.Equal(steam.InitializeCallCount, steam.ShutdownCallCount);
+        }
+        finally
+        {
+            SetService(null);
+            Net.ResetNetworkingStartupHooks();
+        }
+    }
+
+    [Fact]
+    public void ReplaceService_MigratesRuntimeStateBeforeShutdown()
+    {
+        var previous = new TransferSourceService();
+        var next = new CapturingService();
+        SetService(previous);
+
+        try
+        {
+            InvokeReplaceService(previous, next, "test migration");
+
+            Assert.True(previous.CopyCalled);
+            Assert.Equal(1, previous.ShutdownCallCount);
+            Assert.Equal(1, next.RegisterLobbyDataKeyCalls);
+            Assert.Same(next, GetService());
+        }
+        finally
+        {
+            SetService(null);
+        }
+    }
+
     static Harmony EnsureHarmony()
     {
         var harmonyField = typeof(Net).GetField("Harmony", BindingFlags.Static | BindingFlags.NonPublic)!;
@@ -419,5 +714,17 @@ public class NetLifecycleTeardownTests : IDisposable
     {
         typeof(Net).GetMethod("DestroyPollerDuringStartup", BindingFlags.Static | BindingFlags.NonPublic)!
             .Invoke(null, new object[] { target });
+    }
+
+    static IEnumerator InvokeRetrySteamInitializationForStartupWindow(Net net, float retryWindowSeconds)
+    {
+        return (IEnumerator)typeof(Net).GetMethod("RetrySteamInitializationForStartupWindow", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(net, new object[] { retryWindowSeconds })!;
+    }
+
+    static void InvokeReplaceService(INetworkingService previous, INetworkingService next, string reason)
+    {
+        typeof(Net).GetMethod("ReplaceService", BindingFlags.Static | BindingFlags.NonPublic)!
+            .Invoke(null, new object[] { previous, next, reason });
     }
 }

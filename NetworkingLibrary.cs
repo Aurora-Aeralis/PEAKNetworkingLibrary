@@ -3,6 +3,7 @@ using BepInEx.Configuration;
 using BepInEx.Logging;
 using HarmonyLib;
 using System;
+using System.Collections;
 using UnityEngine;
 using System.Linq;
 
@@ -23,10 +24,27 @@ namespace NetworkingLibrary
         public static INetworkingService? Service { get; private set; } 
 
         internal static Func<INetworkingService> CreateDefaultNetworkingService = NetworkingServiceFactory.CreateDefaultService;
+        internal static Func<(INetworkingService service, DefaultServiceSelectionReason reason)> CreateDefaultNetworkingServiceWithReason = () =>
+        {
+            var service = NetworkingServiceFactory.CreateDefaultServiceWithReason(out var reason);
+            return (service, reason);
+        };
         internal static Func<INetworkingService> CreateOfflineNetworkingService = () => new OfflineNetworkingService();
         internal static Func<bool> IsApplicationPlaying = () => Application.isPlaying;
         internal static Action<UnityEngine.Object> DestroyObject = UnityEngine.Object.Destroy;
         internal static Action<UnityEngine.Object> DestroyObjectImmediate = UnityEngine.Object.DestroyImmediate;
+        internal static Func<float> RealtimeSinceStartupProvider = () => Time.realtimeSinceStartup;
+        internal static Func<float, YieldInstruction> WaitForSecondsRealtimeFactory = seconds => new WaitForSecondsRealtime(seconds);
+
+        const string StartupRetryLogSource = "Net.StartupRetry";
+        const string StartupRetryTransitionLogKey = "Net.StartupRetry.Transition";
+        const float StartupRetryTransitionLogCooldownSeconds = 1.5f;
+        const float StartupRetryWindowSeconds = 10f;
+        const float StartupRetryInitialDelaySeconds = 0.5f;
+        const float StartupRetryMaxDelaySeconds = 3f;
+        const float StartupRetryBackoffMultiplier = 1.8f;
+
+        Coroutine? startupRetryCoroutine;
 
         private void OnDestroy()
         {
@@ -82,8 +100,13 @@ namespace NetworkingLibrary
             }
 
             Service = null;
-            TryInitializeNetworkingService(Logger, out var initializedService);
+            TryInitializeNetworkingService(Logger, out var initializedService, out var serviceSelectionReason);
             Service = initializedService;
+
+            if (serviceSelectionReason == DefaultServiceSelectionReason.SteamApiNotReady && Service is OfflineNetworkingService)
+            {
+                startupRetryCoroutine = StartCoroutine(RetrySteamInitializationForStartupWindow(StartupRetryWindowSeconds));
+            }
 
             var pollerName = $"{MyPluginInfo.PLUGIN_NAME}.Poller";
             var pollers = FindObjectsOfType<NetworkingPoller>(true)
@@ -176,11 +199,19 @@ namespace NetworkingLibrary
 
         internal static bool TryInitializeNetworkingService(ManualLogSource? logger, out INetworkingService? service)
         {
+            return TryInitializeNetworkingService(logger, out service, out _);
+        }
+
+        internal static bool TryInitializeNetworkingService(ManualLogSource? logger, out INetworkingService? service, out DefaultServiceSelectionReason defaultSelectionReason)
+        {
             service = null;
+            defaultSelectionReason = DefaultServiceSelectionReason.ProbeFailed;
 
             try
             {
-                service = CreateDefaultNetworkingService();
+                var defaultCreation = CreateDefaultNetworkingServiceWithReason();
+                defaultSelectionReason = defaultCreation.reason;
+                service = defaultCreation.service;
                 service.Initialize();
                 if (!service.IsInitialized)
                 {
@@ -231,13 +262,134 @@ namespace NetworkingLibrary
             }
         }
 
+        IEnumerator RetrySteamInitializationForStartupWindow(float retryWindowSeconds)
+        {
+            var delaySeconds = StartupRetryInitialDelaySeconds;
+            var deadline = RealtimeSinceStartupProvider() + Mathf.Max(0.1f, retryWindowSeconds);
+
+            while (RealtimeSinceStartupProvider() < deadline)
+            {
+                yield return WaitForSecondsRealtimeFactory(delaySeconds);
+
+                var previousService = Service;
+                if (previousService == null) yield break;
+
+                INetworkingService? candidateService = null;
+                DefaultServiceSelectionReason selectionReason;
+                try
+                {
+                    var defaultCreation = CreateDefaultNetworkingServiceWithReason();
+                    candidateService = defaultCreation.service;
+                    selectionReason = defaultCreation.reason;
+                }
+                catch (Exception ex)
+                {
+                    LogStartupRetryTransitionThrottled($"Aborting startup retries: default service creation threw {ex.GetType().Name}: {ex.Message}");
+                    yield break;
+                }
+
+                if (selectionReason == DefaultServiceSelectionReason.SteamReady)
+                {
+                    try
+                    {
+                        candidateService.Initialize();
+                        if (!candidateService.IsInitialized)
+                        {
+                            LogStartupRetryTransitionThrottled("Steam readiness probe passed but Steam service did not initialize yet; continuing startup retries.");
+                            SafeShutdown(candidateService, "startup retry steam candidate");
+                            delaySeconds = Mathf.Min(StartupRetryMaxDelaySeconds, delaySeconds * StartupRetryBackoffMultiplier);
+                            continue;
+                        }
+
+                        if (ReferenceEquals(Service, previousService))
+                        {
+                            if (previousService.InLobby)
+                            {
+                                LogStartupRetryTransitionThrottled("Skipping Steam promotion during startup retry because the active service is currently in a lobby.");
+                                SafeShutdown(candidateService, "startup retry steam candidate while active lobby");
+                                delaySeconds = Mathf.Min(StartupRetryMaxDelaySeconds, delaySeconds * StartupRetryBackoffMultiplier);
+                                continue;
+                            }
+
+                            ReplaceService(previousService, candidateService, "Steam became ready during startup retry window.");
+                        }
+                        else
+                        {
+                            SafeShutdown(candidateService, "startup retry stale steam candidate");
+                        }
+                        yield break;
+                    }
+                    catch (Exception ex)
+                    {
+                        SafeShutdown(candidateService, "startup retry steam candidate after initialize exception");
+                        LogStartupRetryTransitionThrottled($"Aborting startup retries: Steam service initialization threw {ex.GetType().Name}: {ex.Message}");
+                        yield break;
+                    }
+                }
+
+                SafeShutdown(candidateService, "startup retry discarded candidate");
+                if (selectionReason == DefaultServiceSelectionReason.SteamApiNotReady)
+                {
+                    delaySeconds = Mathf.Min(StartupRetryMaxDelaySeconds, delaySeconds * StartupRetryBackoffMultiplier);
+                    continue;
+                }
+
+                LogStartupRetryTransitionThrottled($"Aborting startup retries: default selection reason is {selectionReason}.");
+                yield break;
+            }
+
+            LogStartupRetryTransitionThrottled("Startup retry window elapsed before Steam became ready.");
+        }
+
+        static void ReplaceService(INetworkingService previousService, INetworkingService nextService, string reason)
+        {
+            if (ReferenceEquals(previousService, nextService)) return;
+            try
+            {
+                if (previousService is INetworkingServiceStateTransfer stateTransferSource)
+                    stateTransferSource.CopyRuntimeStateTo(nextService);
+            }
+            catch (Exception ex)
+            {
+                Logger?.LogWarning($"Failed to migrate networking runtime state before service replacement: {ex.Message}");
+            }
+            SafeShutdown(previousService, "startup retry previous service");
+            Service = nextService;
+            LogStartupRetryTransitionThrottled($"Service transition completed: {previousService.GetType().Name} -> {nextService.GetType().Name}. Reason: {reason}");
+        }
+
+        static void SafeShutdown(INetworkingService? service, string context)
+        {
+            if (service == null) return;
+            try
+            {
+                service.Shutdown();
+            }
+            catch (Exception ex)
+            {
+                Logger?.LogWarning($"Failed to shutdown networking service during {context}: {ex.Message}");
+            }
+        }
+
+        static void LogStartupRetryTransitionThrottled(string message)
+        {
+            NetLog.DebugThrottled(StartupRetryLogSource, StartupRetryTransitionLogKey, StartupRetryTransitionLogCooldownSeconds, message, () => RealtimeSinceStartupProvider(), includeOriginalMessageInFallback: true);
+        }
+
         internal static void ResetNetworkingStartupHooks()
         {
             CreateDefaultNetworkingService = NetworkingServiceFactory.CreateDefaultService;
+            CreateDefaultNetworkingServiceWithReason = () =>
+            {
+                var service = NetworkingServiceFactory.CreateDefaultServiceWithReason(out var reason);
+                return (service, reason);
+            };
             CreateOfflineNetworkingService = () => new OfflineNetworkingService();
             IsApplicationPlaying = () => Application.isPlaying;
             DestroyObject = UnityEngine.Object.Destroy;
             DestroyObjectImmediate = UnityEngine.Object.DestroyImmediate;
+            RealtimeSinceStartupProvider = () => Time.realtimeSinceStartup;
+            WaitForSecondsRealtimeFactory = seconds => new WaitForSecondsRealtime(seconds);
         }
     }
 }

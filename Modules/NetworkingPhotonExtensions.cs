@@ -158,12 +158,6 @@ namespace NetworkingLibrary.Modules
                 case long l when l > 0 && IsPlausibleSteam64((ulong)l):
                     steamId = (ulong)l;
                     return true;
-                case uint ui when IsPlausibleSteam64(ui):
-                    steamId = ui;
-                    return true;
-                case int i when i > 0 && IsPlausibleSteam64((ulong)i):
-                    steamId = (ulong)i;
-                    return true;
                 case string s when !string.IsNullOrWhiteSpace(s) && ulong.TryParse(s, out var parsed) && IsPlausibleSteam64(parsed):
                     steamId = parsed;
                     return true;
@@ -173,6 +167,11 @@ namespace NetworkingLibrary.Modules
         }
 
         static bool IsPlausibleSteam64(ulong value) => value >= 76561197960265728UL;
+
+        internal static bool TryParseSteamIdForTests(object raw, out ulong steamId)
+        {
+            return TryParseSteamId(raw, out steamId);
+        }
 
         static void LogWarning(string message)
         {

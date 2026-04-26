@@ -383,7 +383,12 @@ namespace NetworkingLibrary.Services
             lock (lastSeenSequence) lastSeenSequence.Clear();
             lock (rateLimiters) rateLimiters.Clear();
             lock (outgoingSequencePerMod) outgoingSequencePerMod.Clear();
-            lock (fragmentLock) fragmentBuffers.Clear();
+            lock (fragmentLock)
+            {
+                fragmentBuffers.Clear();
+                staleFragmentKeys.Clear();
+                nextFragmentCleanupAt = DateTime.MinValue;
+            }
             NetLog.Info(LogSource, "SteamNetworkingService shutdown");
         }
 
@@ -543,7 +548,12 @@ namespace NetworkingLibrary.Services
             ClearOutboundState();
             lock (lastSeenSequence) lastSeenSequence.Clear();
             lock (rateLimiters) rateLimiters.Clear();
-            lock (fragmentLock) fragmentBuffers.Clear();
+            lock (fragmentLock)
+            {
+                fragmentBuffers.Clear();
+                staleFragmentKeys.Clear();
+                nextFragmentCleanupAt = DateTime.MinValue;
+            }
             lock (cryptoStateLock)
             {
                 handshakeStates.Clear();

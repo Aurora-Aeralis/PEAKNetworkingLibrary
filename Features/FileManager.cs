@@ -116,8 +116,20 @@ namespace NetworkingLibrary.Features
             if (!File.Exists(configPath))
                 return string.Empty;
 
+            var inVersionSection = false;
             foreach (var line in File.ReadLines(configPath))
             {
+                var trimmed = line.Trim();
+                if (trimmed.StartsWith("[", StringComparison.Ordinal) && trimmed.EndsWith("]", StringComparison.Ordinal))
+                {
+                    var section = trimmed[1..^1].Trim();
+                    inVersionSection = section.Equals(VersionSection, StringComparison.Ordinal);
+                    continue;
+                }
+
+                if (!inVersionSection)
+                    continue;
+
                 if (line.StartsWith($"{LegacyVersionKey} = ", StringComparison.Ordinal))
                     return line[(LegacyVersionKey.Length + 3)..].Trim();
             }
@@ -170,8 +182,20 @@ namespace NetworkingLibrary.Features
 
             var lines = File.ReadAllLines(configPath);
             var changed = false;
+            var inVersionSection = false;
             for (var i = 0; i < lines.Length; i++)
             {
+                var trimmed = lines[i].Trim();
+                if (trimmed.StartsWith("[", StringComparison.Ordinal) && trimmed.EndsWith("]", StringComparison.Ordinal))
+                {
+                    var section = trimmed[1..^1].Trim();
+                    inVersionSection = section.Equals(VersionSection, StringComparison.Ordinal);
+                    continue;
+                }
+
+                if (!inVersionSection)
+                    continue;
+
                 if (!lines[i].StartsWith($"{LegacyVersionKey} = ", StringComparison.Ordinal))
                     continue;
 

@@ -32,7 +32,8 @@ namespace NetworkingLibrary.Modules
         public const int MinMaxSize = 1024;
         public const int MaxMaxSize = int.MaxValue / 16;
         private static readonly object DefaultSizePolicyLock = new();
-        public static int MaxSize = DefaultMaxSize;
+        private static int _maxSize = DefaultMaxSize;
+        public static int MaxSize => _maxSize;
         public static int MaxLogicalSize => checked(MaxSize * 16);
         public static MessageSizePolicy DefaultSizePolicy { get; private set; } = new(DefaultMaxSize);
 
@@ -41,7 +42,7 @@ namespace NetworkingLibrary.Modules
             ValidateMaxSize(bytes);
             lock (DefaultSizePolicyLock)
             {
-                MaxSize = bytes;
+                _maxSize = bytes;
                 DefaultSizePolicy = new MessageSizePolicy(bytes);
             }
         }
@@ -49,17 +50,17 @@ namespace NetworkingLibrary.Modules
         private static MessageSizePolicy ResolveDefaultSizePolicy()
         {
             var current = DefaultSizePolicy;
-            if (current.MaxSize == MaxSize)
+            if (current.MaxSize == _maxSize)
             {
                 return current;
             }
 
             lock (DefaultSizePolicyLock)
             {
-                if (DefaultSizePolicy.MaxSize != MaxSize)
+                if (DefaultSizePolicy.MaxSize != _maxSize)
                 {
-                    ValidateMaxSize(MaxSize);
-                    DefaultSizePolicy = new MessageSizePolicy(MaxSize);
+                    ValidateMaxSize(_maxSize);
+                    DefaultSizePolicy = new MessageSizePolicy(_maxSize);
                 }
 
                 return DefaultSizePolicy;

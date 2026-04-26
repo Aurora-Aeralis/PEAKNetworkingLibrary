@@ -50,6 +50,7 @@ namespace NetworkingLibrary.Modules
         internal static Func<int?>? MaxActionsPerFrameProvider;
         internal static Func<double?>? MaxFrameWorkMillisecondsProvider;
         internal static Func<int?>? BacklogWarningFrameThresholdProvider;
+        internal static Action<DelayedEnqueueObservation>? DelayedEnqueueRejectedObserver;
 
         public static UnityMainThreadDispatcher Instance()
         {
@@ -205,7 +206,9 @@ namespace NetworkingLibrary.Modules
         {
             if (a == null) throw new ArgumentNullException(nameof(a));
             yield return new WaitForSeconds(d);
-            TryEnqueueBounded(a, delayed: true, out _);
+            var accepted = TryEnqueueBounded(a, delayed: true, out var rejection);
+            if (accepted || rejection == null) yield break;
+            NotifyDelayedEnqueueRejected(rejection.Value);
         }
 
         sealed class DelayedEnqueueWork
@@ -303,6 +306,39 @@ namespace NetworkingLibrary.Modules
 
             internal static EnqueueRejectionInfo Create(bool delayed, QueueOverflowBehavior behavior, int queueDepth, int maxDepth, string reason)
                 => new(delayed ? "delayed" : "immediate", behavior, queueDepth, maxDepth, reason);
+        }
+
+        internal readonly struct DelayedEnqueueObservation
+        {
+            internal readonly QueueOverflowBehavior Behavior;
+            internal readonly int QueueDepth;
+            internal readonly int MaxDepth;
+            internal readonly string Reason;
+            internal readonly string Message;
+
+            internal DelayedEnqueueObservation(QueueOverflowBehavior behavior, int queueDepth, int maxDepth, string reason, string message)
+            {
+                Behavior = behavior;
+                QueueDepth = queueDepth;
+                MaxDepth = maxDepth;
+                Reason = reason;
+                Message = message;
+            }
+        }
+
+        static void NotifyDelayedEnqueueRejected(EnqueueRejectionInfo rejection)
+        {
+            var observer = DelayedEnqueueRejectedObserver;
+            if (observer == null) return;
+            var message = FormatEnqueueRejectionMessage(rejection);
+            try
+            {
+                observer(new DelayedEnqueueObservation(rejection.Behavior, rejection.QueueDepth, rejection.MaxDepth, rejection.Reason, message));
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[UnityMainThreadDispatcher] Delayed enqueue rejection observer failed. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
+            }
         }
 
         static bool HasEquivalentPendingAction(Action action)
@@ -493,6 +529,7 @@ namespace NetworkingLibrary.Modules
                     MaxActionsPerFrameProvider = null;
                     MaxFrameWorkMillisecondsProvider = null;
                     BacklogWarningFrameThresholdProvider = null;
+                    DelayedEnqueueRejectedObserver = null;
                 }
             }
 

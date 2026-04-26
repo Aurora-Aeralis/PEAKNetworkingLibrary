@@ -213,6 +213,8 @@ public class UnityMainThreadDispatcherTests : IDisposable
         var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
         UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 1;
         UnityMainThreadDispatcher.QueueOverflowBehaviorProvider = () => UnityMainThreadDispatcher.QueueOverflowBehavior.RejectNewWork;
+        UnityMainThreadDispatcher.DelayedEnqueueObservation? observation = null;
+        UnityMainThreadDispatcher.DelayedEnqueueRejectedObserver = o => observation = o;
 
         Assert.True(dispatcher.TryEnqueue(() => { }));
         Assert.False(dispatcher.TryEnqueue(() => { }, 1f));
@@ -225,6 +227,11 @@ public class UnityMainThreadDispatcherTests : IDisposable
 
         Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
         Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.RejectedEnqueueCountForTests);
+        Assert.True(observation.HasValue);
+        Assert.Equal(UnityMainThreadDispatcher.QueueOverflowBehavior.RejectNewWork, observation.Value.Behavior);
+        Assert.Equal(1, observation.Value.QueueDepth);
+        Assert.Equal(1, observation.Value.MaxDepth);
+        Assert.Contains("enqueue rejected delayed work", observation.Value.Message);
     }
 
     [Fact]
@@ -241,6 +248,31 @@ public class UnityMainThreadDispatcherTests : IDisposable
         Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
         Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.CoalescedEnqueueCountForTests);
         Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.RejectedEnqueueCountForTests);
+    }
+
+    [Fact]
+    public void EnqueueDelayed_WhenQueueLimitReached_CoalescesDuplicateAndEmitsObservation()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 1;
+        UnityMainThreadDispatcher.QueueOverflowBehaviorProvider = () => UnityMainThreadDispatcher.QueueOverflowBehavior.Coalesce;
+        UnityMainThreadDispatcher.DelayedEnqueueObservation? observation = null;
+        UnityMainThreadDispatcher.DelayedEnqueueRejectedObserver = o => observation = o;
+
+        Action action = () => { };
+        Assert.True(dispatcher.TryEnqueue(action));
+        var delayed = (System.Collections.IEnumerator)typeof(UnityMainThreadDispatcher)
+            .GetMethod("EnqueueDelayed", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(dispatcher, new object[] { action, 0f })!;
+
+        Assert.True(delayed.MoveNext());
+        Assert.False(delayed.MoveNext());
+
+        Assert.True(observation.HasValue);
+        Assert.Equal(UnityMainThreadDispatcher.QueueOverflowBehavior.Coalesce, observation.Value.Behavior);
+        Assert.Equal("coalesced duplicate action", observation.Value.Reason);
+        Assert.Contains("enqueue rejected delayed work", observation.Value.Message);
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.CoalescedEnqueueCountForTests);
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using UnityEngine;
 
@@ -60,13 +61,13 @@ namespace NetworkingLibrary.Modules
         {
             var timeout = BackgroundThreadInstanceWaitTimeout;
             if (timeout <= TimeSpan.Zero) timeout = defaultBackgroundThreadWaitTimeout;
-            var deadline = DateTime.UtcNow + timeout;
+            var stopwatch = Stopwatch.StartNew();
             var wait = TimeSpan.FromMilliseconds(10);
             var maxWait = TimeSpan.FromMilliseconds(200);
 
-            while (DateTime.UtcNow < deadline)
+            while (stopwatch.Elapsed < timeout)
             {
-                var remaining = deadline - DateTime.UtcNow;
+                var remaining = timeout - stopwatch.Elapsed;
                 if (remaining <= TimeSpan.Zero) break;
                 var currentWait = wait <= remaining ? wait : remaining;
                 if (instanceReady.Wait(currentWait)) return true;
@@ -272,14 +273,17 @@ namespace NetworkingLibrary.Modules
 
         static void EmitOverflowLoggerFailureWarning(Exception ex, string originalMessage, long nowTicks)
         {
-            var previousTicks = Interlocked.Read(ref lastOverflowLoggerFailureTicks);
-            if (previousTicks != 0 && new TimeSpan(nowTicks - previousTicks) < overflowWarningCooldown)
+            while (true)
             {
-                Interlocked.Increment(ref suppressedOverflowLoggerFailures);
-                return;
-            }
+                var previousTicks = Interlocked.Read(ref lastOverflowLoggerFailureTicks);
+                if (previousTicks != 0 && new TimeSpan(nowTicks - previousTicks) < overflowWarningCooldown)
+                {
+                    Interlocked.Increment(ref suppressedOverflowLoggerFailures);
+                    return;
+                }
 
-            Interlocked.Exchange(ref lastOverflowLoggerFailureTicks, nowTicks);
+                if (Interlocked.CompareExchange(ref lastOverflowLoggerFailureTicks, nowTicks, previousTicks) == previousTicks) break;
+            }
             var suppressed = Interlocked.Exchange(ref suppressedOverflowLoggerFailures, 0);
             var suppressedSuffix = suppressed > 0 ? $" Suppressed {suppressed} similar logger failures." : string.Empty;
             Debug.LogWarning($"[UnityMainThreadDispatcher] Failed to write overflow warning. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {originalMessage}.{suppressedSuffix}");

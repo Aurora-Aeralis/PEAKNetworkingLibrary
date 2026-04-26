@@ -194,8 +194,24 @@ namespace NetworkingLibrary.Services
 
         RSACryptoServiceProvider? LocalRsa;
         private Func<RSACryptoServiceProvider> localRsaFactory = () => new RSACryptoServiceProvider(2048);
+        private readonly MessageSizePolicy messageSizePolicy;
 
-        public SteamNetworkingService() { }
+        public SteamNetworkingService(MessageSizePolicy? messageSizePolicy = null)
+        {
+            this.messageSizePolicy = messageSizePolicy ?? CreateDefaultMessageSizePolicy();
+        }
+
+        static MessageSizePolicy CreateDefaultMessageSizePolicy()
+        {
+            try
+            {
+                return new MessageSizePolicy((int)Constants.k_cbMaxSteamNetworkingSocketsMessageSizeSend);
+            }
+            catch
+            {
+                return Message.DefaultSizePolicy;
+            }
+        }
 
         readonly Dictionary<(ulong sender, ulong msgId), FragmentBuffer> fragmentBuffers = new();
         readonly object fragmentLock = new();
@@ -262,12 +278,6 @@ namespace NetworkingLibrary.Services
                     LogError($"Failed to create SteamCallbackPump: {ex}");
                 }
             }
-
-            try
-            {
-                Message.SetMaxSize((int)Constants.k_cbMaxSteamNetworkingSocketsMessageSizeSend);
-            }
-            catch { }
 
             if (!TryInitializeSteamCallbacksAndCrypto())
             {
@@ -877,7 +887,7 @@ namespace NetworkingLibrary.Services
                 EnqueueOrSend(BuildFramedBytesWithMeta(msg, modId, reliable), p, reliable, DeterminePriority(methodName));
             }
 
-            InvokeLocalMessage(new Message(msg.ToArray()), SteamUser.GetSteamID());
+            InvokeLocalMessage(new Message(msg.ToArray(), messageSizePolicy), SteamUser.GetSteamID());
         }
 
         public void RPC(uint modId, string methodName, ReliableType reliable, Type[] parameterTypes, params object?[] parameters)
@@ -895,7 +905,7 @@ namespace NetworkingLibrary.Services
                 EnqueueOrSend(BuildFramedBytesWithMeta(msg, modId, reliable), p, reliable, DeterminePriority(methodName));
             }
 
-            InvokeLocalMessage(new Message(msg.ToArray()), SteamUser.GetSteamID());
+            InvokeLocalMessage(new Message(msg.ToArray(), messageSizePolicy), SteamUser.GetSteamID());
         }
 
         public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, params object[] parameters)
@@ -910,7 +920,7 @@ namespace NetworkingLibrary.Services
             if (msg == null) return;
             if (target == SteamUser.GetSteamID())
             {
-                InvokeLocalMessage(new Message(msg.ToArray()), SteamUser.GetSteamID());
+                InvokeLocalMessage(new Message(msg.ToArray(), messageSizePolicy), SteamUser.GetSteamID());
                 return;
             }
             var framed = BuildFramedBytesWithMeta(msg, modId, reliable);
@@ -929,7 +939,7 @@ namespace NetworkingLibrary.Services
             if (msg == null) return;
             if (target == SteamUser.GetSteamID())
             {
-                InvokeLocalMessage(new Message(msg.ToArray()), SteamUser.GetSteamID());
+                InvokeLocalMessage(new Message(msg.ToArray(), messageSizePolicy), SteamUser.GetSteamID());
                 return;
             }
             var framed = BuildFramedBytesWithMeta(msg, modId, reliable);
@@ -1127,9 +1137,9 @@ namespace NetworkingLibrary.Services
         }
         void SendBytes(byte[] data, CSteamID target, ReliableType reliable)
         {
-            if (data.Length > Message.MaxSize)
+            if (data.Length > messageSizePolicy.MaxSize)
             {
-                LogError($"Send length {data.Length} exceeds Message.MaxSize {Message.MaxSize}");
+                LogError($"Send length {data.Length} exceeds configured max {messageSizePolicy.MaxSize}");
                 return;
             }
 
@@ -1249,7 +1259,7 @@ namespace NetworkingLibrary.Services
                         continue;
                     }
 
-                    if (size > Message.MaxSize)
+                    if (size > messageSizePolicy.MaxSize)
                     {
                         SteamNetworkingMessage_t.Release(outPtr);
                         continue;
@@ -1471,7 +1481,7 @@ namespace NetworkingLibrary.Services
                 {
                     try
                     {
-                        payloadToProcess = Message.DecompressPayload(payloadToProcess, Message.MaxLogicalSize);
+                        payloadToProcess = Message.DecompressPayload(payloadToProcess, messageSizePolicy.MaxLogicalSize);
                     }
                     catch (Exception ex)
                     {
@@ -1480,7 +1490,7 @@ namespace NetworkingLibrary.Services
                     }
                 }
 
-                var message = new Message(payloadToProcess);
+                var message = new Message(payloadToProcess, messageSizePolicy);
 
                 if (message.ModID == 0)
                 {
@@ -1624,7 +1634,7 @@ namespace NetworkingLibrary.Services
 
         void SendAckToSender(CSteamID sender, ulong msgId)
         {
-            var ackMsg = new Message(0u, "NETWORK_INTERNAL_ACK", 0);
+            var ackMsg = new Message(0u, "NETWORK_INTERNAL_ACK", 0, messageSizePolicy);
             ackMsg.WriteULong(msgId);
             // Transport ACK frames reliably so a dropped ACK does not stall sender-side retransmit logic.
             // We explicitly clear ACK_FLAG so ACK packets never request ACKs themselves.
@@ -1876,7 +1886,7 @@ namespace NetworkingLibrary.Services
                 handshakeStates[target.m_SteamID] = new HandshakeState { PeerPub = null, LocalNonce = nonce, Completed = false };
             }
 
-            var m = new Message(0u, "NETWORK_INTERNAL_HANDSHAKE_PUBKEY", 0);
+            var m = new Message(0u, "NETWORK_INTERNAL_HANDSHAKE_PUBKEY", 0, messageSizePolicy);
             m.WriteString(pub);
             m.WriteString(nonce);
             var framed = BuildFramedBytesWithMeta(m, 0, ReliableType.Reliable);
@@ -1914,7 +1924,7 @@ namespace NetworkingLibrary.Services
             if (!string.IsNullOrEmpty(localNonceToSend))
             {
                 var myPub = SerializeRsaPublicKey(LocalRsa);
-                var m = new Message(0u, "NETWORK_INTERNAL_HANDSHAKE_PUBKEY", 0);
+                var m = new Message(0u, "NETWORK_INTERNAL_HANDSHAKE_PUBKEY", 0, messageSizePolicy);
                 m.WriteString(myPub);
                 m.WriteString(localNonceToSend);
                 var framed = BuildFramedBytesWithMeta(m, 0, ReliableType.Reliable);
@@ -1942,7 +1952,7 @@ namespace NetworkingLibrary.Services
                 return;
             }
 
-            var m2 = new Message(0u, "NETWORK_INTERNAL_HANDSHAKE_SECRET", 0);
+            var m2 = new Message(0u, "NETWORK_INTERNAL_HANDSHAKE_SECRET", 0, messageSizePolicy);
             m2.WriteBytes(enc);
             m2.WriteString(localNonceForSecret);
             var framed2 = BuildFramedBytesWithMeta(m2, 0, ReliableType.Reliable);
@@ -1974,7 +1984,7 @@ namespace NetworkingLibrary.Services
                 }
 
                 var confirm = HmacSha256Raw(sym, Encoding.UTF8.GetBytes(initiatorNonce));
-                var m = new Message(0u, "NETWORK_INTERNAL_HANDSHAKE_CONFIRM", 0);
+                var m = new Message(0u, "NETWORK_INTERNAL_HANDSHAKE_CONFIRM", 0, messageSizePolicy);
                 m.WriteString(initiatorNonce);
                 m.WriteBytes(confirm);
                 var framed = BuildFramedBytesWithMeta(m, 0, ReliableType.Reliable);
@@ -2149,7 +2159,7 @@ namespace NetworkingLibrary.Services
             unread = int.MaxValue;
             try
             {
-                var msgCopy = new Message(source.ToArray());
+                var msgCopy = new Message(source.ToArray(), messageSizePolicy);
                 var paramInfos = handler.Parameters;
                 int paramCount = handler.TakesInfo ? paramInfos.Length - 1 : paramInfos.Length;
                 callParams = new object[paramInfos.Length];
@@ -2174,7 +2184,7 @@ namespace NetworkingLibrary.Services
         {
             try
             {
-                var msg = new Message(modId, methodName, mask);
+                var msg = new Message(modId, methodName, mask, messageSizePolicy);
                 MessageHandler[] handlersSnapshot = Array.Empty<MessageHandler>();
                 lock (rpcLock)
                 {
@@ -2222,7 +2232,7 @@ namespace NetworkingLibrary.Services
                         return null;
                     }
 
-                    msg = new Message(modId, methodName, mask, BuildOverloadKey(chosen));
+                    msg = new Message(modId, methodName, mask, BuildOverloadKey(chosen), messageSizePolicy);
                     var expectedParams = chosen.Parameters;
                     int expectedCountFinal = chosen.TakesInfo ? expectedParams.Length - 1 : expectedParams.Length;
                     for (int i = 0; i < expectedCountFinal; i++)
@@ -2273,7 +2283,7 @@ namespace NetworkingLibrary.Services
                     }
                 }
 
-                if (msg.Length() > Message.MaxLogicalSize)
+                if (msg.Length() > messageSizePolicy.MaxLogicalSize)
                 {
                     LogError("Message exceeds maximum allowed overall size.");
                     return null;

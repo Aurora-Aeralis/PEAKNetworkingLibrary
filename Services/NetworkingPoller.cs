@@ -11,9 +11,11 @@ namespace NetworkingLibrary.Services
         float mainThreadDispatcherLastErrorLogTime = float.NegativeInfinity;
         bool mainThreadDispatcherHadFault;
         bool mainThreadDispatcherSuppressedFault;
+        int mainThreadDispatcherSuppressedExceptionCount;
         float pollReceiveLastErrorLogTime = float.NegativeInfinity;
         bool pollReceiveHadFault;
         bool pollReceiveSuppressedFault;
+        int pollReceiveSuppressedExceptionCount;
 
         void Update()
         {
@@ -22,17 +24,25 @@ namespace NetworkingLibrary.Services
                 "Main-thread dispatcher",
                 ref mainThreadDispatcherLastErrorLogTime,
                 ref mainThreadDispatcherHadFault,
-                ref mainThreadDispatcherSuppressedFault);
+                ref mainThreadDispatcherSuppressedFault,
+                ref mainThreadDispatcherSuppressedExceptionCount);
 
             PollGuarded(
                 () => Net.Service?.PollReceive(),
                 "PollReceive",
                 ref pollReceiveLastErrorLogTime,
                 ref pollReceiveHadFault,
-                ref pollReceiveSuppressedFault);
+                ref pollReceiveSuppressedFault,
+                ref pollReceiveSuppressedExceptionCount);
         }
 
-        static void PollGuarded(Action action, string name, ref float lastErrorLogTime, ref bool hadFault, ref bool suppressedFault)
+        static void PollGuarded(
+            Action action,
+            string name,
+            ref float lastErrorLogTime,
+            ref bool hadFault,
+            ref bool suppressedFault,
+            ref int suppressedExceptionCount)
         {
             var succeeded = true;
             try
@@ -50,19 +60,22 @@ namespace NetworkingLibrary.Services
                     lastErrorLogTime = currentTime;
                     Net.Logger?.LogError($"{name} error: {ex}");
                     suppressedFault = false;
+                    suppressedExceptionCount = 0;
                 }
                 else
                 {
                     suppressedFault = true;
+                    suppressedExceptionCount++;
                 }
             }
 
             if (!succeeded || !hadFault) return;
             Net.Logger?.LogInfo(suppressedFault
-                ? $"{name} recovered after repeated failures."
-                : $"{name} recovered.");
+                ? $"{name} recovered after repeated failures. Suppressed {suppressedExceptionCount} errors since last emitted error."
+                : $"{name} recovered. Suppressed {suppressedExceptionCount} errors since last emitted error.");
             hadFault = false;
             suppressedFault = false;
+            suppressedExceptionCount = 0;
         }
 
         void Awake()

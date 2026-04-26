@@ -1,10 +1,7 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Text;
 using BepInEx.Configuration;
 using BepInEx;
-using UnityEngine;
 
 namespace NetworkingLibrary.Features
 {
@@ -76,7 +73,7 @@ namespace NetworkingLibrary.Features
                 switch (schemaVersion)
                 {
                     case 0:
-                        Migrate_0_to_1(config, schemaVersionEntry, legacyVersionEntry);
+                        Migrate_0_to_1(schemaVersionEntry, legacyVersionEntry);
                         break;
                     default:
                         throw new InvalidOperationException($"No migration path exists from schema {schemaVersion} to {schemaVersion + 1}.");
@@ -90,9 +87,8 @@ namespace NetworkingLibrary.Features
             return !string.IsNullOrWhiteSpace(version) && int.TryParse(version, out schemaVersion);
         }
 
-        static void Migrate_0_to_1(ConfigFile config, ConfigEntry<string> schemaVersionEntry, ConfigEntry<string> legacyVersionEntry)
+        static void Migrate_0_to_1(ConfigEntry<string> schemaVersionEntry, ConfigEntry<string> legacyVersionEntry)
         {
-            _ = config;
             if (string.IsNullOrWhiteSpace(schemaVersionEntry.Value) && !string.IsNullOrWhiteSpace(legacyVersionEntry.Value))
                 schemaVersionEntry.Value = legacyVersionEntry.Value;
         }

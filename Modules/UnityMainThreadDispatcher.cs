@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Threading;
 using UnityEngine;
 
@@ -172,7 +171,7 @@ namespace NetworkingLibrary.Modules
 
             var millisecondsBudget = Volatile.Read(ref maxUpdateMilliseconds);
             var useTimeBudget = !double.IsPositiveInfinity(millisecondsBudget);
-            var stopwatch = useTimeBudget ? Stopwatch.StartNew() : null;
+            var stopwatch = useTimeBudget ? System.Diagnostics.Stopwatch.StartNew() : null;
             var processed = 0;
 
             while (true)

@@ -207,14 +207,19 @@ namespace NetworkingLibrary.Modules
             readPos = cursor.Position;
         }
 
-        public void Reset(bool zero = true)
+        public void Reset()
         {
             ThrowIfDisposed();
-            if (!zero) return;
             buffer.Clear();
             readableBuffer = Array.Empty<byte>();
             readableBufferDirty = true;
             readPos = 0;
+        }
+
+        [Obsolete("Reset always clears message state. The bool parameter is ignored and exists only for compatibility.", false)]
+        public void Reset(bool zero)
+        {
+            Reset();
         }
 
         private void EnsureCanAppend(int bytesToAppend, string opName)

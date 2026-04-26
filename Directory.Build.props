@@ -13,10 +13,12 @@
 
   <!-- NuGet -->
   <PropertyGroup>
-    <IsPackable>false</IsPackable>
     <Authors>DAaCollective</Authors>
     <PackageTags>PEAK;$(PackageTags)</PackageTags>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <PropertyGroup Condition="$([System.String]::Copy('$(MSBuildProjectName)').EndsWith('.Tests'))">
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <!-- Primary configuration for the project -->

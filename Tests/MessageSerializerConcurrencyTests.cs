@@ -6,11 +6,21 @@ using Xunit;
 
 namespace NetworkingLibrary.Tests;
 
-public class MessageSerializerConcurrencyTests
+public class MessageSerializerConcurrencyTests : IDisposable
 {
     private sealed class Payload
     {
         public int Value { get; set; }
+    }
+
+    public MessageSerializerConcurrencyTests()
+    {
+        Message.ResetSerializersForTests();
+    }
+
+    public void Dispose()
+    {
+        Message.ResetSerializersForTests();
     }
 
     [Fact]
@@ -111,5 +121,23 @@ public class MessageSerializerConcurrencyTests
         Assert.Equal(7, payload.Value);
 
         Message.UnregisterSerializer<Payload>();
+    }
+
+    [Fact]
+    public void ResetSerializersForTests_Removes_CustomSerializer_And_Restores_BuiltIns()
+    {
+        Message.RegisterSerializer<Payload>(
+            (m, payload) => m.WriteInt(payload.Value),
+            m => new Payload { Value = m.ReadInt() });
+
+        Message.ResetSerializersForTests();
+
+        var write = new Message(1u, "method", 0);
+        write.WriteObject(typeof(int), 99);
+        var read = new Message(write.ToArray());
+        Assert.Equal(99, read.ReadObject(typeof(int)));
+
+        var ex = Assert.Throws<NotSupportedException>(() => write.WriteObject(typeof(Payload), new Payload { Value = 1 }));
+        Assert.Contains("RegisterSerializer", ex.Message);
     }
 }

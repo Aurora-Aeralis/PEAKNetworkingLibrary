@@ -42,6 +42,7 @@ namespace NetworkingLibrary
             {
                 Service = null;
                 ResetNetworkingStartupHooks();
+                Message.ResetSerializersForTests();
             }
 
             try

@@ -3,7 +3,6 @@ using System.Buffers.Binary;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Reflection;
@@ -492,7 +491,7 @@ namespace NetworkingLibrary.Modules
                 Debug.unityLogger.LogWarning(nameof(Message), message);
                 return;
             }
-            Trace.TraceWarning(message);
+            System.Diagnostics.Trace.TraceWarning(message);
         }
 
         public byte ReadByte()

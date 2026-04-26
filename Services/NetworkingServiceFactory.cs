@@ -111,6 +111,7 @@ namespace NetworkingLibrary.Services
         {
             const BindingFlags AnyStaticVisibility = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
             Type? fallbackCandidate = null;
+            var sawAmbiguousFallbackCandidates = false;
             var assemblies = AppDomain.CurrentDomain.GetAssemblies();
             for (var index = 0; index < assemblies.Length; index++)
             {
@@ -152,10 +153,11 @@ namespace NetworkingLibrary.Services
                     if (IsPreferredSteamManagerType(candidate))
                         return candidate;
                     if (fallbackCandidate == null) fallbackCandidate = candidate;
-                    else if (!ReferenceEquals(fallbackCandidate, candidate)) return null;
+                    else if (!ReferenceEquals(fallbackCandidate, candidate)) sawAmbiguousFallbackCandidates = true;
                 }
             }
 
+            if (sawAmbiguousFallbackCandidates) return null;
             return fallbackCandidate;
         }
 

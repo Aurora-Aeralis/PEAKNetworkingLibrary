@@ -1399,86 +1399,70 @@ namespace NetworkingLibrary.Services
 
                 if (hasSign)
                 {
-                    if (payloadToProcess.Length < 5)
+                    if (payloadToProcess.Length < 3)
                     {
                         return;
                     }
 
-                    if (payloadToProcess.Length < 1 + 4)
-                    {
-                        return;
-                    }
-
-                    uint modId;
-                    if (compressed)
-                    {
-                        byte[] probePayload;
-                        try
-                        {
-                            probePayload = Message.DecompressPayload(payloadToProcess, Message.MaxLogicalSize);
-                        }
-                        catch
-                        {
-                            return;
-                        }
-
-                        if (probePayload.Length < 5)
-                        {
-                            return;
-                        }
-
-                        modId = BinaryPrimitives.ReadUInt32LittleEndian(probePayload.AsSpan(1, 4));
-                    }
-                    else
-                    {
-                        modId = BinaryPrimitives.ReadUInt32LittleEndian(payloadToProcess.AsSpan(1, 4));
-                    }
-                    RSAParameters rsaParams;
+                    RSAParameters[] publicKeys;
                     lock (cryptoStateLock)
                     {
-                        if (!modPublicKeys.TryGetValue(modId, out rsaParams))
+                        if (modPublicKeys.Count == 0)
                         {
                             return;
                         }
+
+                        publicKeys = modPublicKeys.Values.ToArray();
                     }
 
-                    int expectedSigLen = rsaParams.Modulus?.Length ?? 0;
-                    if (expectedSigLen <= 0 || payloadToProcess.Length < expectedSigLen + 2)
+                    bool verified = false;
+                    for (int i = 0; i < publicKeys.Length; i++)
                     {
-                        return;
-                    }
-
-                    int sigSectionStart = payloadToProcess.Length - expectedSigLen - 2;
-                    if (sigSectionStart < 0)
-                    {
-                        return;
-                    }
-
-                    ushort declaredLen = BinaryPrimitives.ReadUInt16LittleEndian(payloadToProcess.AsSpan(sigSectionStart, 2));
-                    if (declaredLen != expectedSigLen)
-                    {
-                        return;
-                    }
-
-                    var signature = new byte[expectedSigLen];
-                    Array.Copy(payloadToProcess, sigSectionStart + 2, signature, 0, expectedSigLen);
-                    var dataOnly = new byte[sigSectionStart];
-                    Array.Copy(payloadToProcess, 0, dataOnly, 0, sigSectionStart);
-
-                    try
-                    {
-                        using var rsa = new RSACryptoServiceProvider();
-                        rsa.ImportParameters(rsaParams);
-                        var ok = rsa.VerifyData(dataOnly, CryptoConfig.MapNameToOID("SHA256"), signature);
-                        if (!ok)
+                        var rsaParams = publicKeys[i];
+                        int expectedSigLen = rsaParams.Modulus?.Length ?? 0;
+                        if (expectedSigLen <= 0 || payloadToProcess.Length < expectedSigLen + 2)
                         {
-                            return;
+                            continue;
                         }
-                        payloadToProcess = dataOnly;
+
+                        int sigSectionStart = payloadToProcess.Length - expectedSigLen - 2;
+                        if (sigSectionStart < 0)
+                        {
+                            continue;
+                        }
+
+                        ushort declaredLen = BinaryPrimitives.ReadUInt16LittleEndian(payloadToProcess.AsSpan(sigSectionStart, 2));
+                        if (declaredLen != expectedSigLen)
+                        {
+                            continue;
+                        }
+
+                        var signature = new byte[expectedSigLen];
+                        Array.Copy(payloadToProcess, sigSectionStart + 2, signature, 0, expectedSigLen);
+                        var dataOnly = new byte[sigSectionStart];
+                        Array.Copy(payloadToProcess, 0, dataOnly, 0, sigSectionStart);
+
+                        try
+                        {
+                            using var rsa = new RSACryptoServiceProvider();
+                            rsa.ImportParameters(rsaParams);
+                            if (!rsa.VerifyData(dataOnly, CryptoConfig.MapNameToOID("SHA256"), signature))
+                            {
+                                continue;
+                            }
+
+                            payloadToProcess = dataOnly;
+                            verified = true;
+                            break;
+                        }
+                        catch (Exception ex)
+                        {
+                            LogError($"ProcessIncomingFrame: Signature verification error: {ex}");
+                        }
                     }
-                    catch (Exception ex)
+
+                    if (!verified)
                     {
-                        LogError($"ProcessIncomingFrame: Signature verification error: {ex}");
                         return;
                     }
                 }

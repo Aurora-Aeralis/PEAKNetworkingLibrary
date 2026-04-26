@@ -172,18 +172,23 @@ namespace NetworkingLibrary.Modules
             }
         }
 
-        public void Enqueue(Action a, float delaySeconds = 0f)
+        public bool TryEnqueue(Action a, float delaySeconds = 0f)
         {
             if (a == null) throw new ArgumentNullException(nameof(a));
-            if (delaySeconds <= 0f)
-            {
-                TryEnqueueBounded(a, delayed: false);
-            }
-            else
-            {
-                if (IsMainThread()) StartCoroutine(EnqueueDelayed(a, delaySeconds));
-                else TryEnqueueBounded(() => StartCoroutine(EnqueueDelayed(a, delaySeconds)), delayed: true);
-            }
+            if (delaySeconds <= 0f) return TryEnqueueBounded(a, delayed: false);
+
+            return TryEnqueueBounded(CreateDelayedEnqueueAction(a, delaySeconds), delayed: true);
+        }
+
+        public void Enqueue(Action a, float delaySeconds = 0f)
+        {
+            TryEnqueue(a, delaySeconds);
+        }
+
+        Action CreateDelayedEnqueueAction(Action action, float delaySeconds)
+        {
+            var delayedWork = new DelayedEnqueueWork(this, action, delaySeconds);
+            return delayedWork.Invoke;
         }
 
         IEnumerator EnqueueDelayed(Action a, float d)
@@ -191,6 +196,33 @@ namespace NetworkingLibrary.Modules
             if (a == null) throw new ArgumentNullException(nameof(a));
             yield return new WaitForSeconds(d);
             TryEnqueueBounded(a, delayed: true);
+        }
+
+        sealed class DelayedEnqueueWork
+        {
+            readonly UnityMainThreadDispatcher dispatcher;
+            readonly Action action;
+            readonly float delaySeconds;
+
+            internal DelayedEnqueueWork(UnityMainThreadDispatcher dispatcher, Action action, float delaySeconds)
+            {
+                this.dispatcher = dispatcher;
+                this.action = action;
+                this.delaySeconds = delaySeconds;
+            }
+
+            internal void Invoke() => dispatcher.StartCoroutine(dispatcher.EnqueueDelayed(action, delaySeconds));
+
+            public override bool Equals(object? obj)
+            {
+                if (obj is not DelayedEnqueueWork other) return false;
+                return ReferenceEquals(dispatcher, other.dispatcher)
+                    && action.Method == other.action.Method
+                    && Equals(action.Target, other.action.Target)
+                    && delaySeconds.Equals(other.delaySeconds);
+            }
+
+            public override int GetHashCode() => HashCode.Combine(dispatcher, action.Method, action.Target, delaySeconds);
         }
 
         static bool TryEnqueueBounded(Action action, bool delayed)

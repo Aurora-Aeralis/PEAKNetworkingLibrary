@@ -132,8 +132,10 @@ public class UnityMainThreadDispatcherTests : IDisposable
         UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 3;
         UnityMainThreadDispatcher.QueueOverflowBehaviorProvider = () => UnityMainThreadDispatcher.QueueOverflowBehavior.RejectNewWork;
 
-        for (var i = 0; i < 6; i++) dispatcher.Enqueue(() => { });
+        var accepted = new List<bool>();
+        for (var i = 0; i < 6; i++) accepted.Add(dispatcher.TryEnqueue(() => { }));
 
+        Assert.Equal(new[] { true, true, true, false, false, false }, accepted);
         Assert.Equal(3, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
         Assert.Equal(3, UnityMainThreadDispatcher.TestHooks.QueueHighWaterMarkForTests);
         Assert.Equal(3, UnityMainThreadDispatcher.TestHooks.RejectedEnqueueCountForTests);
@@ -148,9 +150,9 @@ public class UnityMainThreadDispatcherTests : IDisposable
         UnityMainThreadDispatcher.QueueOverflowBehaviorProvider = () => UnityMainThreadDispatcher.QueueOverflowBehavior.DropOldest;
 
         var executed = new List<int>();
-        dispatcher.Enqueue(() => executed.Add(1));
-        dispatcher.Enqueue(() => executed.Add(2));
-        dispatcher.Enqueue(() => executed.Add(3));
+        Assert.True(dispatcher.TryEnqueue(() => executed.Add(1)));
+        Assert.True(dispatcher.TryEnqueue(() => executed.Add(2)));
+        Assert.True(dispatcher.TryEnqueue(() => executed.Add(3)));
 
         typeof(UnityMainThreadDispatcher)
             .GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic)!
@@ -168,7 +170,8 @@ public class UnityMainThreadDispatcherTests : IDisposable
         UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 1;
         UnityMainThreadDispatcher.QueueOverflowBehaviorProvider = () => UnityMainThreadDispatcher.QueueOverflowBehavior.RejectNewWork;
 
-        dispatcher.Enqueue(() => { });
+        Assert.True(dispatcher.TryEnqueue(() => { }));
+        Assert.False(dispatcher.TryEnqueue(() => { }, 1f));
         var delayed = (System.Collections.IEnumerator)typeof(UnityMainThreadDispatcher)
             .GetMethod("EnqueueDelayed", BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(dispatcher, new object[] { (Action)(() => { }), 0f })!;
@@ -178,6 +181,22 @@ public class UnityMainThreadDispatcherTests : IDisposable
 
         Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
         Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.RejectedEnqueueCountForTests);
+    }
+
+    [Fact]
+    public void TryEnqueueDelayed_WhenQueueLimitReached_CoalescesDuplicates()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 1;
+        UnityMainThreadDispatcher.QueueOverflowBehaviorProvider = () => UnityMainThreadDispatcher.QueueOverflowBehavior.Coalesce;
+
+        Action action = () => { };
+        Assert.True(dispatcher.TryEnqueue(action, 1f));
+        Assert.False(dispatcher.TryEnqueue(action, 1f));
+
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.CoalescedEnqueueCountForTests);
+        Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.RejectedEnqueueCountForTests);
     }
 
     [Fact]

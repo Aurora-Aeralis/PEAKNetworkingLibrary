@@ -428,6 +428,45 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void CleanupFailedPumpSetup_UsesEquivalentCleanupBehavior_ForBothInitializeFailurePaths()
+    {
+        static (bool pumpingEnabledAfterCleanup, bool gameObjectDestroyed, bool componentDestroyed) RunCleanup(string contextKey)
+        {
+            var service = new SteamNetworkingService();
+            var gameObject = new UnityEngine.GameObject($"SteamCallbackPump-{contextKey}");
+            var component = gameObject.AddComponent<SteamCallbackPump>();
+            SteamCallbackPump.EnablePumping();
+
+            try
+            {
+                InvokeNonPublic(
+                    service,
+                    "CleanupFailedPumpSetup",
+                    true,
+                    false,
+                    gameObject,
+                    component,
+                    contextKey);
+
+                return (
+                    SteamCallbackPump.CallbackPumpingEnabled,
+                    !gameObject,
+                    !component);
+            }
+            finally
+            {
+                SteamCallbackPump.DisablePumping();
+            }
+        }
+
+        var pumpSetupFailure = RunCleanup("Initialize.DisablePumpingAfterPumpSetupFailure");
+        var callbackFailure = RunCleanup("Initialize.DisablePumpingAfterCallbackFailure");
+
+        Assert.Equal(pumpSetupFailure, callbackFailure);
+        Assert.Equal((false, true, true), pumpSetupFailure);
+    }
+
+    [Fact]
     public void GetLobbyMemberSteamIds_SkipsNilMembers_AndReturnsCompactArray()
     {
         var service = new SteamNetworkingService();

@@ -266,68 +266,54 @@ namespace NetworkingLibrary.Services
 
             if (!pumpSetupSucceeded)
             {
-                if (enabledPumpingInThisInitialize && !pumpingWasEnabledBeforeInitialize)
-                {
-                    try { SteamCallbackPump.DisablePumping(); }
-                    catch (Exception ex)
-                    {
-                        NetLog.DebugThrottled(LogSource, "Initialize.DisablePumpingAfterPumpSetupFailure", DebugLogCooldownSeconds, $"Initialize failed pump setup cleanup at SteamCallbackPump.DisablePumping: {ex.GetType().Name}: {ex.Message}");
-                    }
-                }
-                try
-                {
-                    if (createdPumpGameObject != null)
-                    {
-                        if (Application.isPlaying) UnityEngine.Object.Destroy(createdPumpGameObject);
-                        else UnityEngine.Object.DestroyImmediate(createdPumpGameObject);
-                    }
-                    else if (createdPumpComponent != null)
-                    {
-                        if (Application.isPlaying) UnityEngine.Object.Destroy(createdPumpComponent);
-                        else UnityEngine.Object.DestroyImmediate(createdPumpComponent);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    NetLog.Error(LogSource, $"Failed to cleanup created SteamCallbackPump after initialization failure: {ex}");
-                }
+                CleanupFailedPumpSetup(enabledPumpingInThisInitialize, pumpingWasEnabledBeforeInitialize, createdPumpGameObject, createdPumpComponent, "Initialize.DisablePumpingAfterPumpSetupFailure");
                 IsInitialized = false;
                 return;
             }
 
             if (!TryInitializeSteamCallbacksAndCrypto())
             {
-                if (enabledPumpingInThisInitialize && !pumpingWasEnabledBeforeInitialize)
-                {
-                    try { SteamCallbackPump.DisablePumping(); }
-                    catch (Exception ex)
-                    {
-                        NetLog.DebugThrottled(LogSource, "Initialize.DisablePumpingAfterCallbackFailure", DebugLogCooldownSeconds, $"Initialize failed callback/crypto cleanup at SteamCallbackPump.DisablePumping: {ex.GetType().Name}: {ex.Message}");
-                    }
-                }
-                try
-                {
-                    if (createdPumpGameObject != null)
-                    {
-                        if (Application.isPlaying) UnityEngine.Object.Destroy(createdPumpGameObject);
-                        else UnityEngine.Object.DestroyImmediate(createdPumpGameObject);
-                    }
-                    else if (createdPumpComponent != null)
-                    {
-                        if (Application.isPlaying) UnityEngine.Object.Destroy(createdPumpComponent);
-                        else UnityEngine.Object.DestroyImmediate(createdPumpComponent);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    NetLog.Error(LogSource, $"Failed to cleanup created SteamCallbackPump after initialization failure: {ex}");
-                }
+                CleanupFailedPumpSetup(enabledPumpingInThisInitialize, pumpingWasEnabledBeforeInitialize, createdPumpGameObject, createdPumpComponent, "Initialize.DisablePumpingAfterCallbackFailure");
                 IsInitialized = false;
                 return;
             }
 
             IsInitialized = true;
             NetLog.Info(LogSource, "SteamNetworkingService initialized");
+        }
+
+        private void CleanupFailedPumpSetup(bool enabledPumpingInThisInitialize, bool pumpingWasEnabledBeforeInitialize, GameObject? createdPumpGameObject, SteamCallbackPump? createdPumpComponent, string disablePumpingContextKey)
+        {
+            if (enabledPumpingInThisInitialize && !pumpingWasEnabledBeforeInitialize)
+            {
+                try { SteamCallbackPump.DisablePumping(); }
+                catch (Exception ex)
+                {
+                    var disablePumpingMessage = disablePumpingContextKey == "Initialize.DisablePumpingAfterPumpSetupFailure"
+                        ? "Initialize failed pump setup cleanup at SteamCallbackPump.DisablePumping"
+                        : disablePumpingContextKey == "Initialize.DisablePumpingAfterCallbackFailure"
+                            ? "Initialize failed callback/crypto cleanup at SteamCallbackPump.DisablePumping"
+                            : "Initialize failed cleanup at SteamCallbackPump.DisablePumping";
+                    NetLog.DebugThrottled(LogSource, disablePumpingContextKey, DebugLogCooldownSeconds, $"{disablePumpingMessage}: {ex.GetType().Name}: {ex.Message}");
+                }
+            }
+            try
+            {
+                if (createdPumpGameObject != null)
+                {
+                    if (Application.isPlaying) UnityEngine.Object.Destroy(createdPumpGameObject);
+                    else UnityEngine.Object.DestroyImmediate(createdPumpGameObject);
+                }
+                else if (createdPumpComponent != null)
+                {
+                    if (Application.isPlaying) UnityEngine.Object.Destroy(createdPumpComponent);
+                    else UnityEngine.Object.DestroyImmediate(createdPumpComponent);
+                }
+            }
+            catch (Exception ex)
+            {
+                NetLog.Error(LogSource, $"Failed to cleanup created SteamCallbackPump after initialization failure: {ex}");
+            }
         }
 
         private bool TryInitializeSteamCallbacksAndCrypto()

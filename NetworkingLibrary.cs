@@ -101,14 +101,21 @@ namespace NetworkingLibrary
         {
             foreach (var extraPoller in duplicatePollers)
             {
-                var components = extraPoller.gameObject
+                if (extraPoller == null)
+                    continue;
+
+                var duplicatePollerObject = extraPoller.gameObject;
+                if (duplicatePollerObject == null)
+                    continue;
+
+                var components = duplicatePollerObject
                     .GetComponents<Component>()
                     .Where(component => component != null)
                     .ToArray();
                 var hasOnlyTransformAndPoller = components.Length == 2
                     && components.Any(component => component is Transform)
                     && components.Any(component => component is NetworkingPoller);
-                destroyAction(hasOnlyTransformAndPoller ? extraPoller.gameObject : extraPoller);
+                destroyAction(hasOnlyTransformAndPoller ? duplicatePollerObject : extraPoller);
             }
         }
 

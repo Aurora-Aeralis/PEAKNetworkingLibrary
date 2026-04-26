@@ -110,14 +110,50 @@ namespace NetworkingLibrary.Features
 
         static string ReadLegacyVersion(ConfigFile config)
         {
-            var configPath = config.ConfigFilePath;
+            var legacyDefinition = new ConfigDefinition(VersionSection, LegacyVersionKey);
+            var tryGetEntryMethod = config.GetType().GetMethod("TryGetEntry", new[] { typeof(ConfigDefinition), typeof(ConfigEntryBase).MakeByRefType() });
+            if (tryGetEntryMethod != null)
+            {
+                var args = new object[] { legacyDefinition, null! };
+                if (tryGetEntryMethod.Invoke(config, args) is true && args[1] is ConfigEntryBase entry)
+                    return entry.BoxedValue?.ToString() ?? string.Empty;
+            }
+
+            return ReadLegacyVersionFromFile(config.ConfigFilePath);
+        }
+
+        static string ReadLegacyVersionFromFile(string configPath)
+        {
             if (!File.Exists(configPath))
                 return string.Empty;
 
-            foreach (var line in File.ReadLines(configPath))
+            var inVersionSection = false;
+            foreach (var rawLine in File.ReadLines(configPath))
             {
-                if (line.StartsWith($"{LegacyVersionKey} = ", StringComparison.Ordinal))
-                    return line[(LegacyVersionKey.Length + 3)..].Trim();
+                var line = rawLine.Trim();
+                if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#", StringComparison.Ordinal) || line.StartsWith(";", StringComparison.Ordinal))
+                    continue;
+
+                if (line.StartsWith("[", StringComparison.Ordinal) && line.EndsWith("]", StringComparison.Ordinal))
+                {
+                    var sectionName = line[1..^1].Trim();
+                    inVersionSection = sectionName.Equals(VersionSection, StringComparison.Ordinal);
+                    continue;
+                }
+
+                if (!inVersionSection)
+                    continue;
+
+                var separatorIndex = line.IndexOf('=');
+                if (separatorIndex < 0)
+                    continue;
+
+                var key = line[..separatorIndex].Trim();
+                if (!key.Equals(LegacyVersionKey, StringComparison.Ordinal))
+                    continue;
+
+                var value = line[(separatorIndex + 1)..].Trim();
+                return value;
             }
 
             return string.Empty;

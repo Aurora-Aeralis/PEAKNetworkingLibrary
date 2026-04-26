@@ -93,6 +93,57 @@ public class FileManagerConfigMigrationTests
         Assert.DoesNotContain("Current Version =", configText, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void MigrateConfigIfNeeded_LegacyKeyOutsideVersionSection_Ignored()
+    {
+        using var scope = new TempConfigScope();
+        File.WriteAllText(scope.ConfigPath, """
+[Gameplay]
+Current Version = 9
+""");
+
+        var config = new ConfigFile(scope.ConfigPath, true);
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        Assert.Equal("1", schemaVersion);
+    }
+
+    [Fact]
+    public void MigrateConfigIfNeeded_LegacyKeyWithWhitespace_ReadsValue()
+    {
+        using var scope = new TempConfigScope();
+        File.WriteAllText(scope.ConfigPath, """
+[Version]
+Current Version     =      1
+""");
+
+        var config = new ConfigFile(scope.ConfigPath, true);
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        var configText = File.ReadAllText(scope.ConfigPath);
+
+        Assert.Equal("1", schemaVersion);
+        Assert.DoesNotContain("Current Version = 1", configText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MigrateConfigIfNeeded_MissingLegacyKey_TreatedAsEmpty()
+    {
+        using var scope = new TempConfigScope();
+        File.WriteAllText(scope.ConfigPath, """
+[Version]
+PluginVersion = 1.2.3
+""");
+
+        var config = new ConfigFile(scope.ConfigPath, true);
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        Assert.Equal("1", schemaVersion);
+    }
+
     sealed class TempConfigScope : IDisposable
     {
         readonly string _root = Path.Combine(Path.GetTempPath(), $"NetworkingLibrary_ConfigMigration_{Guid.NewGuid():N}");

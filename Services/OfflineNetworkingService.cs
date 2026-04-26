@@ -36,6 +36,9 @@ namespace NetworkingLibrary.Services
         private readonly MessageSizePolicy messageSizePolicy;
 
         readonly Dictionary<ulong, byte[]> perPeerSymmetricKey = new();
+        readonly object handlerProbeLogLock = new();
+        readonly Dictionary<string, DateTime> handlerProbeNextLogAtUtc = new();
+        static readonly TimeSpan HandlerProbeLogCooldown = TimeSpan.FromSeconds(2);
         byte[]? globalSharedSecret;
         HMACSHA256? globalHmac;
         readonly Dictionary<uint, Func<byte[], byte[]>> modSigners = new();
@@ -49,6 +52,11 @@ namespace NetworkingLibrary.Services
         static void LogWarning(string message)
         {
             try { Net.Logger?.LogWarning(message); } catch { }
+        }
+
+        static void LogDebug(string message)
+        {
+            try { Net.Logger?.LogDebug(message); } catch { }
         }
 
         public ulong GetLocalSteam64()
@@ -796,14 +804,38 @@ namespace NetworkingLibrary.Services
                 unread = source.UnreadLength();
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
+                LogHandlerProbeFailure(source, handler, ex);
                 return false;
             }
             finally
             {
                 source.RestoreReadCursor(originalCursor);
             }
+        }
+
+        void LogHandlerProbeFailure(Message message, MessageHandler handler, Exception ex)
+        {
+            var key = $"{message.ModID}:{message.MethodName}:{handler.Method.Name}";
+            var now = DateTime.UtcNow;
+            var shouldLog = false;
+            lock (handlerProbeLogLock)
+            {
+                if (!handlerProbeNextLogAtUtc.TryGetValue(key, out var nextLogAt) || now >= nextLogAt)
+                {
+                    handlerProbeNextLogAtUtc[key] = now + HandlerProbeLogCooldown;
+                    shouldLog = true;
+                }
+            }
+
+            if (!shouldLog) return;
+
+            var expectedTypes = string.Join(", ", handler.Parameters.Select(param => param.ParameterType.FullName ?? param.ParameterType.Name));
+            var unread = -1;
+            try { unread = message.UnreadLength(); } catch { }
+
+            LogDebug($"RPC handler probe failed for {message.ModID}:{message.MethodName} -> {handler.Method.Name}. mask={message.Mask}, protocol={message.ProtocolVersion}, expected=[{expectedTypes}], unread={unread}, exception={ex.GetType().Name}: {ex.Message}");
         }
 
         object CreateRpcInfoInstance(Type infoType, ulong from)

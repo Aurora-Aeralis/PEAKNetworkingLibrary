@@ -1,6 +1,8 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Reflection;
+using BepInEx.Logging;
 using NetworkingLibrary.Modules;
 using NetworkingLibrary.Services;
 using Steamworks;
@@ -13,8 +15,38 @@ public class RpcNullParameterSerializationTests
     const uint TestModId = 9090;
     static readonly MethodInfo OfflineBuildMessage = typeof(OfflineNetworkingService).GetMethod("BuildMessage", BindingFlags.Instance | BindingFlags.NonPublic)!;
     static readonly MethodInfo SteamBuildMessage = typeof(SteamNetworkingService).GetMethod("BuildMessage", BindingFlags.Instance | BindingFlags.NonPublic)!;
+    static readonly MethodInfo OfflineDispatchIncoming = typeof(OfflineNetworkingService).GetMethod("DispatchIncoming", BindingFlags.Instance | BindingFlags.NonPublic)!;
     static readonly MethodInfo SteamDispatchIncoming = typeof(SteamNetworkingService).GetMethod("DispatchIncoming", BindingFlags.Instance | BindingFlags.NonPublic)!;
     static readonly MethodInfo SteamCreateRpcInfoInstance = typeof(SteamNetworkingService).GetMethod("CreateRpcInfoInstance", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+    sealed class ScopeAction : IDisposable
+    {
+        Action? onDispose;
+        public ScopeAction(Action onDispose) { this.onDispose = onDispose; }
+        public void Dispose()
+        {
+            var action = onDispose;
+            if (action == null) return;
+            onDispose = null;
+            action();
+        }
+    }
+
+    static IDisposable WithCapturedNetLogs(List<(LogLevel Level, string Message)> logs)
+    {
+        var loggerField = typeof(Net).GetField("<Logger>k__BackingField", BindingFlags.Static | BindingFlags.NonPublic);
+        if (loggerField == null) return new ScopeAction(() => { });
+
+        var original = loggerField.GetValue(null);
+        var logger = new ManualLogSource("RpcNullParameterSerializationTests");
+        logger.LogEvent += (_, args) => logs.Add((args.Level, args.Data?.ToString() ?? string.Empty));
+        loggerField.SetValue(null, logger);
+        return new ScopeAction(() =>
+        {
+            loggerField.SetValue(null, original);
+            logger.Dispose();
+        });
+    }
 
     sealed class NullReceiver
     {
@@ -52,6 +84,27 @@ public class RpcNullParameterSerializationTests
         {
             LastOverload = "string";
             LastStringValue = value;
+        }
+    }
+
+    sealed class ByteIntDispatchReceiver
+    {
+        public string? LastOverload;
+        public byte[]? LastBytes;
+        public int? LastIntValue;
+
+        [CustomRPC]
+        void Shared(byte[] value)
+        {
+            LastOverload = "bytes";
+            LastBytes = value;
+        }
+
+        [CustomRPC]
+        void Shared(int value)
+        {
+            LastOverload = "int";
+            LastIntValue = value;
         }
     }
 
@@ -248,6 +301,35 @@ public class RpcNullParameterSerializationTests
         Assert.Equal("string", receiver.LastOverload);
         Assert.Equal("hi", receiver.LastStringValue);
         Assert.Null(receiver.LastIntValue);
+    }
+
+    [Fact]
+    public void OfflineDispatchIncoming_MalformedProbe_LogsDiagnostics_AndFallsBackToMatchingOverload()
+    {
+        var service = new OfflineNetworkingService();
+        var receiver = new ByteIntDispatchReceiver();
+        using var token = service.RegisterNetworkObject(receiver, TestModId);
+        var logs = new List<(LogLevel Level, string Message)>();
+        using var loggerScope = WithCapturedNetLogs(logs);
+
+        var malformedForByteArray = new Message();
+        malformedForByteArray.WriteByte(3);
+        malformedForByteArray.WriteUInt(TestModId);
+        malformedForByteArray.WriteString("Shared");
+        malformedForByteArray.WriteInt(0);
+        malformedForByteArray.WriteBool(false);
+        malformedForByteArray.WriteObject(typeof(int), 42);
+
+        OfflineDispatchIncoming.Invoke(service, new object?[] { malformedForByteArray, service.LocalSteamId });
+
+        Assert.Equal("int", receiver.LastOverload);
+        Assert.Equal(42, receiver.LastIntValue);
+        Assert.Null(receiver.LastBytes);
+        Assert.Contains(logs, entry =>
+            (entry.Level == LogLevel.Debug || entry.Level == LogLevel.Warning)
+            && entry.Message.Contains("RPC handler probe failed")
+            && entry.Message.Contains("Shared")
+            && entry.Message.Contains("exception="));
     }
 
     [Fact]

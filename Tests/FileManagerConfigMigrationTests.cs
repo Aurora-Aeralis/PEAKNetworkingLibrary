@@ -189,10 +189,58 @@ public class FileManagerConfigMigrationTests
         var configText = File.ReadAllText(scope.ConfigPath);
 
         Assert.Equal("1", schemaVersion);
-        Assert.True(IsLegacyVersionClearedOrRemoved(configText));
+        AssertDoesNotContainLegacyVersionKeyInVersionSection(configText);
     }
 
-    static bool IsLegacyVersionClearedOrRemoved(string configText)
+    [Fact]
+    public void MigrateConfigIfNeeded_LegacyVersionLineRemoval_PreservesCommentsAndSpacing()
+    {
+        using var scope = new TempConfigScope();
+        const string before =
+            "[Version]\n" +
+            "# keep this comment\n" +
+            "  PluginVersion = 2.0.0\n" +
+            "  Current Version = 1\n" +
+            "; keep this note\n" +
+            "\n" +
+            "[Gameplay]\n" +
+            "Current Version = 99\n" +
+            "UserSetting = 7\n";
+        File.WriteAllText(scope.ConfigPath, before);
+
+        var config = new NoReflectionLegacyCleanupConfigFile(scope.ConfigPath, true);
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var after = File.ReadAllText(scope.ConfigPath);
+        Assert.Contains("# keep this comment", after, StringComparison.Ordinal);
+        Assert.Contains("  PluginVersion = 2.0.0", after, StringComparison.Ordinal);
+        Assert.Contains("; keep this note", after, StringComparison.Ordinal);
+        Assert.Contains("Current Version = 99", after, StringComparison.Ordinal);
+        AssertDoesNotContainLegacyVersionKeyInVersionSection(after);
+    }
+
+    [Fact]
+    public void MigrateConfigIfNeeded_LegacyVersionLineRemoval_PreservesMixedLineEndings()
+    {
+        using var scope = new TempConfigScope();
+        var before =
+            "[Version]\r\n" +
+            "Current Version = 1\r\n" +
+            "PluginVersion = 2.0.0\r\n" +
+            "\r\n" +
+            "[Gameplay]\r\n" +
+            "UserSetting = 3\r\n";
+        File.WriteAllText(scope.ConfigPath, before);
+
+        var config = new NoReflectionLegacyCleanupConfigFile(scope.ConfigPath, true);
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var after = File.ReadAllText(scope.ConfigPath);
+        Assert.Contains("\r\n", after, StringComparison.Ordinal);
+        AssertDoesNotContainLegacyVersionKeyInVersionSection(after);
+    }
+
+    static void AssertDoesNotContainLegacyVersionKeyInVersionSection(string configText)
     {
         var inVersionSection = false;
         foreach (var line in configText.Split('\n', StringSplitOptions.None))
@@ -215,11 +263,8 @@ public class FileManagerConfigMigrationTests
             if (!string.Equals(key, "Current Version", StringComparison.Ordinal))
                 continue;
 
-            if (!string.IsNullOrWhiteSpace(line[(separatorIndex + 1)..]))
-                return false;
+            throw new Xunit.Sdk.XunitException("Version section still contains legacy key 'Current Version'.");
         }
-
-        return true;
     }
 
     sealed class TrackingRemoveConfigFile : ConfigFile
@@ -284,6 +329,11 @@ public class FileManagerConfigMigrationTests
         }
 
         public new IDictionary OrphanedEntries => throw new InvalidOperationException("Simulated OrphanedEntries reflection failure.");
+    }
+
+    sealed class NoReflectionLegacyCleanupConfigFile : ConfigFile
+    {
+        internal NoReflectionLegacyCleanupConfigFile(string configPath, bool saveOnInit) : base(configPath, saveOnInit) { }
     }
 
     sealed class TempConfigScope : IDisposable

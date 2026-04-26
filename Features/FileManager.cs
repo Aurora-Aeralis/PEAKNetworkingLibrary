@@ -190,9 +190,16 @@ namespace NetworkingLibrary.Features
             if (!File.Exists(configPath))
                 return;
 
-            var lines = File.ReadAllLines(configPath);
+            var content = File.ReadAllText(configPath);
+            if (content.Length == 0)
+                return;
+
+            var normalized = content.Replace("\r\n", "\n").Replace('\r', '\n');
+            var lines = normalized.Split('\n');
+            var hasTerminalNewline = normalized.EndsWith('\n');
             var changed = false;
             var inVersionSection = false;
+            var remaining = new System.Collections.Generic.List<string>(lines.Length);
             for (var i = 0; i < lines.Length; i++)
             {
                 var trimmed = lines[i].Trim();
@@ -200,29 +207,47 @@ namespace NetworkingLibrary.Features
                 {
                     var section = trimmed[1..^1].Trim();
                     inVersionSection = section.Equals(VersionSection, StringComparison.Ordinal);
+                    remaining.Add(lines[i]);
                     continue;
                 }
 
                 if (!inVersionSection)
+                {
+                    remaining.Add(lines[i]);
                     continue;
+                }
 
                 if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#", StringComparison.Ordinal) || trimmed.StartsWith(";", StringComparison.Ordinal))
+                {
+                    remaining.Add(lines[i]);
                     continue;
+                }
 
                 var separatorIndex = lines[i].IndexOf('=');
                 if (separatorIndex <= 0)
+                {
+                    remaining.Add(lines[i]);
                     continue;
+                }
 
                 var key = lines[i][..separatorIndex].Trim();
                 if (!key.Equals(LegacyVersionKey, StringComparison.Ordinal))
+                {
+                    remaining.Add(lines[i]);
                     continue;
+                }
 
-                lines[i] = lines[i][..(separatorIndex + 1)];
                 changed = true;
             }
 
             if (changed)
-                File.WriteAllLines(configPath, lines);
+            {
+                var newline = content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : content.Contains('\r', StringComparison.Ordinal) ? "\r" : "\n";
+                var output = string.Join(newline, remaining);
+                if (hasTerminalNewline)
+                    output += newline;
+                File.WriteAllText(configPath, output);
+            }
         }
 
         internal static MethodInfo? GetRemoveMethod(ConfigFile config)

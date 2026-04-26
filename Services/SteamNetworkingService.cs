@@ -243,6 +243,10 @@ namespace NetworkingLibrary.Services
             {
                 return false;
             }
+            catch (NotSupportedException)
+            {
+                return false;
+            }
         }
 
         public void Initialize()

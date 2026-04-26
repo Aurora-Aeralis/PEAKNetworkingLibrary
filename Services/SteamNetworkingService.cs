@@ -196,6 +196,7 @@ namespace NetworkingLibrary.Services
         const string HANDSHAKE_SECRET_PADDING_PKCS1 = "PKCS1_V15";
 
         RSA? LocalRsa;
+        bool localSupportsOaepSha256;
         private Func<RSA> localRsaFactory = () =>
         {
             var rsa = RSA.Create();
@@ -222,6 +223,26 @@ namespace NetworkingLibrary.Services
         {
             public string MethodName = string.Empty;
             public MessageHandler Handler = null!;
+        }
+
+        string GetLocalHandshakePaddingMarker()
+            => localSupportsOaepSha256 ? HANDSHAKE_SECRET_PADDING_OAEP_SHA256 : HANDSHAKE_SECRET_PADDING_PKCS1;
+
+        static bool SupportsOaepSha256(RSA rsa)
+        {
+            try
+            {
+                using var rng = RandomNumberGenerator.Create();
+                var probe = new byte[32];
+                rng.GetBytes(probe);
+                var encrypted = rsa.Encrypt(probe, RSAEncryptionPadding.OaepSHA256);
+                var decrypted = rsa.Decrypt(encrypted, RSAEncryptionPadding.OaepSHA256);
+                return CryptographicOperations.FixedTimeEquals(probe, decrypted);
+            }
+            catch (CryptographicException)
+            {
+                return false;
+            }
         }
 
         public void Initialize()
@@ -317,6 +338,9 @@ namespace NetworkingLibrary.Services
                 cbLobbyChatUpdate = Callback<LobbyChatUpdate_t>.Create(OnLobbyChatUpdate);
                 cbLobbyDataUpdate = Callback<LobbyDataUpdate_t>.Create(OnLobbyDataUpdate);
                 LocalRsa = localRsaFactory();
+                localSupportsOaepSha256 = SupportsOaepSha256(LocalRsa);
+                if (!localSupportsOaepSha256)
+                    LogWarning("RSA provider does not support OAEP-SHA256; advertising PKCS1 v1.5 handshake fallback.");
                 return true;
             }
             catch (Exception ex)
@@ -327,6 +351,7 @@ namespace NetworkingLibrary.Services
                 cbLobbyChatUpdate = null;
                 cbLobbyDataUpdate = null;
                 LocalRsa = null;
+                localSupportsOaepSha256 = false;
                 return false;
             }
         }
@@ -359,6 +384,7 @@ namespace NetworkingLibrary.Services
             }
             LocalRsa?.Dispose();
             LocalRsa = null;
+            localSupportsOaepSha256 = false;
 
             IsInitialized = false;
             try { SteamCallbackPump.DisableAndDestroyExisting(); } catch { }
@@ -1889,7 +1915,7 @@ namespace NetworkingLibrary.Services
             var m = new Message(0u, "NETWORK_INTERNAL_HANDSHAKE_PUBKEY", 0);
             m.WriteString(pub);
             m.WriteString(nonce);
-            m.WriteString(HANDSHAKE_SECRET_PADDING_OAEP_SHA256);
+            m.WriteString(GetLocalHandshakePaddingMarker());
             var framed = BuildFramedBytesWithMeta(m, 0, ReliableType.Reliable);
             SendBytes(framed, target, ReliableType.Reliable);
         }
@@ -1928,7 +1954,7 @@ namespace NetworkingLibrary.Services
                 var m = new Message(0u, "NETWORK_INTERNAL_HANDSHAKE_PUBKEY", 0);
                 m.WriteString(myPub);
                 m.WriteString(localNonceToSend);
-                m.WriteString(HANDSHAKE_SECRET_PADDING_OAEP_SHA256);
+                m.WriteString(GetLocalHandshakePaddingMarker());
                 var framed = BuildFramedBytesWithMeta(m, 0, ReliableType.Reliable);
                 SendBytes(framed, sender, ReliableType.Reliable);
                 return;
@@ -1940,7 +1966,7 @@ namespace NetworkingLibrary.Services
             rng.GetBytes(sym);
 
             byte[] enc;
-            var selectedPaddingMarker = string.Equals(peerPaddingPreference, HANDSHAKE_SECRET_PADDING_OAEP_SHA256, StringComparison.Ordinal)
+            var selectedPaddingMarker = localSupportsOaepSha256 && string.Equals(peerPaddingPreference, HANDSHAKE_SECRET_PADDING_OAEP_SHA256, StringComparison.Ordinal)
                 ? HANDSHAKE_SECRET_PADDING_OAEP_SHA256
                 : HANDSHAKE_SECRET_PADDING_PKCS1;
             try

@@ -109,10 +109,9 @@ public class OfflineNetworkingServiceTests
     public void LeaveLobby_ResetsLobbyState_AndHostIdentity()
     {
         var service = new OfflineNetworkingService();
-        var lobbyId = 424242UL;
 
         service.Initialize();
-        service.JoinLobby(lobbyId);
+        service.JoinLobby(424242UL);
         Assert.True(service.InLobby);
         Assert.True(service.IsHost);
         Assert.Equal(service.LocalSteamId, service.HostSteamId64);
@@ -121,7 +120,6 @@ public class OfflineNetworkingServiceTests
 
         Assert.False(service.InLobby);
         Assert.False(service.IsHost);
-        Assert.NotEqual(lobbyId, service.HostSteamId64);
         Assert.Equal(service.LocalSteamId, service.HostSteamId64);
     }
 
@@ -178,7 +176,24 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
-    public void JoinLobby_RemoteLobbyId_UsesSinglePeerHostSimulation_AndRpcToHostDispatchesToLocalRegisteredHandler()
+    public void JoinLobby_LocalHostId_SetsHostRole_AndRpcToHostDispatchesToLocalRegisteredHandler()
+    {
+        var service = new OfflineNetworkingService();
+        var receiver = new RpcReceiver();
+
+        service.Initialize();
+        service.RegisterNetworkObject(receiver, TestModId);
+        service.JoinLobby(service.LocalSteamId);
+        service.RPCToHost(TestModId, "OnPing", ReliableType.Reliable, 99);
+
+        Assert.True(service.InLobby);
+        Assert.True(service.IsHost);
+        Assert.Equal(service.LocalSteamId, service.HostSteamId64);
+        Assert.Equal(99, receiver.LastValue);
+    }
+
+    [Fact]
+    public void JoinLobby_NonLocalLobbyId_PreservesLocalHostRole_AndRpcToHostDispatchesToLocalRegisteredHandler()
     {
         var service = new OfflineNetworkingService();
         var receiver = new RpcReceiver();
@@ -190,22 +205,6 @@ public class OfflineNetworkingServiceTests
         service.RPCToHost(TestModId, "OnPing", ReliableType.Reliable, 99);
 
         Assert.True(service.InLobby);
-        Assert.True(service.IsHost);
-        Assert.Equal(service.LocalSteamId, service.HostSteamId64);
-        Assert.Equal(99, receiver.LastValue);
-    }
-
-    [Fact]
-    public void JoinLobby_LocalLobbyId_ThenRpcToHost_DispatchesToLocalRegisteredHandler()
-    {
-        var service = new OfflineNetworkingService();
-        var receiver = new RpcReceiver();
-
-        service.Initialize();
-        service.RegisterNetworkObject(receiver, TestModId);
-        service.JoinLobby(service.LocalSteamId);
-        service.RPCToHost(TestModId, "OnPing", ReliableType.Reliable, 99);
-
         Assert.True(service.IsHost);
         Assert.Equal(service.LocalSteamId, service.HostSteamId64);
         Assert.Equal(99, receiver.LastValue);

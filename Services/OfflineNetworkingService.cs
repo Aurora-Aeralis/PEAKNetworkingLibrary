@@ -291,7 +291,7 @@ namespace NetworkingLibrary.Services
             EnsureLocalPeerKey();
             InLobby = true;
             if (lobbySteamId64 != LocalSteamId)
-                LogWarning($"Offline single-peer host simulation uses local peer {LocalSteamId} as host identity; lobby id {lobbySteamId64} is compatibility-only.");
+                LogWarning($"Offline mode is single-peer only; treating JoinLobby argument {lobbySteamId64} as lobby id and preserving local host identity {LocalSteamId}.");
             HostSteamId64 = LocalSteamId;
             lobbyData.Clear();
             perPlayerData.Clear();

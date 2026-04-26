@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using NetworkingLibrary.Modules;
+using UnityEngine;
 
 namespace NetworkingLibrary.Services
 {
@@ -40,15 +41,96 @@ namespace NetworkingLibrary.Services
         HMACSHA256? globalHmac;
         readonly Dictionary<uint, Func<byte[], byte[]>> modSigners = new();
         readonly Dictionary<uint, RSAParameters> modPublicKeys = new();
+        static readonly TimeSpan LogFallbackCooldown = TimeSpan.FromSeconds(5);
+        static readonly object logFallbackLock = new();
+        static DateTime lastLogFallbackUtc = DateTime.MinValue;
+        static int suppressedLogFallbackCount;
+        static readonly TimeSpan DeserializeFailureCooldown = TimeSpan.FromSeconds(2);
+        static readonly object deserializeFailureLock = new();
+        static DateTime lastDeserializeFailureUtc = DateTime.MinValue;
+        static int suppressedDeserializeFailureCount;
+        static readonly TimeSpan ExceptionLogCooldown = TimeSpan.FromSeconds(3);
+        static readonly object exceptionLogThrottleLock = new();
+        static readonly Dictionary<string, DateTime> lastExceptionLogByKey = new();
+        static readonly Dictionary<string, int> suppressedExceptionLogByKey = new();
 
         static void LogError(string message)
         {
-            try { Net.Logger?.LogError(message); } catch { }
+            try { Net.Logger?.LogError(message); }
+            catch (Exception ex)
+            {
+                LogFallbackWarningThrottled("error", message, ex);
+            }
         }
 
         static void LogWarning(string message)
         {
-            try { Net.Logger?.LogWarning(message); } catch { }
+            try { Net.Logger?.LogWarning(message); }
+            catch (Exception ex)
+            {
+                LogFallbackWarningThrottled("warning", message, ex);
+            }
+        }
+
+        static void LogFallbackWarningThrottled(string level, string originalMessage, Exception ex)
+        {
+            var now = DateTime.UtcNow;
+            lock (logFallbackLock)
+            {
+                if (lastLogFallbackUtc != DateTime.MinValue && now - lastLogFallbackUtc < LogFallbackCooldown)
+                {
+                    suppressedLogFallbackCount++;
+                    return;
+                }
+
+                var suppressed = suppressedLogFallbackCount;
+                suppressedLogFallbackCount = 0;
+                lastLogFallbackUtc = now;
+                var suffix = suppressed > 0 ? $" Suppressed {suppressed} similar logger failures." : string.Empty;
+                Debug.LogWarning($"[OfflineNetworkingService] Failed to write {level} log. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {originalMessage}.{suffix}");
+            }
+        }
+
+        static string FormatException(Exception ex) => $"{ex.GetType().Name}: {ex.Message}";
+
+        static void LogDeserializeFailureThrottled(Exception ex, string context)
+        {
+            var now = DateTime.UtcNow;
+            lock (deserializeFailureLock)
+            {
+                if (lastDeserializeFailureUtc != DateTime.MinValue && now - lastDeserializeFailureUtc < DeserializeFailureCooldown)
+                {
+                    suppressedDeserializeFailureCount++;
+                    return;
+                }
+
+                var suppressed = suppressedDeserializeFailureCount;
+                suppressedDeserializeFailureCount = 0;
+                lastDeserializeFailureUtc = now;
+                var suffix = suppressed > 0 ? $" Suppressed {suppressed} similar deserialization failures." : string.Empty;
+                LogWarning($"Offline RPC deserialization skipped handler ({context}). Exception: {FormatException(ex)}.{suffix}");
+            }
+        }
+
+        static void LogExceptionThrottled(string key, bool error, string messagePrefix, Exception ex)
+        {
+            var now = DateTime.UtcNow;
+            lock (exceptionLogThrottleLock)
+            {
+                if (lastExceptionLogByKey.TryGetValue(key, out var previous) && now - previous < ExceptionLogCooldown)
+                {
+                    suppressedExceptionLogByKey[key] = suppressedExceptionLogByKey.TryGetValue(key, out var currentSuppressed) ? currentSuppressed + 1 : 1;
+                    return;
+                }
+
+                lastExceptionLogByKey[key] = now;
+                var suppressed = suppressedExceptionLogByKey.TryGetValue(key, out var count) ? count : 0;
+                suppressedExceptionLogByKey.Remove(key);
+                var suffix = suppressed > 0 ? $" Suppressed {suppressed} similar exceptions." : string.Empty;
+                var message = $"{messagePrefix} Exception: {FormatException(ex)}.{suffix}";
+                if (error) LogError(message);
+                else LogWarning(message);
+            }
         }
 
         public ulong GetLocalSteam64()
@@ -499,7 +581,7 @@ namespace NetworkingLibrary.Services
             if (!lobbyKeys.Contains(key)) LogWarning($"Accessing unregistered lobby key {key}");
             if (!lobbyData.TryGetValue(key, out var v)) return default!;
             try { return (T)Convert.ChangeType(v, typeof(T), System.Globalization.CultureInfo.InvariantCulture); }
-            catch { LogError($"Could not parse lobby data [{key},{v}]"); return default!; }
+            catch (Exception ex) { LogExceptionThrottled($"lobby_parse:{key}", error: true, $"Could not parse lobby data [{key},{v}].", ex); return default!; }
         }
 
         public void RegisterPlayerDataKey(string key)
@@ -529,7 +611,7 @@ namespace NetworkingLibrary.Services
             if (!perPlayerData.TryGetValue(steamId64, out var dict)) return default!;
             if (!dict.TryGetValue(key, out var v)) return default!;
             try { return (T)Convert.ChangeType(v, typeof(T), System.Globalization.CultureInfo.InvariantCulture); }
-            catch { LogError($"Could not parse player data [{key},{v}]"); return default!; }
+            catch (Exception ex) { LogExceptionThrottled($"player_parse:{key}", error: true, $"Could not parse player data [{key},{v}].", ex); return default!; }
         }
 
         public void PollReceive()
@@ -796,8 +878,9 @@ namespace NetworkingLibrary.Services
                 unread = source.UnreadLength();
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
+                LogDeserializeFailureThrottled(ex, $"{handler.Method.DeclaringType?.Name ?? "UnknownType"}.{handler.Method.Name}");
                 return false;
             }
             finally
@@ -818,7 +901,11 @@ namespace NetworkingLibrary.Services
                 AssignRpcIdentityMembers(p, infoType, from);
                 return p;
             }
-            catch { return null!; }
+            catch (Exception ex)
+            {
+                LogExceptionThrottled($"rpc_info:{infoType.FullName ?? infoType.Name}", error: false, $"CreateRpcInfoInstance failed for {infoType.FullName ?? infoType.Name}.", ex);
+                return null!;
+            }
         }
 
         static void AssignRpcIdentityMembers(object instance, Type infoType, ulong steamId64)

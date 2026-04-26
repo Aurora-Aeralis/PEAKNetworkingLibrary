@@ -5,6 +5,7 @@ using Photon.Pun;
 using Photon.Realtime;
 using Steamworks;
 using NetworkingLibrary.Services;
+using UnityEngine;
 
 namespace NetworkingLibrary.Modules
 {
@@ -16,6 +17,10 @@ namespace NetworkingLibrary.Modules
         static readonly Dictionary<string, DateTime> UnresolvedMappingWarningThrottle = new Dictionary<string, DateTime>(StringComparer.Ordinal);
         static readonly object UnresolvedMappingWarningThrottleLock = new object();
         static DateTime UnresolvedMappingWarningNextPruneUtc = DateTime.MinValue;
+        static readonly TimeSpan PersonaLookupExceptionCooldown = TimeSpan.FromSeconds(5);
+        static DateTime lastPersonaLookupExceptionUtc = DateTime.MinValue;
+        static int suppressedPersonaLookupExceptions;
+        static readonly object personaLookupExceptionLock = new object();
         static readonly string[] StableIdPropertyKeys =
         {
             "steam64", "steamid64", "steam_id64", "steamid", "steam_id", "steam", "authid", "auth_id", "userid", "user_id"
@@ -43,7 +48,10 @@ namespace NetworkingLibrary.Modules
                     if (!personaByName.TryGetValue(name, out var ids)) personaByName[name] = ids = new List<ulong>(1);
                     ids.Add(sid);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    LogPersonaLookupExceptionThrottled(ex, sid);
+                }
             }
 
             foreach (var kv in room.Players)
@@ -166,7 +174,30 @@ namespace NetworkingLibrary.Modules
 
         static void LogWarning(string message)
         {
-            try { Net.Logger?.LogWarning(message); } catch { }
+            try { Net.Logger?.LogWarning(message); }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[NetworkingPhotonExtensions] Failed to write warning log. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
+            }
+        }
+
+        static void LogPersonaLookupExceptionThrottled(Exception ex, ulong steamId)
+        {
+            var now = DateTime.UtcNow;
+            lock (personaLookupExceptionLock)
+            {
+                if (lastPersonaLookupExceptionUtc != DateTime.MinValue && now - lastPersonaLookupExceptionUtc < PersonaLookupExceptionCooldown)
+                {
+                    suppressedPersonaLookupExceptions++;
+                    return;
+                }
+
+                var suppressed = suppressedPersonaLookupExceptions;
+                suppressedPersonaLookupExceptions = 0;
+                lastPersonaLookupExceptionUtc = now;
+                var suffix = suppressed > 0 ? $" Suppressed {suppressed} similar exceptions." : string.Empty;
+                LogWarning($"Steam persona lookup failed for lobby member {steamId}. Exception: {ex.GetType().Name}: {ex.Message}.{suffix}");
+            }
         }
 
         static void LogUnresolvedMappingWarning(int actorNumber, string issueText, string message)

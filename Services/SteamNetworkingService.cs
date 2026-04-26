@@ -1382,42 +1382,33 @@ namespace NetworkingLibrary.Services
                 for (int i = 0; i < count; i++)
                 {
                     IntPtr outPtr = this.inMessages[i];
-                    SteamNetworkingMessage_t steamMsg = Marshal.PtrToStructure<SteamNetworkingMessage_t>(outPtr);
-                    int size = (int)steamMsg.m_cbSize;
-
-
-                    if (size <= 0)
-                    {
-                        SteamNetworkingMessage_t.Release(outPtr);
-                        continue;
-                    }
-
-                    if (size > messageSizePolicy.MaxSize)
-                    {
-                        SteamNetworkingMessage_t.Release(outPtr);
-                        continue;
-                    }
-
-                    CSteamID sender = steamMsg.m_identityPeer.GetSteamID();
-                    if (sender == CSteamID.Nil)
-                    {
-                        SteamNetworkingMessage_t.Release(outPtr);
-                        continue;
-                    }
-
-                    byte[] bytes = new byte[size];
-                    Marshal.Copy(steamMsg.m_pData, bytes, 0, size);
-
+                    if (outPtr == IntPtr.Zero) continue;
                     try
                     {
-                        ProcessIncomingFrame(bytes, sender);
-                    }
-                    catch (Exception ex)
-                    {
-                        LogError($"ProcessIncomingFrame exception: {ex}");
-                    }
+                        SteamNetworkingMessage_t steamMsg = Marshal.PtrToStructure<SteamNetworkingMessage_t>(outPtr);
+                        int size = (int)steamMsg.m_cbSize;
+                        if (size <= 0) continue;
+                        if (size > messageSizePolicy.MaxSize) continue;
 
-                    SteamNetworkingMessage_t.Release(outPtr);
+                        CSteamID sender = steamMsg.m_identityPeer.GetSteamID();
+                        if (sender == CSteamID.Nil) continue;
+
+                        byte[] bytes = new byte[size];
+                        Marshal.Copy(steamMsg.m_pData, bytes, 0, size);
+
+                        try
+                        {
+                            ProcessIncomingFrame(bytes, sender);
+                        }
+                        catch (Exception ex)
+                        {
+                            LogError($"ProcessIncomingFrame exception: {ex}");
+                        }
+                    }
+                    finally
+                    {
+                        SteamNetworkingMessage_t.Release(outPtr);
+                    }
                 }
             }
             catch (Exception ex)

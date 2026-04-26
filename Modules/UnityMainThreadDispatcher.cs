@@ -64,11 +64,7 @@ namespace NetworkingLibrary.Modules
             return string.Equals(context?.GetType().FullName, "UnityEngine.UnitySynchronizationContext", StringComparison.Ordinal);
         }
 
-        static void QueueCreateRequest()
-        {
-            if (Interlocked.Exchange(ref createRequestQueued, 1) == 1) return;
-            lock (queue) queue.Enqueue(ProcessPendingMainThreadWork);
-        }
+        static void QueueCreateRequest() => Interlocked.Exchange(ref createRequestQueued, 1);
 
         static bool IsMainThread()
         {
@@ -120,11 +116,8 @@ namespace NetworkingLibrary.Modules
                 if (!IsMainThread()) return;
             }
 
-            if (Volatile.Read(ref createRequestQueued) == 1)
-            {
-                Interlocked.Exchange(ref createRequestQueued, 0);
-                if (instance == null) EnsureInstanceOnMainThread();
-            }
+            if (Interlocked.Exchange(ref createRequestQueued, 0) == 1 && instance == null)
+                EnsureInstanceOnMainThread();
         }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
@@ -205,6 +198,13 @@ namespace NetworkingLibrary.Modules
             internal static void SetMainThreadIdForTests(int id) => mainThreadId = id;
             internal static int CreateRequestQueuedForTests => Volatile.Read(ref createRequestQueued);
             internal static int CurrentMainThreadIdForTests => Volatile.Read(ref mainThreadId);
+            internal static int QueueDepthForTests
+            {
+                get
+                {
+                    lock (queue) return queue.Count;
+                }
+            }
         }
     }
 }

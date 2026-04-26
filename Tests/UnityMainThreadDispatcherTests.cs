@@ -79,6 +79,28 @@ public class UnityMainThreadDispatcherTests : IDisposable
         Assert.All(instances, item => Assert.Same(instances[0], item));
     }
 
+
+    [Fact]
+    public async Task Instance_RepeatedWorkerCalls_DoNotGrowQueuedActionDepth()
+    {
+        UnityMainThreadDispatcher.BackgroundThreadInstanceWaitTimeout = TimeSpan.FromMilliseconds(100);
+
+        var attempts = Enumerable.Range(0, 8)
+            .Select(_ => Task.Run(() => Record.Exception(() => UnityMainThreadDispatcher.Instance())))
+            .ToArray();
+
+        await Task.WhenAll(attempts);
+
+        Assert.All(attempts, task => Assert.IsType<InvalidOperationException>(task.Result));
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.CreateRequestQueuedForTests);
+        Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
+
+        UnityMainThreadDispatcher.ProcessPendingMainThreadWork();
+
+        Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.CreateRequestQueuedForTests);
+        Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
+    }
+
     [Fact]
     public async Task Instance_FromWorkerThread_WithDelayedMainThreadProcessing_DoesNotThrow()
     {

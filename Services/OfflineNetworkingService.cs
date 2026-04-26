@@ -134,6 +134,8 @@ namespace NetworkingLibrary.Services
             playerKeys.Clear();
             lobbyData.Clear();
             perPlayerData.Clear();
+            lobbyKeys.Clear();
+            playerKeys.Clear();
             ClearPerPeerSymmetricKeys();
             ClearGlobalSharedSecret();
             modSigners.Clear();
@@ -205,6 +207,8 @@ namespace NetworkingLibrary.Services
             HostSteamId64 = LocalSteamId;
             lobbyData.Clear();
             perPlayerData.Clear();
+            lobbyKeys.Clear();
+            playerKeys.Clear();
             ClearPerPeerSymmetricKeys();
             ClearGlobalSharedSecret();
             globalHmac?.Dispose(); globalHmac = null;

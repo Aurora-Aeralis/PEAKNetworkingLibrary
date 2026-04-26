@@ -41,14 +41,14 @@ namespace NetworkingLibrary.Modules
 
         private static Guid ParseGuid(string guid)
         {
-            if (string.IsNullOrWhiteSpace(guid)) throw new ArgumentException("ModId.FromGuid requires a non-empty GUID string (for example, \"123e4567-e89b-12d3-a456-426614174000\").", nameof(guid));
-            if (!Guid.TryParse(guid, out var guidValue)) throw new ArgumentException("ModId.FromGuid requires a valid GUID string in a recognized format.", nameof(guid));
+            if (string.IsNullOrWhiteSpace(guid)) throw new ArgumentException("ModId requires a non-empty GUID string (for example, \"123e4567-e89b-12d3-a456-426614174000\").", nameof(guid));
+            if (!Guid.TryParse(guid, out var guidValue)) throw new ArgumentException("ModId requires a valid GUID string in a recognized format.", nameof(guid));
             return guidValue;
         }
 
-        private static uint FoldHashToUInt32(byte[] hashBytes)
+        private static uint FoldHashToUInt32(ReadOnlySpan<byte> hashBytes)
         {
-            if (hashBytes == null || hashBytes.Length == 0 || hashBytes.Length % sizeof(uint) != 0) throw new ArgumentException("Hash bytes must be non-empty and divisible by four.", nameof(hashBytes));
+            if (hashBytes.Length == 0 || hashBytes.Length % sizeof(uint) != 0) throw new ArgumentException("Hash bytes must be non-empty and divisible by four.", nameof(hashBytes));
             var folded = 0u;
             for (var index = 0; index < hashBytes.Length; index += sizeof(uint)) folded ^= BinaryPrimitives.ReadUInt32LittleEndian(hashBytes.AsSpan(index, sizeof(uint)));
             return folded;

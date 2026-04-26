@@ -43,6 +43,11 @@ public class NetworkingServiceFactoryTests
         public static void Set(bool value) => Initialized = value;
     }
 
+    sealed class SteamManager
+    {
+        public static bool Initialized;
+    }
+
     sealed class FakeService : INetworkingService
     {
         public bool IsInitialized => false;
@@ -272,6 +277,27 @@ public class NetworkingServiceFactoryTests
         {
             NetworkingServiceFactory.ResetTestHooks();
             NetLog.ResetForTests();
+        }
+    }
+
+    [Fact]
+    public void TryReadSteamManagerInitialized_DoesNotUseAmbiguousLoadedSteamManagerType_WhenResolveTypeMisses()
+    {
+        SteamManager.Initialized = true;
+        NetworkingLibrary.Tests.OtherPlugin.SteamManager.Initialized = false;
+        NetworkingServiceFactory.ResolveType = _ => null;
+
+        try
+        {
+            var read = InvokeTryReadSteamManagerInitialized(out var isInitialized);
+            Assert.False(read);
+            Assert.False(isInitialized);
+        }
+        finally
+        {
+            SteamManager.Initialized = false;
+            NetworkingLibrary.Tests.OtherPlugin.SteamManager.Initialized = false;
+            NetworkingServiceFactory.ResetTestHooks();
         }
     }
 

@@ -1,4 +1,6 @@
 using System;
+using System.Linq;
+using System.Reflection;
 using NetworkingLibrary.Modules;
 #if !UNITY_EDITOR
 using Steamworks;
@@ -91,6 +93,11 @@ namespace NetworkingLibrary.Services
                     if (steamManagerType == null) continue;
                     if (TryReadInitializedFromType(steamManagerType, out isInitialized)) return true;
                 }
+
+                var loadedSteamManagerType = ResolveLoadedSteamManagerType();
+                if (loadedSteamManagerType != null && TryReadInitializedFromType(loadedSteamManagerType, out isInitialized))
+                    return true;
+
                 return false;
             }
             catch (Exception ex)
@@ -98,6 +105,59 @@ namespace NetworkingLibrary.Services
                 NetLog.DebugThrottled(LogSource, "NetworkingServiceFactory.TryReadSteamManagerInitialized", ProbeDebugLogCooldownSeconds, $"TryReadSteamManagerInitialized reflection probe failed: {ex.GetType().Name}: {ex.Message}", () => UnscaledTimeProvider(), includeOriginalMessageInFallback: true);
                 return false;
             }
+        }
+
+        static Type? ResolveLoadedSteamManagerType()
+        {
+            const BindingFlags AnyStaticVisibility = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            for (var index = 0; index < assemblies.Length; index++)
+            {
+                var assembly = assemblies[index];
+                if (assembly == null || assembly.IsDynamic) continue;
+
+                Type[] types;
+                try
+                {
+                    types = assembly.GetTypes();
+                }
+                catch (ReflectionTypeLoadException ex)
+                {
+                    types = ex.Types.Where(type => type != null).ToArray()!;
+                }
+                catch
+                {
+                    continue;
+                }
+
+                for (var typeIndex = 0; typeIndex < types.Length; typeIndex++)
+                {
+                    var candidate = types[typeIndex];
+                    if (candidate == null || !string.Equals(candidate.Name, "SteamManager", StringComparison.Ordinal)) continue;
+                    if (candidate.GetProperty("Initialized", AnyStaticVisibility)?.PropertyType != typeof(bool)
+                        && candidate.GetField("Initialized", AnyStaticVisibility)?.FieldType != typeof(bool))
+                        continue;
+
+                    if (IsPreferredSteamManagerType(candidate))
+                        return candidate;
+
+                }
+            }
+
+            return null;
+        }
+
+        static bool IsPreferredSteamManagerType(Type steamManagerType)
+        {
+            var fullName = steamManagerType.FullName;
+            if (string.Equals(fullName, "pworld.Scripts.SteamManager", StringComparison.Ordinal))
+                return true;
+
+            if (string.Equals(fullName, "SteamManager", StringComparison.Ordinal))
+                return true;
+
+            var assemblyName = steamManagerType.Assembly.GetName().Name;
+            return string.Equals(assemblyName, "Assembly-CSharp", StringComparison.Ordinal);
         }
 
         static bool TryReadInitializedFromType(Type steamManagerType, out bool isInitialized)

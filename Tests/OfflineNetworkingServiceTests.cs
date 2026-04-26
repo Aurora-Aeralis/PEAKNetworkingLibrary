@@ -415,6 +415,24 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
+    public void Shutdown_ClearsIncomingValidator_AndReinitializeRequiresExplicitReconfiguration()
+    {
+        var service = new OfflineNetworkingService();
+        service.Initialize();
+        service.IncomingValidator = (_, _) => false;
+
+        service.Shutdown();
+
+        Assert.Null(service.IncomingValidator);
+
+        service.Initialize();
+        Assert.Null(service.IncomingValidator);
+
+        service.IncomingValidator = (_, _) => true;
+        Assert.NotNull(service.IncomingValidator);
+    }
+
+    [Fact]
     public void SetLobbyData_NullValue_DoesNotThrow_AndReadsBackAsEmptyString()
     {
         var service = new OfflineNetworkingService();

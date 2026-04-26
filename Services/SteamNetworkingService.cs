@@ -344,6 +344,7 @@ namespace NetworkingLibrary.Services
             if (InLobby || Lobby != CSteamID.Nil)
                 LeaveLobby();
 
+            IncomingValidator = null;
             cbLobbyEnter = null;
             cbLobbyCreated = null;
             cbLobbyChatUpdate = null;

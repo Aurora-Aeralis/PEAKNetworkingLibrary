@@ -214,6 +214,7 @@ namespace NetworkingLibrary.Services
             if (InLobby)
                 LeaveLobby();
 
+            IncomingValidator = null;
             IsInitialized = false;
             offlineIsHost = false;
             HostSteamId64 = LocalSteamId;

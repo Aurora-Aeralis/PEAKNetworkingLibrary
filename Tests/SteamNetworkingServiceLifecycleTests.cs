@@ -280,6 +280,25 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void Shutdown_ClearsIncomingValidator_AndReinitializeRequiresExplicitReconfiguration()
+    {
+        var service = new SteamNetworkingService();
+        service.IncomingValidator = (_, _) => false;
+        SetInLobby(service, true);
+        SetLobby(service, new CSteamID(9001UL));
+
+        service.Shutdown();
+
+        Assert.Null(service.IncomingValidator);
+
+        service.Initialize();
+        Assert.Null(service.IncomingValidator);
+
+        service.IncomingValidator = (_, _) => true;
+        Assert.NotNull(service.IncomingValidator);
+    }
+
+    [Fact]
     public async Task Shutdown_RacingWithRetransmitAndFlush_DoesNotThrow()
     {
         var service = new SteamNetworkingService();

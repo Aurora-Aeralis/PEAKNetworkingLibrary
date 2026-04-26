@@ -6,6 +6,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Threading.Tasks;
 using Xunit;
 
 namespace NetworkingLibrary.Tests;
@@ -255,6 +256,40 @@ public class FileManagerConfigMigrationTests
         Assert.Equal("1", schemaVersion);
         Assert.Contains("ConfigSchemaVersion = 1", configText, StringComparison.Ordinal);
         Assert.True(IsLegacyVersionRemoved(configText));
+    }
+
+    [Fact]
+    public void MigrateConfigIfNeeded_RepeatedContentionLikeMigrations_AreIdempotentWithStableOutput()
+    {
+        using var scope = new TempConfigScope();
+        File.WriteAllText(scope.ConfigPath,
+            "[Version]\n" +
+            "Current Version = 1\n");
+
+        const int MigrationAttempts = 24;
+        Parallel.For(0, MigrationAttempts, _ =>
+        {
+            var config = new ConfigFile(scope.ConfigPath, true);
+            FileManager.MigrateConfigIfNeeded(config, "1");
+        });
+
+        var finalConfig = new ConfigFile(scope.ConfigPath, true);
+        FileManager.MigrateConfigIfNeeded(finalConfig, "1");
+        var finalSchemaVersion = finalConfig.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        var finalConfigText = File.ReadAllText(scope.ConfigPath);
+        var baselineConfigText = finalConfigText;
+
+        for (var i = 0; i < 5; i++)
+        {
+            var config = new ConfigFile(scope.ConfigPath, true);
+            FileManager.MigrateConfigIfNeeded(config, "1");
+        }
+
+        var repeatedConfigText = File.ReadAllText(scope.ConfigPath);
+        Assert.Equal("1", finalSchemaVersion);
+        Assert.True(IsLegacyVersionRemoved(finalConfigText));
+        Assert.Equal(baselineConfigText, repeatedConfigText);
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(scope.ConfigPath)!, "*.tmp"));
     }
 
     static bool IsLegacyVersionRemoved(string configText)

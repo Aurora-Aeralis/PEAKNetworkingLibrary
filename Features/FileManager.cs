@@ -20,6 +20,7 @@ namespace NetworkingLibrary.Features
         const string PluginVersionInfo = "Tracks plugin release version.";
         const string DaModsFolderName = "DAa Mods";
         const string ConfigFileName = "config.cfg";
+        static readonly object ConfigMigrationLock = new();
         static readonly ConcurrentDictionary<Type, Lazy<MethodInfo?>> RemoveMethodCache = new();
         static readonly ConcurrentDictionary<Type, Lazy<PropertyInfo?>> OrphanedEntriesPropertyCache = new();
 
@@ -52,17 +53,20 @@ namespace NetworkingLibrary.Features
 
         internal static void MigrateConfigIfNeeded(ConfigFile config, string currentVersion)
         {
-            var schemaVersionEntry = BindSchemaVersion(config, string.Empty);
-            var legacyVersion = ReadLegacyVersion(config);
-            var storedVersion = GetStoredVersion(schemaVersionEntry.Value, legacyVersion);
-            var needsNormalization = string.IsNullOrWhiteSpace(schemaVersionEntry.Value) && !string.IsNullOrWhiteSpace(legacyVersion);
-            if (storedVersion == currentVersion && !needsNormalization)
-                return;
+            lock (ConfigMigrationLock)
+            {
+                var schemaVersionEntry = BindSchemaVersion(config, string.Empty);
+                var legacyVersion = ReadLegacyVersion(config);
+                var storedVersion = GetStoredVersion(schemaVersionEntry.Value, legacyVersion);
+                var needsNormalization = string.IsNullOrWhiteSpace(schemaVersionEntry.Value) && !string.IsNullOrWhiteSpace(legacyVersion);
+                if (storedVersion == currentVersion && !needsNormalization)
+                    return;
 
-            MigrateConfig(schemaVersionEntry, storedVersion, currentVersion, legacyVersion);
-            schemaVersionEntry.Value = currentVersion;
-            DropLegacyVersionFromConfig(config);
-            config.Save();
+                MigrateConfig(schemaVersionEntry, storedVersion, currentVersion, legacyVersion);
+                schemaVersionEntry.Value = currentVersion;
+                DropLegacyVersionFromConfig(config);
+                config.Save();
+            }
         }
 
         static string GetStoredVersion(string schemaVersion, string legacyVersion)
@@ -214,16 +218,19 @@ namespace NetworkingLibrary.Features
         static bool ClearLegacyVersionInFile(ConfigFile config, out Exception? exception)
         {
             exception = null;
+            var stage = "initialize";
+            var configPath = config.ConfigFilePath;
             try
             {
-                var configPath = config.ConfigFilePath;
                 if (!File.Exists(configPath))
                     return false;
 
+                stage = "read";
                 var lines = File.ReadAllLines(configPath);
                 var keptLines = new List<string>(lines.Length);
                 var changed = false;
                 var inVersionSection = false;
+                stage = "normalize";
                 for (var i = 0; i < lines.Length; i++)
                 {
                     var trimmed = lines[i].Trim();
@@ -267,12 +274,43 @@ namespace NetworkingLibrary.Features
                 if (!changed)
                     return false;
 
-                File.WriteAllLines(configPath, keptLines);
+                stage = "write-temp";
+                var directoryPath = Path.GetDirectoryName(configPath);
+                if (string.IsNullOrWhiteSpace(directoryPath))
+                    throw new InvalidOperationException("Config path does not contain a directory.");
+
+                var tempPath = Path.Combine(directoryPath, $"{Path.GetFileName(configPath)}.{Guid.NewGuid():N}.tmp");
+                try
+                {
+                    File.WriteAllLines(tempPath, keptLines);
+                    stage = "replace";
+                    if (File.Exists(configPath))
+                    {
+                        try
+                        {
+                            File.Replace(tempPath, configPath, null);
+                        }
+                        catch (PlatformNotSupportedException)
+                        {
+                            File.Move(tempPath, configPath, true);
+                        }
+                    }
+                    else
+                    {
+                        File.Move(tempPath, configPath, true);
+                    }
+                }
+                finally
+                {
+                    if (File.Exists(tempPath))
+                        File.Delete(tempPath);
+                }
+
                 return true;
             }
             catch (Exception ex)
             {
-                exception = ex;
+                exception = new InvalidOperationException($"Failed to clear legacy version in config file at '{configPath}' during stage '{stage}'.", ex);
                 return false;
             }
         }

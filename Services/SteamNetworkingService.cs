@@ -1804,7 +1804,7 @@ namespace NetworkingLibrary.Services
                         if (preferOverloadKeyMatch.Value != isPreferred) continue;
                     }
 
-                    if (!TryDeserializeForHandler(message, handler, sender, out var callParams, out int unread))
+                    if (!TryDeserializeForHandler(message, handler, sender, isLocalLoopback: false, out var callParams, out int unread))
                         continue;
 
                     if (unread == 0)
@@ -1851,22 +1851,12 @@ namespace NetworkingLibrary.Services
             }
         }
 
-        object CreateRpcInfoInstance(Type infoType, CSteamID sender)
+        object CreateRpcInfoInstance(Type infoType, CSteamID sender, bool isLocalLoopback)
         {
             try
             {
                 var ctorFull = infoType.GetConstructor(new Type[] { typeof(ulong), typeof(string), typeof(bool) });
-                if (ctorFull != null)
-                {
-                    bool isLocal = false;
-                    try { isLocal = (sender == SteamUser.GetSteamID()); }
-                    catch (Exception ex)
-                    {
-                        isLocal = false;
-                        NetLog.DebugThrottled(LogSource, "CreateRpcInfoInstance.GetSteamID", DebugLogCooldownSeconds, $"CreateRpcInfoInstance failed local sender probe via SteamUser.GetSteamID: {ex.GetType().Name}: {ex.Message}");
-                    }
-                    return ctorFull.Invoke(new object[] { sender.m_SteamID, sender.ToString(), isLocal });
-                }
+                if (ctorFull != null) return ctorFull.Invoke(new object[] { sender.m_SteamID, sender.ToString(), isLocalLoopback });
 
                 var ci = infoType.GetConstructor(new Type[] { typeof(CSteamID) });
                 if (ci != null) return ci.Invoke(new object[] { sender });
@@ -2249,7 +2239,7 @@ namespace NetworkingLibrary.Services
                         if (preferOverloadKeyMatch.Value != isPreferred) continue;
                     }
 
-                    if (!TryDeserializeForHandler(message, handler, localSender, out var callParams, out int unread))
+                    if (!TryDeserializeForHandler(message, handler, localSender, isLocalLoopback: true, out var callParams, out int unread))
                         continue;
 
                     deserialized.Add((handler, callParams, unread, handler.OverloadKey));
@@ -2296,7 +2286,7 @@ namespace NetworkingLibrary.Services
                 NetLog.Warning(LogSource, $"No handler matched for local {message.ModID}:{message.MethodName} mask={message.Mask}");
         }
 
-        bool TryDeserializeForHandler(Message source, MessageHandler handler, CSteamID sender, out object[] callParams, out int unread)
+        bool TryDeserializeForHandler(Message source, MessageHandler handler, CSteamID sender, bool isLocalLoopback, out object[] callParams, out int unread)
         {
             callParams = null!;
             unread = int.MaxValue;
@@ -2311,7 +2301,7 @@ namespace NetworkingLibrary.Services
                 if (handler.TakesInfo)
                 {
                     var infoType = paramInfos[paramInfos.Length - 1].ParameterType;
-                    callParams[paramInfos.Length - 1] = CreateRpcInfoInstance(infoType, sender);
+                    callParams[paramInfos.Length - 1] = CreateRpcInfoInstance(infoType, sender, isLocalLoopback);
                 }
 
                 unread = source.UnreadLength();

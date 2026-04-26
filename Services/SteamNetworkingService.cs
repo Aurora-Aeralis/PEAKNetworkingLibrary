@@ -1688,8 +1688,6 @@ namespace NetworkingLibrary.Services
         {
             var ackMsg = new Message(0u, "NETWORK_INTERNAL_ACK", 0, messageSizePolicy);
             ackMsg.WriteULong(msgId);
-            // Transport ACK frames reliably so a dropped ACK does not stall sender-side retransmit logic.
-            // We explicitly clear ACK_FLAG so ACK packets never request ACKs themselves.
             var framed = BuildFramedBytesWithMeta(ackMsg, 0, ReliableType.Reliable);
             if ((framed[0] & ACK_FLAG) != 0)
             {

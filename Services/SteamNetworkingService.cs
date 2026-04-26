@@ -28,6 +28,8 @@ namespace NetworkingLibrary.Services
         const int MAX_LOW_QUEUE_DEPTH = 128;
         const double DebugLogCooldownSeconds = 2d;
         const double QueueOverflowWarningCooldownSeconds = 2d;
+        const string GetLocalSteam64DebugCooldownKey = "SteamNetworkingService.GetLocalSteam64";
+        const string IsHostDebugCooldownKey = "SteamNetworkingService.IsHost";
         readonly IntPtr[] inMessages = new IntPtr[MAX_IN_MESSAGES];
         private readonly object rpcLock = new object();
         private readonly object cryptoStateLock = new();
@@ -39,7 +41,7 @@ namespace NetworkingLibrary.Services
             get
             {
                 if (Lobby == CSteamID.Nil) return 0UL;
-                var owner = SteamMatchmaking.GetLobbyOwner(Lobby);
+                var owner = getLobbyOwner(Lobby);
                 if (owner == CSteamID.Nil) return 0UL;
                 return owner.m_SteamID;
             }
@@ -49,7 +51,7 @@ namespace NetworkingLibrary.Services
             get
             {
                 if (Lobby == CSteamID.Nil) return string.Empty;
-                var owner = SteamMatchmaking.GetLobbyOwner(Lobby);
+                var owner = getLobbyOwner(Lobby);
                 return owner == CSteamID.Nil ? string.Empty : owner.ToString();
             }
         }
@@ -58,10 +60,11 @@ namespace NetworkingLibrary.Services
         {
             try
             {
-                return SteamUser.GetSteamID().m_SteamID;
+                return getLocalSteamId().m_SteamID;
             }
-            catch
+            catch (Exception ex)
             {
+                NetLog.DebugThrottled(LogSource, GetLocalSteam64DebugCooldownKey, DebugLogCooldownSeconds, $"GetLocalSteam64 failed: {ex.GetType().Name}: {ex.Message}");
                 return 0UL;
             }
         }
@@ -103,12 +106,13 @@ namespace NetworkingLibrary.Services
                 try
                 {
                     if (!InLobby) return false;
-                    var owner = SteamMatchmaking.GetLobbyOwner(Lobby);
+                    var owner = getLobbyOwner(Lobby);
                     if (owner == CSteamID.Nil) return false;
-                    return owner == SteamUser.GetSteamID();
+                    return owner == getLocalSteamId();
                 }
-                catch
+                catch (Exception ex)
                 {
+                    NetLog.DebugThrottled(LogSource, IsHostDebugCooldownKey, DebugLogCooldownSeconds, $"IsHost check failed: {ex.GetType().Name}: {ex.Message}");
                     return false;
                 }
             }
@@ -128,6 +132,8 @@ namespace NetworkingLibrary.Services
         private readonly Dictionary<CSteamID, Dictionary<string, string>> lastPlayerData = new();
         private readonly Dictionary<string, string> lastLobbyData = new();
         private Func<CSteamID, int> getNumLobbyMembers = SteamMatchmaking.GetNumLobbyMembers;
+        private Func<CSteamID, CSteamID> getLobbyOwner = SteamMatchmaking.GetLobbyOwner;
+        private Func<CSteamID> getLocalSteamId = SteamUser.GetSteamID;
         private Func<CSteamID, int, CSteamID> getLobbyMemberByIndex = SteamMatchmaking.GetLobbyMemberByIndex;
         private Action<CSteamID, string, string> setLobbyData = SteamMatchmaking.SetLobbyData;
         private Func<CSteamID, string, string> getLobbyData = SteamMatchmaking.GetLobbyData;

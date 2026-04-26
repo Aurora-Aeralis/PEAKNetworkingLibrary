@@ -532,6 +532,56 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void GetLocalSteam64_WhenAccessorThrows_ReturnsFallback_AndHitsThrottledDebugPath()
+    {
+        var service = new SteamNetworkingService();
+        NetLog.ResetForTests();
+        try
+        {
+            SetField(service, "getLocalSteamId", (Func<CSteamID>)(() => throw new InvalidOperationException("steam id unavailable")));
+
+            var exception = Record.Exception(() =>
+            {
+                var value = service.GetLocalSteam64();
+                Assert.Equal(0UL, value);
+            });
+
+            Assert.Null(exception);
+            Assert.False(NetLog.TryEnterCooldown("SteamNetworkingService.GetLocalSteam64", 2d));
+        }
+        finally
+        {
+            NetLog.ResetForTests();
+        }
+    }
+
+    [Fact]
+    public void IsHost_WhenOwnerLookupThrows_ReturnsFalse_AndHitsThrottledDebugPath()
+    {
+        var service = new SteamNetworkingService();
+        NetLog.ResetForTests();
+        try
+        {
+            SetInLobby(service, true);
+            SetLobby(service, 9001UL);
+            SetField(service, "getLobbyOwner", (Func<CSteamID, CSteamID>)(_ => throw new InvalidOperationException("owner unavailable")));
+
+            var exception = Record.Exception(() =>
+            {
+                var value = service.IsHost;
+                Assert.False(value);
+            });
+
+            Assert.Null(exception);
+            Assert.False(NetLog.TryEnterCooldown("SteamNetworkingService.IsHost", 2d));
+        }
+        finally
+        {
+            NetLog.ResetForTests();
+        }
+    }
+
+    [Fact]
     public void OnLobbyEnter_RefreshPlayerList_UsesConfiguredLobbyMemberDelegates()
     {
         var service = new SteamNetworkingService();

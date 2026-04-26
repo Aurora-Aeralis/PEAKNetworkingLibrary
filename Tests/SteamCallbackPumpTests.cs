@@ -134,4 +134,30 @@ public class SteamCallbackPumpTests : IDisposable
             if (secondObject) UnityEngine.Object.DestroyImmediate(secondObject);
         }
     }
+
+    [Fact]
+    public void PrepareCanonicalSteamCallbackPump_PromotesCanonicalPumpToActiveHierarchy_WhenParentIsInactive()
+    {
+        var inactiveParent = new GameObject("inactive-parent");
+        var canonicalObject = new GameObject("canonical-under-inactive-parent");
+        canonicalObject.transform.SetParent(inactiveParent.transform, false);
+        var canonicalPump = canonicalObject.AddComponent<SteamCallbackPump>();
+        inactiveParent.SetActive(false);
+
+        try
+        {
+            var prepareMethod = typeof(SteamNetworkingService).GetMethod("PrepareCanonicalSteamCallbackPump", BindingFlags.Static | BindingFlags.NonPublic)!;
+            var args = new object?[] { null, null };
+            var selectedPump = (SteamCallbackPump)prepareMethod.Invoke(null, args)!;
+
+            Assert.Same(canonicalPump, selectedPump);
+            Assert.True(canonicalObject.activeInHierarchy);
+            Assert.Null(canonicalObject.transform.parent);
+        }
+        finally
+        {
+            if (canonicalObject) UnityEngine.Object.DestroyImmediate(canonicalObject);
+            if (inactiveParent) UnityEngine.Object.DestroyImmediate(inactiveParent);
+        }
+    }
 }

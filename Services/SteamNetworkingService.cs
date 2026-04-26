@@ -300,6 +300,11 @@ namespace NetworkingLibrary.Services
 
             var canonicalObject = canonicalPump.gameObject;
             if (!canonicalObject.activeSelf) canonicalObject.SetActive(true);
+            if (!canonicalObject.activeInHierarchy)
+            {
+                canonicalObject.transform.SetParent(null, true);
+                if (!canonicalObject.activeSelf) canonicalObject.SetActive(true);
+            }
             if (!canonicalPump.enabled) canonicalPump.enabled = true;
             GameObject.DontDestroyOnLoad(canonicalObject);
             return canonicalPump;

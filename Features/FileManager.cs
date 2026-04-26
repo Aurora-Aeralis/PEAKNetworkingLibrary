@@ -157,14 +157,13 @@ namespace NetworkingLibrary.Features
         {
             var legacyDefinition = new ConfigDefinition(VersionSection, LegacyVersionKey);
             Exception? removeException = null;
-            var reflectivePathAvailable = false;
+            var orphanedEntriesPathAttempted = false;
 
             try
             {
                 var removeMethod = GetRemoveMethod(config);
                 if (removeMethod != null)
                 {
-                    reflectivePathAvailable = true;
                     removeMethod.Invoke(config, new object[] { legacyDefinition });
                     return true;
                 }
@@ -179,7 +178,7 @@ namespace NetworkingLibrary.Features
                 var orphanedEntries = GetOrphanedEntries(config);
                 if (orphanedEntries != null)
                 {
-                    reflectivePathAvailable = true;
+                    orphanedEntriesPathAttempted = true;
                     orphanedEntries.Remove(legacyDefinition);
                     return true;
                 }
@@ -190,7 +189,10 @@ namespace NetworkingLibrary.Features
                 Net.Logger?.LogWarning($"Failed to remove legacy config key '{LegacyVersionKey}' during migration.{removeContext} OrphanedEntries fallback error: {orphanedEntriesException}");
             }
 
-            return reflectivePathAvailable;
+            if (removeException != null && !orphanedEntriesPathAttempted)
+                Net.Logger?.LogWarning($"Failed to remove legacy config key '{LegacyVersionKey}' during migration. Remove invocation error: {removeException}");
+
+            return false;
         }
 
         internal static MethodInfo? GetRemoveMethod(ConfigFile config)

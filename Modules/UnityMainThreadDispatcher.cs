@@ -361,9 +361,10 @@ namespace NetworkingLibrary.Modules
 
         static void EmitOverflowWarning(string message)
         {
+            long nowTicks = 0;
             while (true)
             {
-                var nowTicks = DateTime.UtcNow.Ticks;
+                nowTicks = DateTime.UtcNow.Ticks;
                 var previousTicks = Interlocked.Read(ref lastOverflowWarningTicks);
                 if (previousTicks != 0 && new TimeSpan(nowTicks - previousTicks) < overflowWarningCooldown)
                 {

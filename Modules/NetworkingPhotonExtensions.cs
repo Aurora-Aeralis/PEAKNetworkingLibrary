@@ -12,13 +12,23 @@ namespace NetworkingLibrary.Modules
     {
         static readonly TimeSpan UnresolvedMappingWarningCooldown = TimeSpan.FromSeconds(7);
         static readonly TimeSpan UnresolvedMappingWarningPruneAge = TimeSpan.FromSeconds(UnresolvedMappingWarningCooldown.TotalSeconds * 4);
+        static readonly TimeSpan PersonaByNameCacheTtl = TimeSpan.FromSeconds(5);
         const int UnresolvedMappingWarningThrottleMaxEntries = 2048;
         static readonly Dictionary<string, DateTime> UnresolvedMappingWarningThrottle = new Dictionary<string, DateTime>(StringComparer.Ordinal);
         static readonly object UnresolvedMappingWarningThrottleLock = new object();
+        static readonly object PersonaByNameCacheLock = new object();
+        static PersonaByNameCacheState PersonaByNameCache = new PersonaByNameCacheState();
         static readonly string[] StableIdPropertyKeys =
         {
             "steam64", "steamid64", "steam_id64", "steamid", "steam_id", "steam", "authid", "auth_id", "userid", "user_id"
         };
+
+        internal struct PersonaByNameCacheState
+        {
+            internal string LastMembershipKey;
+            internal Dictionary<string, List<ulong>> LastPersonaByName;
+            internal DateTime LastBuiltUtc;
+        }
 
         public static Dictionary<int, ulong> MapPhotonActorsToSteam(INetworkingService svc)
         {
@@ -32,18 +42,7 @@ namespace NetworkingLibrary.Modules
             if (room == null) return map;
 
             var lobbyIdSet = new HashSet<ulong>(lobbyIds);
-            var personaByName = new Dictionary<string, List<ulong>>(StringComparer.Ordinal);
-            foreach (var sid in lobbyIds)
-            {
-                try
-                {
-                    var name = SteamFriends.GetFriendPersonaName(new CSteamID(sid));
-                    if (string.IsNullOrEmpty(name)) continue;
-                    if (!personaByName.TryGetValue(name, out var ids)) personaByName[name] = ids = new List<ulong>(1);
-                    ids.Add(sid);
-                }
-                catch { }
-            }
+            var personaByName = GetOrBuildPersonaByName(lobbyIds, DateTime.UtcNow);
 
             foreach (var kv in room.Players)
             {
@@ -75,6 +74,48 @@ namespace NetworkingLibrary.Modules
             }
 
             return map;
+        }
+
+        static Dictionary<string, List<ulong>> GetOrBuildPersonaByName(ulong[] lobbyIds, DateTime nowUtc)
+        {
+            var membershipKey = BuildLobbyMembershipKey(lobbyIds);
+            lock (PersonaByNameCacheLock)
+            {
+                var cached = PersonaByNameCache.LastPersonaByName;
+                if (cached != null && PersonaByNameCache.LastMembershipKey == membershipKey && nowUtc - PersonaByNameCache.LastBuiltUtc < PersonaByNameCacheTtl) return cached;
+
+                var rebuilt = BuildPersonaByName(lobbyIds);
+                PersonaByNameCache.LastMembershipKey = membershipKey;
+                PersonaByNameCache.LastPersonaByName = rebuilt;
+                PersonaByNameCache.LastBuiltUtc = nowUtc;
+                return rebuilt;
+            }
+        }
+
+        static Dictionary<string, List<ulong>> BuildPersonaByName(ulong[] lobbyIds)
+        {
+            var personaByName = new Dictionary<string, List<ulong>>(StringComparer.Ordinal);
+            foreach (var sid in lobbyIds)
+            {
+                try
+                {
+                    var name = SteamFriends.GetFriendPersonaName(new CSteamID(sid));
+                    if (string.IsNullOrEmpty(name)) continue;
+                    if (!personaByName.TryGetValue(name, out var ids)) personaByName[name] = ids = new List<ulong>(1);
+                    ids.Add(sid);
+                }
+                catch { }
+            }
+            return personaByName;
+        }
+
+        static string BuildLobbyMembershipKey(ulong[] lobbyIds)
+        {
+            if (lobbyIds == null || lobbyIds.Length == 0) return string.Empty;
+            var sortedIds = new ulong[lobbyIds.Length];
+            Array.Copy(lobbyIds, sortedIds, lobbyIds.Length);
+            Array.Sort(sortedIds);
+            return string.Join(",", sortedIds);
         }
 
         static bool TryResolveStableIdentity(Player player, HashSet<ulong> lobbyIdSet, out ulong matchedSteamId, out string issue)
@@ -195,6 +236,11 @@ namespace NetworkingLibrary.Modules
         internal static int GetUnresolvedMappingWarningThrottleCountForTests()
         {
             lock (UnresolvedMappingWarningThrottleLock) return UnresolvedMappingWarningThrottle.Count;
+        }
+
+        internal static void ResetPersonaByNameCacheForTests()
+        {
+            lock (PersonaByNameCacheLock) PersonaByNameCache = new PersonaByNameCacheState();
         }
 
         static void PruneUnresolvedMappingWarningThrottle(DateTime nowUtc)

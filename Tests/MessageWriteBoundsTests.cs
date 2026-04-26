@@ -1,0 +1,36 @@
+using System.IO;
+using NetworkingLibrary.Modules;
+using Xunit;
+
+namespace NetworkingLibrary.Tests;
+
+public class MessageWriteBoundsTests
+{
+    private static Message NewMessage() => new(1u, "method", 0);
+
+    [Fact]
+    public void WriteBytes_Rejects_Payload_That_Exceeds_Logical_Message_Cap()
+    {
+        using var message = NewMessage();
+        var remaining = Message.MaxLogicalSize - message.Length() - sizeof(int);
+        Assert.True(remaining > 0);
+
+        message.WriteBytes(new byte[remaining]);
+
+        var ex = Assert.Throws<InvalidDataException>(() => message.WriteBytes(new byte[1]));
+        Assert.Contains("WriteBytes exceeds max message size", ex.Message);
+    }
+
+    [Fact]
+    public void WriteString_Rejects_Payload_That_Exceeds_Logical_Message_Cap()
+    {
+        using var message = NewMessage();
+        var remaining = Message.MaxLogicalSize - message.Length() - sizeof(int);
+        Assert.True(remaining > 0);
+
+        message.WriteString(new string('a', remaining));
+
+        var ex = Assert.Throws<InvalidDataException>(() => message.WriteString("b"));
+        Assert.Contains("WriteString exceeds max message size", ex.Message);
+    }
+}

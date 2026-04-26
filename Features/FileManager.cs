@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Collections;
+using System.Collections.Generic;
 using System.Reflection;
 using System.Collections.Concurrent;
 using BepInEx.Configuration;
@@ -215,6 +216,7 @@ namespace NetworkingLibrary.Features
                     return false;
 
                 var lines = File.ReadAllLines(configPath);
+                var keptLines = new List<string>(lines.Length);
                 var changed = false;
                 var inVersionSection = false;
                 for (var i = 0; i < lines.Length; i++)
@@ -224,29 +226,43 @@ namespace NetworkingLibrary.Features
                     {
                         var section = trimmed[1..^1].Trim();
                         inVersionSection = section.Equals(VersionSection, StringComparison.Ordinal);
+                        keptLines.Add(lines[i]);
                         continue;
                     }
 
                     if (!inVersionSection)
+                    {
+                        keptLines.Add(lines[i]);
                         continue;
+                    }
 
                     if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#", StringComparison.Ordinal) || trimmed.StartsWith(";", StringComparison.Ordinal))
+                    {
+                        keptLines.Add(lines[i]);
                         continue;
+                    }
 
                     var separatorIndex = lines[i].IndexOf('=');
                     if (separatorIndex <= 0)
+                    {
+                        keptLines.Add(lines[i]);
                         continue;
+                    }
 
                     var key = lines[i][..separatorIndex].Trim();
                     if (!key.Equals(LegacyVersionKey, StringComparison.Ordinal))
+                    {
+                        keptLines.Add(lines[i]);
                         continue;
+                    }
 
-                    lines[i] = lines[i][..(separatorIndex + 1)];
                     changed = true;
                 }
 
-                if (changed)
-                    File.WriteAllLines(configPath, lines);
+                if (!changed)
+                    return false;
+
+                File.WriteAllLines(configPath, keptLines);
                 return true;
             }
             catch (Exception ex)

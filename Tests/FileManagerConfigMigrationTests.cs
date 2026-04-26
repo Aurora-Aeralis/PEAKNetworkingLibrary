@@ -195,7 +195,7 @@ public class FileManagerConfigMigrationTests
     [InlineData("Current Version=1")]
     [InlineData("Current Version    =    1")]
     [InlineData("    Current Version = 1")]
-    public void MigrateConfigIfNeeded_LegacyVersionSpacingVariants_ParsesAndClearsOrRemovesKey(string legacyLine)
+    public void MigrateConfigIfNeeded_LegacyVersionSpacingVariants_ParsesAndRemovesKey(string legacyLine)
     {
         using var scope = new TempConfigScope();
         File.WriteAllText(scope.ConfigPath,
@@ -209,7 +209,7 @@ public class FileManagerConfigMigrationTests
         var configText = File.ReadAllText(scope.ConfigPath);
 
         Assert.Equal("1", schemaVersion);
-        Assert.True(IsLegacyVersionClearedOrRemoved(configText));
+        Assert.True(IsLegacyVersionRemoved(configText));
     }
 
     [Theory]
@@ -233,10 +233,10 @@ public class FileManagerConfigMigrationTests
 
         Assert.Equal("1", schemaVersion);
         Assert.Contains("ConfigSchemaVersion = 1", configText, StringComparison.Ordinal);
-        Assert.True(IsLegacyVersionClearedOrRemoved(configText));
+        Assert.True(IsLegacyVersionRemoved(configText));
     }
 
-    static bool IsLegacyVersionClearedOrRemoved(string configText)
+    static bool IsLegacyVersionRemoved(string configText)
     {
         var inVersionSection = false;
         foreach (var line in configText.Split('\n', StringSplitOptions.None))
@@ -259,8 +259,7 @@ public class FileManagerConfigMigrationTests
             if (!string.Equals(key, "Current Version", StringComparison.Ordinal))
                 continue;
 
-            if (!string.IsNullOrWhiteSpace(line[(separatorIndex + 1)..]))
-                return false;
+            return false;
         }
 
         return true;

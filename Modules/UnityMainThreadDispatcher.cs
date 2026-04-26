@@ -17,6 +17,7 @@ namespace NetworkingLibrary.Modules
         }
 
         const int defaultMaxQueueDepth = 2048;
+        const int defaultMaxActionsPerFrame = 256;
         static readonly TimeSpan overflowWarningCooldown = TimeSpan.FromSeconds(5);
         static UnityMainThreadDispatcher? instance;
         static readonly object instanceLock = new();
@@ -38,6 +39,7 @@ namespace NetworkingLibrary.Modules
         internal static Func<UnityMainThreadDispatcher> CreateInstanceOnMainThreadFactory = CreateOrFindDispatcherOnMainThread;
         internal static TimeSpan BackgroundThreadInstanceWaitTimeout = defaultBackgroundThreadWaitTimeout;
         internal static Func<int?>? MaxQueueDepthProvider;
+        internal static Func<int?>? MaxActionsPerFrameProvider;
         internal static Func<QueueOverflowBehavior>? QueueOverflowBehaviorProvider;
 
         public static UnityMainThreadDispatcher Instance()
@@ -243,6 +245,13 @@ namespace NetworkingLibrary.Modules
             return defaultMaxQueueDepth;
         }
 
+        static int ResolveMaxActionsPerFrame()
+        {
+            var configured = MaxActionsPerFrameProvider?.Invoke();
+            if (configured.HasValue && configured.Value > 0) return configured.Value;
+            return defaultMaxActionsPerFrame;
+        }
+
         static void EmitOverflowWarning(string message)
         {
             while (true)
@@ -291,7 +300,8 @@ namespace NetworkingLibrary.Modules
 
         void Update()
         {
-            while (true)
+            var maxActionsPerFrame = ResolveMaxActionsPerFrame();
+            for (var i = 0; i < maxActionsPerFrame; i++)
             {
                 Action a = null!;
                 lock (queue)
@@ -329,6 +339,7 @@ namespace NetworkingLibrary.Modules
                     CreateInstanceOnMainThreadFactory = CreateOrFindDispatcherOnMainThread;
                     BackgroundThreadInstanceWaitTimeout = defaultBackgroundThreadWaitTimeout;
                     MaxQueueDepthProvider = null;
+                    MaxActionsPerFrameProvider = null;
                     QueueOverflowBehaviorProvider = null;
                 }
             }
@@ -349,6 +360,7 @@ namespace NetworkingLibrary.Modules
             internal static int CoalescedEnqueueCountForTests => Volatile.Read(ref coalescedEnqueueCount);
             internal static int SuppressedOverflowWarningsForTests => Volatile.Read(ref suppressedOverflowWarnings);
             internal static int EmittedOverflowWarningCountForTests => Volatile.Read(ref emittedOverflowWarningCountForTests);
+            internal static int MaxActionsPerFrameForTests => ResolveMaxActionsPerFrame();
             internal static long LastOverflowWarningTicksForTests
             {
                 get => Interlocked.Read(ref lastOverflowWarningTicks);

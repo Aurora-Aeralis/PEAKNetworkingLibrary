@@ -162,6 +162,61 @@ public class UnityMainThreadDispatcherTests : IDisposable
     }
 
     [Fact]
+    public void Update_WhenActionsExceedPerFrameBudget_PreservesRemainingWorkForNextFrame()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxActionsPerFrameProvider = () => 2;
+
+        var executed = new List<int>();
+        for (var i = 1; i <= 5; i++)
+        {
+            var value = i;
+            dispatcher.Enqueue(() => executed.Add(value));
+        }
+
+        typeof(UnityMainThreadDispatcher)
+            .GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(dispatcher, null);
+
+        Assert.Equal(new[] { 1, 2 }, executed);
+        Assert.Equal(3, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
+
+        typeof(UnityMainThreadDispatcher)
+            .GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(dispatcher, null);
+
+        Assert.Equal(new[] { 1, 2, 3, 4 }, executed);
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
+    }
+
+    [Fact]
+    public void Update_WithPerFrameBudget_DoesNotChangeOverflowCounters()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 3;
+        UnityMainThreadDispatcher.MaxActionsPerFrameProvider = () => 1;
+        UnityMainThreadDispatcher.QueueOverflowBehaviorProvider = () => UnityMainThreadDispatcher.QueueOverflowBehavior.DropOldest;
+
+        var executed = new List<int>();
+        dispatcher.Enqueue(() => executed.Add(1));
+        dispatcher.Enqueue(() => executed.Add(2));
+        dispatcher.Enqueue(() => executed.Add(3));
+        dispatcher.Enqueue(() => executed.Add(4));
+
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.DroppedEnqueueCountForTests);
+        Assert.Equal(3, UnityMainThreadDispatcher.TestHooks.QueueHighWaterMarkForTests);
+
+        typeof(UnityMainThreadDispatcher)
+            .GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(dispatcher, null);
+
+        Assert.Equal(new[] { 2 }, executed);
+        Assert.Equal(2, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.DroppedEnqueueCountForTests);
+        Assert.Equal(3, UnityMainThreadDispatcher.TestHooks.QueueHighWaterMarkForTests);
+    }
+
+    [Fact]
     public void EnqueueDelayed_WhenQueueLimitReached_UsesSameBoundControls()
     {
         var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));

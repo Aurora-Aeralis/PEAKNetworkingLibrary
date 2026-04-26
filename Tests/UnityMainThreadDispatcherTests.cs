@@ -7,6 +7,7 @@ using System.Runtime.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using NetworkingLibrary.Modules;
+using UnityEngine;
 using Xunit;
 
 namespace NetworkingLibrary.Tests;
@@ -181,6 +182,19 @@ public class UnityMainThreadDispatcherTests : IDisposable
 
         Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
         Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.RejectedEnqueueCountForTests);
+    }
+
+    [Fact]
+    public void EnqueueDelayed_UsesRealtimeWaitSoDelayIgnoresTimeScale()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        var delayed = (System.Collections.IEnumerator)typeof(UnityMainThreadDispatcher)
+            .GetMethod("EnqueueDelayed", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(dispatcher, new object[] { (Action)(() => { }), 1.25f })!;
+
+        Assert.True(delayed.MoveNext());
+        var wait = Assert.IsType<WaitForSecondsRealtime>(delayed.Current);
+        Assert.Equal(1.25f, wait.waitTime, 3);
     }
 
     [Fact]

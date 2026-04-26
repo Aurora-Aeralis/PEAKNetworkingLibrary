@@ -194,7 +194,7 @@ namespace NetworkingLibrary.Modules
         IEnumerator EnqueueDelayed(Action a, float d)
         {
             if (a == null) throw new ArgumentNullException(nameof(a));
-            yield return new WaitForSeconds(d);
+            yield return new WaitForSecondsRealtime(d);
             TryEnqueueBounded(a, delayed: true);
         }
 

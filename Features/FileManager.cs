@@ -23,20 +23,20 @@ namespace NetworkingLibrary.Features
         static readonly ConcurrentDictionary<Type, Lazy<MethodInfo?>> RemoveMethodCache = new();
         static readonly ConcurrentDictionary<Type, Lazy<PropertyInfo?>> OrphanedEntriesPropertyCache = new();
 
-        internal static ConfigEntry<T> BindConfig<T>(string Header, string Features, T Value, string? Info = "")
+        internal static ConfigEntry<T> BindConfig<T>(string header, string features, T value, string? info = "")
         {
-            return Net.Instance.config.Bind(Header, Features, Value, Info);
+            return Net.Instance.config.Bind(header, features, value, info);
         }
 
         internal static void InitializeConfig()
         {
-            string ConfigFolderPath = Path.Combine(Paths.ConfigPath, DaModsFolderName, MyPluginInfo.PLUGIN_NAME);
-            if (!Directory.Exists(ConfigFolderPath)) Directory.CreateDirectory(ConfigFolderPath);
-            Net.Instance.config = new ConfigFile(BuildConfigPath(ConfigFolderPath), true);
+            var configFolderPath = Path.Combine(Paths.ConfigPath, DaModsFolderName, MyPluginInfo.PLUGIN_NAME);
+            if (!Directory.Exists(configFolderPath)) Directory.CreateDirectory(configFolderPath);
+            Net.Instance.config = new ConfigFile(BuildConfigPath(configFolderPath), true);
             MigrateConfigIfNeeded(Net.Instance.config, CurrentConfigSchemaVersion);
 
             DefineConfig();
-            Net.Logger.LogInfo("Config initialized.");
+            Net.Logger.LogInfo("Config initialization complete.");
         }
 
         internal static string BuildConfigPath(string configFolderPath)
@@ -82,18 +82,18 @@ namespace NetworkingLibrary.Features
             if (!sourceVersionValid || startVersion < 0)
             {
                 startVersion = 0;
-                Net.Logger?.LogWarning($"Invalid source config schema version '{sourceVersion}'. Defaulting migration start version to 0.");
+                Net.Logger?.LogWarning($"Invalid source schema version '{sourceVersion}'. Starting migration at schema 0.");
             }
 
-            for (var schemaVersion = startVersion; schemaVersion < targetVersion; schemaVersion++)
+            for (var fromSchemaVersion = startVersion; fromSchemaVersion < targetVersion; fromSchemaVersion++)
             {
-                switch (schemaVersion)
+                switch (fromSchemaVersion)
                 {
                     case 0:
                         Migrate_0_to_1(schemaVersionEntry, legacyVersion);
                         break;
                     default:
-                        throw new InvalidOperationException($"No migration path exists from schema {schemaVersion} to {schemaVersion + 1}.");
+                        throw new InvalidOperationException($"No migration path exists from schema {fromSchemaVersion} to {fromSchemaVersion + 1}.");
                 }
             }
         }
@@ -164,7 +164,7 @@ namespace NetworkingLibrary.Features
             if (ClearLegacyVersionInFile(config, out var fileCleanupException))
                 return;
 
-            Net.Logger?.LogWarning($"Failed to remove legacy config key '{LegacyVersionKey}' during migration.{BuildCleanupFailureContext(removeException, orphanedEntriesException, fileCleanupException)}");
+            Net.Logger?.LogWarning($"Legacy config key '{LegacyVersionKey}' could not be removed during migration.{BuildCleanupFailureContext(removeException, orphanedEntriesException, fileCleanupException)}");
         }
 
         static bool TryRemoveViaConfigApi(ConfigFile config, ConfigDefinition legacyDefinition, out Exception? exception)

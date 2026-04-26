@@ -47,23 +47,19 @@ namespace NetworkingLibrary.Modules
         public const int MaxMaxSize = int.MaxValue / 16;
         private static readonly object DefaultSizePolicyLock = new();
         /// <summary>
-        /// Legacy compatibility field.
-        /// <para>
-        /// Existing binaries may write this field directly. Runtime reads should use <see cref="GetMaxSize"/> or
-        /// <see cref="MaxLogicalSize"/> so validation and policy synchronization are applied under <see cref="DefaultSizePolicyLock"/>.
-        /// </para>
+        /// Legacy max-size field kept for binary compatibility.
+        /// Read effective limits through <see cref="GetMaxSize"/> or <see cref="MaxLogicalSize"/>.
         /// </summary>
         [Obsolete("Use SetMaxSize(int bytes) so validation and size policy rebuild happen under lock. This field remains for binary compatibility.", false)]
         public static int MaxSize = DefaultMaxSize;
         /// <summary>
-        /// Effective logical size cap for the current default policy.
-        /// <para>Reads synchronize legacy <see cref="MaxSize"/> writes into <see cref="DefaultSizePolicy"/> deterministically.</para>
+        /// Logical payload cap from the synchronized default policy.
         /// </summary>
         public static int MaxLogicalSize => ResolveDefaultSizePolicy().MaxLogicalSize;
         public static MessageSizePolicy DefaultSizePolicy { get; private set; } = new(DefaultMaxSize);
 
         /// <summary>
-        /// Gets the effective max size from the synchronized default policy.
+        /// Returns the synchronized default max payload size.
         /// </summary>
         public static int GetMaxSize() => ResolveDefaultSizePolicy().MaxSize;
 
@@ -591,7 +587,7 @@ namespace NetworkingLibrary.Modules
 
         private static void TraceListMaterializationFallback(Type targetType, Type elementType, string reason)
         {
-            var message = $"Falling back to List<{elementType.Name}> while deserializing list-like target {targetType.FullName}: {reason}";
+            var message = $"List deserialization fallback to List<{elementType.Name}> for {targetType.FullName}: {reason}";
             if (Debug.unityLogger != null)
             {
                 Debug.unityLogger.LogWarning(nameof(Message), message);
@@ -801,7 +797,7 @@ namespace NetworkingLibrary.Modules
         }
 
         /// <summary>
-        /// Decompresses a GZip payload using the global default message size policy when no explicit max is provided.
+        /// Decompresses GZip payload data with the default policy cap when no max is provided.
         /// </summary>
         public static byte[] DecompressPayload(byte[] compressed, int maxOutputSize = -1)
         {

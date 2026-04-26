@@ -92,6 +92,47 @@ public class MessageSerializerConcurrencyTests
         Assert.Empty(errors);
     }
 
+
+    [Fact]
+    public void Primitive_WireBytes_AreStable_Across_Repeated_Writes()
+    {
+        var expectedInt = BitConverter.GetBytes(unchecked((int)0x89ABCDEF));
+        var expectedUInt = BitConverter.GetBytes(0x01234567u);
+        var expectedLong = BitConverter.GetBytes(unchecked((long)0x0123456789ABCDEFl));
+        var expectedULong = BitConverter.GetBytes(0xFEDCBA9876543210ul);
+        var expectedFloat = BitConverter.GetBytes(123.25f);
+
+        for (var attempt = 0; attempt < 256; attempt++)
+        {
+            var message = new Message(1u, "method", 0);
+            message.WriteInt(unchecked((int)0x89ABCDEF));
+            message.WriteUInt(0x01234567u);
+            message.WriteLong(unchecked((long)0x0123456789ABCDEFl));
+            message.WriteULong(0xFEDCBA9876543210ul);
+            message.WriteFloat(123.25f);
+
+            var bytes = message.ToArray();
+            var read = new Message(bytes);
+
+            Assert.Equal(unchecked((int)0x89ABCDEF), read.ReadInt());
+            Assert.Equal(0x01234567u, read.ReadUInt());
+            Assert.Equal(unchecked((long)0x0123456789ABCDEFl), read.ReadLong());
+            Assert.Equal(0xFEDCBA9876543210ul, read.ReadULong());
+            Assert.Equal(123.25f, read.ReadFloat());
+
+            var payloadOffset = bytes.Length - (4 + 4 + 8 + 8 + 4);
+            Assert.Equal(expectedInt, bytes.AsSpan(payloadOffset, 4).ToArray());
+            payloadOffset += 4;
+            Assert.Equal(expectedUInt, bytes.AsSpan(payloadOffset, 4).ToArray());
+            payloadOffset += 4;
+            Assert.Equal(expectedLong, bytes.AsSpan(payloadOffset, 8).ToArray());
+            payloadOffset += 8;
+            Assert.Equal(expectedULong, bytes.AsSpan(payloadOffset, 8).ToArray());
+            payloadOffset += 8;
+            Assert.Equal(expectedFloat, bytes.AsSpan(payloadOffset, 4).ToArray());
+        }
+    }
+
     [Fact]
     public void Final_Registered_Serializer_IsUsed_Deterministically()
     {

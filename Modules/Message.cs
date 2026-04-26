@@ -142,7 +142,7 @@ namespace NetworkingLibrary.Modules
         {
             if (bytes.Length == 0) return;
             buffer.EnsureCapacity(buffer.Count + bytes.Length);
-            buffer.AddRange(bytes.ToArray());
+            for (int i = 0; i < bytes.Length; i++) buffer.Add(bytes[i]);
             readableBufferDirty = true;
         }
 

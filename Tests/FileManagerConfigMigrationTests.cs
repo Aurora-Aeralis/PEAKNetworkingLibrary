@@ -34,15 +34,18 @@ public class FileManagerConfigMigrationTests
         using var scope = new TempConfigScope();
         var seedConfig = new ConfigFile(scope.ConfigPath, true);
         seedConfig.Bind("Version", "Current Version", string.Empty).Value = "1";
+        seedConfig.Bind("Gameplay", "UserSetting", 0).Value = 12;
         seedConfig.Save();
 
         var config = new ConfigFile(scope.ConfigPath, true);
         FileManager.MigrateConfigIfNeeded(config, "1");
 
         var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        var userSetting = config.Bind("Gameplay", "UserSetting", 0).Value;
         var configText = File.ReadAllText(scope.ConfigPath);
 
         Assert.Equal("1", schemaVersion);
+        Assert.Equal(12, userSetting);
         Assert.Contains("ConfigSchemaVersion = 1", configText, StringComparison.Ordinal);
         Assert.DoesNotContain("Current Version = 1", configText, StringComparison.Ordinal);
 
@@ -58,6 +61,29 @@ public class FileManagerConfigMigrationTests
 
         Assert.Equal("1", reloadedSchemaVersion);
         Assert.DoesNotContain("Current Version = 999", reloadedConfigText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MigrateConfigIfNeeded_AlreadyCurrentWithoutLegacy_DoesNotWriteConfig()
+    {
+        using var scope = new TempConfigScope();
+        var seedConfig = new ConfigFile(scope.ConfigPath, true);
+        seedConfig.Bind("Version", "ConfigSchemaVersion", string.Empty).Value = "1";
+        seedConfig.Bind("Gameplay", "UserSetting", 0).Value = 77;
+        seedConfig.Save();
+
+        var baseline = File.ReadAllText(scope.ConfigPath);
+        var baselineStamp = File.GetLastWriteTimeUtc(scope.ConfigPath);
+        System.Threading.Thread.Sleep(1100);
+
+        var config = new ConfigFile(scope.ConfigPath, true);
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var afterText = File.ReadAllText(scope.ConfigPath);
+        var afterStamp = File.GetLastWriteTimeUtc(scope.ConfigPath);
+
+        Assert.Equal(baseline, afterText);
+        Assert.Equal(baselineStamp, afterStamp);
     }
 
     [Fact]

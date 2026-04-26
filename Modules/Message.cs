@@ -46,6 +46,7 @@ namespace NetworkingLibrary.Modules
         public const int MinMaxSize = 1024;
         public const int MaxMaxSize = int.MaxValue / 16;
         private static readonly object DefaultSizePolicyLock = new();
+        [Obsolete("Use SetMaxSize(int bytes) so validation and size policy rebuild happen under lock. This field remains for binary compatibility.", false)]
         public static int MaxSize = DefaultMaxSize;
         public static int MaxLogicalSize => checked(MaxSize * 16);
         public static MessageSizePolicy DefaultSizePolicy { get; private set; } = new(DefaultMaxSize);

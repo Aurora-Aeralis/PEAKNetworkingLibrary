@@ -490,12 +490,29 @@ namespace NetworkingLibrary.Services
 
                 if ((change & leftMask) != 0)
                 {
+                    CleanupPeerState(player.m_SteamID);
                     PlayerLeft?.Invoke(player.m_SteamID);
                 }
             }
             catch (Exception ex)
             {
                 LogError($"OnLobbyChatUpdate error: {ex}");
+            }
+        }
+
+        internal void CleanupPeerState(ulong steamId64)
+        {
+            if (steamId64 == 0UL) return;
+
+            lastPlayerData.Remove(new CSteamID(steamId64));
+            lock (lastSeenSequence) lastSeenSequence.Remove(steamId64);
+            lock (rateLimiters) rateLimiters.Remove(steamId64);
+            lock (cryptoStateLock)
+            {
+                handshakeStates.Remove(steamId64);
+                if (!perPeerSymmetricKey.TryGetValue(steamId64, out var sym) || sym == null) return;
+                CryptographicOperations.ZeroMemory(sym);
+                perPeerSymmetricKey.Remove(steamId64);
             }
         }
 

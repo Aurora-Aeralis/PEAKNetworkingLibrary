@@ -29,16 +29,14 @@
     <Reference Include="$(ManagedDir)Assembly-CSharp.dll" Private="false" Publicize="true" />
   </ItemGroup>
 
-  <Target Name="PackTS" AfterTargets="Build" Condition="'$(Configuration)' == 'Release' And '$(ThunderstorePackable)' != 'false'">
-    <Error
-      Text=" PackTS must be called with Release configuration."
-      Condition="'$(Configuration)' != 'Release'"
-    />
+  <Target Name="PackTS" AfterTargets="Build" Condition="'$(Configuration)' == 'Release' And '$(IsPackable)' == 'true' And '$(ThunderstorePackable)' != 'false'">
     <PropertyGroup>
       <BuildArgument Condition="'$(PublishTS)' != 'true'">build</BuildArgument>
       <BuildArgument Condition="'$(PublishTS)' == 'true'">publish</BuildArgument>
     </PropertyGroup>
+    <Message Text="PackTS mode: $(BuildArgument)" Importance="high" />
     <Exec Command="dotnet tool restore" />
+    <Exec Command="dotnet tool run tcli thunderstore $(BuildArgument)" />
   </Target>
 
 </Project>

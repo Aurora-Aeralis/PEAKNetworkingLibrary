@@ -20,7 +20,9 @@ public class MessageResetTests
         Assert.Equal(0, message.UnreadLength());
 
         message.WriteInt(7);
-        var reread = new Message(message.ToArray());
+
+        using var reread = NewMessage();
+        reread.SetBytes(message.ToArray());
         Assert.Equal(7, reread.ReadInt());
     }
 
@@ -37,7 +39,9 @@ public class MessageResetTests
         Assert.Equal(0, message.UnreadLength());
 
         message.WriteBool(true);
-        var reread = new Message(message.ToArray());
+
+        using var reread = NewMessage();
+        reread.SetBytes(message.ToArray());
         Assert.True(reread.ReadBool());
     }
 

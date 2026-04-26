@@ -78,4 +78,66 @@ public class NetworkingPhotonExtensionsTests
         Assert.False(NetworkingPhotonExtensions.TryParseSteamIdForTests(765611980, out _));
     }
 
+    [Fact]
+    public void BuildPersonaLookupIndex_Preserves_Ambiguous_Name_Grouping()
+    {
+        NetworkingPhotonExtensions.ResetPersonaNameCacheForTests();
+        NetworkingPhotonExtensions.UtcNow = () => new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        NetworkingPhotonExtensions.PersonaNameLookup = sid => sid switch
+        {
+            76561198000000001UL => "Aurora",
+            76561198000000002UL => "Aurora",
+            76561198000000003UL => "Comet",
+            _ => string.Empty
+        };
+
+        var lobbyIds = new[]
+        {
+            76561198000000001UL,
+            76561198000000002UL,
+            76561198000000003UL
+        };
+
+        var map = NetworkingPhotonExtensions.BuildPersonaLookupIndexForTests(lobbyIds);
+        Assert.Equal(2, map["Aurora"].Count);
+        Assert.Contains(76561198000000001UL, map["Aurora"]);
+        Assert.Contains(76561198000000002UL, map["Aurora"]);
+        Assert.Single(map["Comet"]);
+        Assert.Contains(76561198000000003UL, map["Comet"]);
+    }
+
+    [Fact]
+    public void BuildPersonaLookupIndex_Uses_Cache_Within_Ttl_And_Refreshes_After_Expiry()
+    {
+        NetworkingPhotonExtensions.ResetPersonaNameCacheForTests();
+        var now = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        NetworkingPhotonExtensions.UtcNow = () => now;
+
+        var calls = 0;
+        NetworkingPhotonExtensions.PersonaNameLookup = sid =>
+        {
+            calls++;
+            return sid == 76561198000000001UL ? "Aurora" : "Comet";
+        };
+
+        var lobbyIds = new[]
+        {
+            76561198000000001UL,
+            76561198000000002UL
+        };
+
+        var first = NetworkingPhotonExtensions.BuildPersonaLookupIndexForTests(lobbyIds);
+        Assert.Equal(2, calls);
+        Assert.Single(first["Aurora"]);
+        Assert.Single(first["Comet"]);
+
+        now = now.AddSeconds(2);
+        NetworkingPhotonExtensions.BuildPersonaLookupIndexForTests(lobbyIds);
+        Assert.Equal(2, calls);
+
+        now = now.AddSeconds(4);
+        NetworkingPhotonExtensions.BuildPersonaLookupIndexForTests(lobbyIds);
+        Assert.Equal(4, calls);
+    }
+
 }

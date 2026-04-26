@@ -233,7 +233,7 @@ public class MessageNullContractTests
     [Fact]
     public void ReadString_Allows_Length_Above_MaxSize_Within_LogicalCap()
     {
-        var value = new string('a', Message.MaxSize + 1);
+        var value = new string('a', Message.GetMaxSize() + 1);
         var write = NewMessage();
         write.WriteString(value);
 
@@ -244,7 +244,7 @@ public class MessageNullContractTests
     [Fact]
     public void ReadObject_ByteArray_Allows_Length_Above_MaxSize_Within_LogicalCap()
     {
-        var payload = Enumerable.Repeat((byte)7, Message.MaxSize + 1).ToArray();
+        var payload = Enumerable.Repeat((byte)7, Message.GetMaxSize() + 1).ToArray();
         var write = NewMessage();
         write.WriteObject(typeof(byte[]), payload);
 

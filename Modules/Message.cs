@@ -46,10 +46,26 @@ namespace NetworkingLibrary.Modules
         public const int MinMaxSize = 1024;
         public const int MaxMaxSize = int.MaxValue / 16;
         private static readonly object DefaultSizePolicyLock = new();
+        /// <summary>
+        /// Legacy compatibility field.
+        /// <para>
+        /// Existing binaries may write this field directly. Runtime reads should use <see cref="GetMaxSize"/> or
+        /// <see cref="MaxLogicalSize"/> so validation and policy synchronization are applied under <see cref="DefaultSizePolicyLock"/>.
+        /// </para>
+        /// </summary>
         [Obsolete("Use SetMaxSize(int bytes) so validation and size policy rebuild happen under lock. This field remains for binary compatibility.", false)]
         public static int MaxSize = DefaultMaxSize;
-        public static int MaxLogicalSize => checked(MaxSize * 16);
+        /// <summary>
+        /// Effective logical size cap for the current default policy.
+        /// <para>Reads synchronize legacy <see cref="MaxSize"/> writes into <see cref="DefaultSizePolicy"/> deterministically.</para>
+        /// </summary>
+        public static int MaxLogicalSize => ResolveDefaultSizePolicy().MaxLogicalSize;
         public static MessageSizePolicy DefaultSizePolicy { get; private set; } = new(DefaultMaxSize);
+
+        /// <summary>
+        /// Gets the effective max size from the synchronized default policy.
+        /// </summary>
+        public static int GetMaxSize() => ResolveDefaultSizePolicy().MaxSize;
 
         public static void SetMaxSize(int bytes)
         {
@@ -64,17 +80,19 @@ namespace NetworkingLibrary.Modules
         private static MessageSizePolicy ResolveDefaultSizePolicy()
         {
             var current = DefaultSizePolicy;
-            if (current.MaxSize == MaxSize)
+            var legacyMaxSize = MaxSize;
+            if (current.MaxSize == legacyMaxSize)
             {
                 return current;
             }
 
             lock (DefaultSizePolicyLock)
             {
-                if (DefaultSizePolicy.MaxSize != MaxSize)
+                legacyMaxSize = MaxSize;
+                if (DefaultSizePolicy.MaxSize != legacyMaxSize)
                 {
-                    ValidateMaxSize(MaxSize);
-                    DefaultSizePolicy = new MessageSizePolicy(MaxSize);
+                    ValidateMaxSize(legacyMaxSize);
+                    DefaultSizePolicy = new MessageSizePolicy(legacyMaxSize);
                 }
 
                 return DefaultSizePolicy;

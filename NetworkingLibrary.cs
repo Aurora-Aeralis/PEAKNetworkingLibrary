@@ -85,7 +85,7 @@ namespace NetworkingLibrary
                 canonicalPoller.hideFlags = HideFlags.HideAndDontSave;
             }
 
-            CleanupDuplicatePollers(pollers.Skip(1), Destroy);
+            CleanupDuplicatePollers(pollers.Skip(1), DestroyPollerDuringStartup);
 
             var go = canonicalPoller.gameObject;
             go.name = pollerName;
@@ -110,6 +110,16 @@ namespace NetworkingLibrary
                     && components.Any(component => component is NetworkingPoller);
                 destroyAction(hasOnlyTransformAndPoller ? extraPoller.gameObject : extraPoller);
             }
+        }
+
+        private static void DestroyPollerDuringStartup(UnityEngine.Object target)
+        {
+            if (target is NetworkingPoller duplicatePoller)
+                duplicatePoller.enabled = false;
+            else if (target is GameObject duplicatePollerObject)
+                duplicatePollerObject.SetActive(false);
+
+            DestroyImmediate(target);
         }
 
         internal static bool TryInitializeNetworkingService(ManualLogSource? logger, out INetworkingService? service)

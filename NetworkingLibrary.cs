@@ -343,6 +343,15 @@ namespace NetworkingLibrary
         static void ReplaceService(INetworkingService previousService, INetworkingService nextService, string reason)
         {
             if (ReferenceEquals(previousService, nextService)) return;
+            try
+            {
+                if (previousService is INetworkingServiceStateTransfer stateTransferSource)
+                    stateTransferSource.CopyRuntimeStateTo(nextService);
+            }
+            catch (Exception ex)
+            {
+                Logger?.LogWarning($"Failed to migrate networking runtime state before service replacement: {ex.Message}");
+            }
             SafeShutdown(previousService, "startup retry previous service");
             Service = nextService;
             LogStartupRetryTransitionThrottled($"Service transition completed: {previousService.GetType().Name} -> {nextService.GetType().Name}. Reason: {reason}");

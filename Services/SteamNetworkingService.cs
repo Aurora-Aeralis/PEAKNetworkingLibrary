@@ -18,7 +18,7 @@ using UnityEngine;
 
 namespace NetworkingLibrary.Services
 {
-    public class SteamNetworkingService : INetworkingService
+    public class SteamNetworkingService : INetworkingService, INetworkingServiceStateTransfer
     {
         const string LogSource = "SteamNetworkingService";
         const int CHANNEL = 120;
@@ -2302,6 +2302,56 @@ namespace NetworkingLibrary.Services
             }
         }
 
+        public void CopyRuntimeStateTo(INetworkingService target)
+        {
+            if (target == null) throw new ArgumentNullException(nameof(target));
+
+            (object instance, uint modId, int mask)[] objectRegistrations;
+            (Type type, uint modId, int mask)[] typeRegistrations;
+            string[] lobbyKeysSnapshot;
+            string[] playerKeysSnapshot;
+            KeyValuePair<uint, Func<byte[], byte[]>>[] signersSnapshot;
+            KeyValuePair<uint, RSAParameters>[] publicKeysSnapshot;
+
+            lock (rpcLock)
+            {
+                var objectSet = new HashSet<(object instance, uint modId, int mask)>();
+                var typeSet = new HashSet<(Type type, uint modId, int mask)>();
+                foreach (var modEntry in rpcs)
+                {
+                    foreach (var handlers in modEntry.Value.Values)
+                    {
+                        foreach (var handler in handlers)
+                        {
+                            if (handler.Method.IsStatic) typeSet.Add((handler.Method.DeclaringType!, modEntry.Key, handler.Mask));
+                            else if (handler.Target != null) objectSet.Add((handler.Target, modEntry.Key, handler.Mask));
+                        }
+                    }
+                }
+
+                objectRegistrations = objectSet.ToArray();
+                typeRegistrations = typeSet.ToArray();
+                lobbyKeysSnapshot = lobbyDataKeys.ToArray();
+                playerKeysSnapshot = playerDataKeys.ToArray();
+            }
+
+            lock (cryptoStateLock)
+            {
+                signersSnapshot = modSigners.ToArray();
+                publicKeysSnapshot = modPublicKeys
+                    .Select(entry => new KeyValuePair<uint, RSAParameters>(entry.Key, CloneRsaParameters(entry.Value)))
+                    .ToArray();
+            }
+
+            target.IncomingValidator = IncomingValidator;
+            foreach (var registration in objectRegistrations) target.RegisterNetworkObject(registration.instance, registration.modId, registration.mask);
+            foreach (var registration in typeRegistrations) target.RegisterNetworkType(registration.type, registration.modId, registration.mask);
+            foreach (var key in lobbyKeysSnapshot) target.RegisterLobbyDataKey(key);
+            foreach (var key in playerKeysSnapshot) target.RegisterPlayerDataKey(key);
+            foreach (var signer in signersSnapshot) target.RegisterModSigner(signer.Key, signer.Value);
+            foreach (var publicKey in publicKeysSnapshot) target.RegisterModPublicKey(publicKey.Key, publicKey.Value);
+        }
+
         static RSAParameters CloneRsaParameters(RSAParameters source)
         {
             return new RSAParameters
@@ -2618,7 +2668,7 @@ namespace NetworkingLibrary.Services
     /// <summary>
     /// Editor-safe fallback that preserves the SteamNetworkingService type without Steamworks dependencies.
     /// </summary>
-    public class SteamNetworkingService : INetworkingService
+    public class SteamNetworkingService : INetworkingService, INetworkingServiceStateTransfer
     {
         readonly OfflineNetworkingService offline = new();
 
@@ -2701,6 +2751,7 @@ namespace NetworkingLibrary.Services
         public void PollReceive() => offline.PollReceive();
         public void RegisterModSigner(uint modId, Func<byte[], byte[]> signerDelegate) => offline.RegisterModSigner(modId, signerDelegate);
         public void RegisterModPublicKey(uint modId, RSAParameters pub) => offline.RegisterModPublicKey(modId, pub);
+        public void CopyRuntimeStateTo(INetworkingService target) => offline.CopyRuntimeStateTo(target);
     }
 }
 #endif

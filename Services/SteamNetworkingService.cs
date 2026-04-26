@@ -233,31 +233,7 @@ namespace NetworkingLibrary.Services
             {
                 try
                 {
-                    var existingPumps = UnityEngine.Object.FindObjectsOfType<SteamCallbackPump>(true);
-                    var existingPump = existingPumps?.FirstOrDefault(p => p != null && p.isActiveAndEnabled);
-                    var go = existingPump != null ? existingPump.gameObject : GameObject.Find("SteamCallbackPump");
-                    if (go == null)
-                    {
-                        go = new GameObject("SteamCallbackPump");
-                        createdPumpGameObject = go;
-                        GameObject.DontDestroyOnLoad(go);
-                        createdPumpComponent = go.AddComponent<SteamCallbackPump>();
-                        NetLog.Info(LogSource, "Created SteamCallbackPump GameObject.");
-                    }
-                    else
-                    {
-                        if (!go.activeSelf) go.SetActive(true);
-                        var pump = go.GetComponent<SteamCallbackPump>();
-                        if (pump == null)
-                        {
-                            createdPumpComponent = go.AddComponent<SteamCallbackPump>();
-                        }
-                        else if (!pump.enabled)
-                        {
-                            pump.enabled = true;
-                        }
-                    }
-                    GameObject.DontDestroyOnLoad(go);
+                    var _ = PrepareCanonicalSteamCallbackPump(out createdPumpGameObject, out createdPumpComponent);
 
                     SteamCallbackPump.EnablePumping();
                     enabledPumpingInThisInitialize = true;
@@ -285,6 +261,107 @@ namespace NetworkingLibrary.Services
 
             IsInitialized = true;
             NetLog.Info(LogSource, "SteamNetworkingService initialized");
+        }
+
+        static SteamCallbackPump PrepareCanonicalSteamCallbackPump(out GameObject? createdPumpGameObject, out SteamCallbackPump? createdPumpComponent)
+        {
+            createdPumpGameObject = null;
+            createdPumpComponent = null;
+            var existingPumps = UnityEngine.Object.FindObjectsOfType<SteamCallbackPump>(true)
+                .Where(p => p != null && p.gameObject != null)
+                .OrderByDescending(p => p.isActiveAndEnabled)
+                .ThenByDescending(p => p.gameObject.activeInHierarchy)
+                .ThenBy(p => p.GetInstanceID())
+                .ToList();
+
+            var canonicalPump = existingPumps.FirstOrDefault();
+            if (canonicalPump == null)
+            {
+                var go = GameObject.Find("SteamCallbackPump");
+                if (go == null)
+                {
+                    go = new GameObject("SteamCallbackPump");
+                    createdPumpGameObject = go;
+                    NetLog.Info(LogSource, "Created SteamCallbackPump GameObject.");
+                }
+
+                canonicalPump = go.GetComponent<SteamCallbackPump>();
+                if (canonicalPump == null)
+                {
+                    canonicalPump = go.AddComponent<SteamCallbackPump>();
+                    if (createdPumpGameObject == null) createdPumpComponent = canonicalPump;
+                }
+            }
+            else
+            {
+                CleanupDuplicatePumps(canonicalPump, existingPumps.Skip(1));
+            }
+
+            var canonicalObject = canonicalPump.gameObject;
+            if (!canonicalObject.activeSelf) canonicalObject.SetActive(true);
+            if (!canonicalObject.activeInHierarchy)
+            {
+                canonicalObject.transform.SetParent(null, true);
+                if (!canonicalObject.activeSelf) canonicalObject.SetActive(true);
+            }
+            if (!canonicalPump.enabled) canonicalPump.enabled = true;
+            GameObject.DontDestroyOnLoad(canonicalObject);
+            return canonicalPump;
+        }
+
+        static void CleanupDuplicatePumps(SteamCallbackPump canonicalPump, IEnumerable<SteamCallbackPump> duplicatePumps)
+        {
+            foreach (var duplicatePump in duplicatePumps)
+            {
+                if (duplicatePump == null) continue;
+                var duplicatePumpObject = duplicatePump.gameObject;
+                if (duplicatePumpObject == null) continue;
+                var hasOnlyTransformAndPump = HasOnlyTransformAndSteamCallbackPumpComponents(duplicatePumpObject);
+                var destroyingObjectWouldDeleteCanonical = hasOnlyTransformAndPump
+                    && duplicatePumpObject.transform != null
+                    && canonicalPump.transform.IsChildOf(duplicatePumpObject.transform);
+                DestroyPumpDuringStartup(hasOnlyTransformAndPump && !destroyingObjectWouldDeleteCanonical
+                    ? duplicatePumpObject
+                    : duplicatePump);
+            }
+        }
+
+        static bool HasOnlyTransformAndSteamCallbackPumpComponents(GameObject pumpObject)
+        {
+            var components = pumpObject.GetComponents<Component>();
+            var hasTransform = false;
+            var hasPump = false;
+            var count = 0;
+            for (var i = 0; i < components.Length; i++)
+            {
+                var component = components[i];
+                if (component == null) continue;
+                count++;
+                if (component is Transform)
+                {
+                    hasTransform = true;
+                    continue;
+                }
+
+                if (component is SteamCallbackPump)
+                {
+                    hasPump = true;
+                    continue;
+                }
+
+                return false;
+            }
+
+            return count == 2 && hasTransform && hasPump;
+        }
+
+        static void DestroyPumpDuringStartup(UnityEngine.Object target)
+        {
+            if (target is SteamCallbackPump duplicatePump) duplicatePump.enabled = false;
+            else if (target is GameObject duplicatePumpObject) duplicatePumpObject.SetActive(false);
+
+            if (Application.isPlaying) UnityEngine.Object.Destroy(target);
+            else UnityEngine.Object.DestroyImmediate(target);
         }
 
         private void CleanupFailedPumpSetup(bool enabledPumpingInThisInitialize, bool pumpingWasEnabledBeforeInitialize, GameObject? createdPumpGameObject, SteamCallbackPump? createdPumpComponent, string disablePumpingContextKey)

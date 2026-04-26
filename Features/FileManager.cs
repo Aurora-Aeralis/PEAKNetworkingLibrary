@@ -129,7 +129,7 @@ namespace NetworkingLibrary.Features
                 if (trimmed.StartsWith("[", StringComparison.Ordinal) && trimmed.EndsWith("]", StringComparison.Ordinal))
                 {
                     var section = trimmed[1..^1].Trim();
-                    inVersionSection = section.Equals(VersionSection, StringComparison.Ordinal);
+                    inVersionSection = section.Equals(VersionSection, StringComparison.OrdinalIgnoreCase);
                     continue;
                 }
 
@@ -144,7 +144,7 @@ namespace NetworkingLibrary.Features
                     continue;
 
                 var key = line[..separatorIndex].Trim();
-                if (!key.Equals(LegacyVersionKey, StringComparison.Ordinal))
+                if (!key.Equals(LegacyVersionKey, StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 return line[(separatorIndex + 1)..].Trim();
@@ -223,7 +223,7 @@ namespace NetworkingLibrary.Features
                     if (trimmed.StartsWith("[", StringComparison.Ordinal) && trimmed.EndsWith("]", StringComparison.Ordinal))
                     {
                         var section = trimmed[1..^1].Trim();
-                        inVersionSection = section.Equals(VersionSection, StringComparison.Ordinal);
+                        inVersionSection = section.Equals(VersionSection, StringComparison.OrdinalIgnoreCase);
                         continue;
                     }
 
@@ -238,7 +238,7 @@ namespace NetworkingLibrary.Features
                         continue;
 
                     var key = lines[i][..separatorIndex].Trim();
-                    if (!key.Equals(LegacyVersionKey, StringComparison.Ordinal))
+                    if (!key.Equals(LegacyVersionKey, StringComparison.OrdinalIgnoreCase))
                         continue;
 
                     lines[i] = lines[i][..(separatorIndex + 1)];

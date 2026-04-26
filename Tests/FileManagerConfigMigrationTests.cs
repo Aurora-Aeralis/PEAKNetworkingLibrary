@@ -212,6 +212,29 @@ public class FileManagerConfigMigrationTests
         Assert.True(IsLegacyVersionClearedOrRemoved(configText));
     }
 
+
+    [Theory]
+    [InlineData("[VeRsIoN]", "Current Version")]
+    [InlineData("[Version]", "cUrReNt vErSiOn")]
+    [InlineData("[vErSiOn]", "CuRrEnT VeRsIoN")]
+    public void MigrateConfigIfNeeded_LegacyVersionMixedCaseSectionOrKey_ParsesAndClearsOrRemovesKey(string sectionHeader, string legacyKey)
+    {
+        using var scope = new TempConfigScope();
+        File.WriteAllText(scope.ConfigPath,
+            $"{sectionHeader}\n" +
+            $"{legacyKey} = 1\n");
+
+        var config = new ConfigFile(scope.ConfigPath, true);
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        var configText = File.ReadAllText(scope.ConfigPath);
+
+        Assert.Equal("1", schemaVersion);
+        Assert.Contains("ConfigSchemaVersion = 1", configText, StringComparison.Ordinal);
+        Assert.True(IsLegacyVersionClearedOrRemoved(configText));
+    }
+
     [Theory]
     [InlineData("-1")]
     [InlineData("abc")]
@@ -244,7 +267,7 @@ public class FileManagerConfigMigrationTests
             var trimmed = line.Trim();
             if (trimmed.StartsWith("[", StringComparison.Ordinal) && trimmed.EndsWith("]", StringComparison.Ordinal))
             {
-                inVersionSection = string.Equals(trimmed[1..^1].Trim(), "Version", StringComparison.Ordinal);
+                inVersionSection = string.Equals(trimmed[1..^1].Trim(), "Version", StringComparison.OrdinalIgnoreCase);
                 continue;
             }
 
@@ -256,7 +279,7 @@ public class FileManagerConfigMigrationTests
                 continue;
 
             var key = line[..separatorIndex].Trim();
-            if (!string.Equals(key, "Current Version", StringComparison.Ordinal))
+            if (!string.Equals(key, "Current Version", StringComparison.OrdinalIgnoreCase))
                 continue;
 
             if (!string.IsNullOrWhiteSpace(line[(separatorIndex + 1)..]))

@@ -812,9 +812,12 @@ namespace NetworkingLibrary.Services
                         Target = method.IsStatic ? null! : instance!,
                         Method = method,
                         Parameters = method.GetParameters(),
-                        TakesInfo = method.GetParameters().Length > 0 && RpcInfoParameterTypeHelper.IsRpcInfoParameterType(method.GetParameters().Last().ParameterType),
+                        TakesInfo = false,
                         Mask = mask
                     };
+                    mh.TakesInfo = mh.Parameters.Length > 0 && RpcInfoParameterTypeHelper.IsRpcInfoParameterType(mh.Parameters.Last().ParameterType);
+                    mh.ParameterCountWithoutRpcInfo = mh.TakesInfo ? mh.Parameters.Length - 1 : mh.Parameters.Length;
+                    mh.OverloadKey = BuildOverloadKey(mh);
                     handlers.Add(mh);
                     registeredHandlers.Add(new HandlerRegistration { MethodName = method.Name, Handler = mh });
                     registered++;
@@ -1767,32 +1770,59 @@ namespace NetworkingLibrary.Services
                 handlersSnapshot = handlers.ToArray();
             }
 
-            IEnumerable<MessageHandler> candidates = handlersSnapshot.Where(h => h.Mask == message.Mask);
-            if (!string.IsNullOrEmpty(message.OverloadKey))
-            {
-                var keyed = candidates.Where(h => BuildOverloadKey(h) == message.OverloadKey).ToArray();
-                if (keyed.Length > 0) candidates = keyed.Concat(candidates.Where(h => BuildOverloadKey(h) != message.OverloadKey));
-            }
-
             MessageHandler? chosenHandler = null;
             object[]? chosenParams = null;
             MessageHandler? fallbackHandler = null;
             object[]? fallbackParams = null;
-
-            foreach (var handler in candidates)
+            bool hasOverloadKey = !string.IsNullOrEmpty(message.OverloadKey);
+            bool hasPreferredOverload = false;
+            if (hasOverloadKey)
             {
-                if (!TryDeserializeForHandler(message, handler, sender, out var callParams, out int unread))
-                    continue;
-
-                if (unread == 0)
+                for (int i = 0; i < handlersSnapshot.Length; i++)
                 {
-                    chosenHandler = handler;
-                    chosenParams = callParams;
+                    var handler = handlersSnapshot[i];
+                    if (handler.Mask != message.Mask) continue;
+                    if (handler.OverloadKey != message.OverloadKey) continue;
+                    hasPreferredOverload = true;
                     break;
                 }
+            }
 
-                fallbackHandler ??= handler;
-                fallbackParams ??= callParams;
+            void TryDispatch(bool? preferOverloadKeyMatch)
+            {
+                for (int i = 0; i < handlersSnapshot.Length; i++)
+                {
+                    var handler = handlersSnapshot[i];
+                    if (handler.Mask != message.Mask) continue;
+                    if (preferOverloadKeyMatch.HasValue)
+                    {
+                        bool isPreferred = handler.OverloadKey == message.OverloadKey;
+                        if (preferOverloadKeyMatch.Value != isPreferred) continue;
+                    }
+
+                    if (!TryDeserializeForHandler(message, handler, sender, out var callParams, out int unread))
+                        continue;
+
+                    if (unread == 0)
+                    {
+                        chosenHandler = handler;
+                        chosenParams = callParams;
+                        return;
+                    }
+
+                    fallbackHandler ??= handler;
+                    fallbackParams ??= callParams;
+                }
+            }
+
+            if (hasPreferredOverload)
+            {
+                TryDispatch(preferOverloadKeyMatch: true);
+                if (chosenHandler == null) TryDispatch(preferOverloadKeyMatch: false);
+            }
+            else
+            {
+                TryDispatch(preferOverloadKeyMatch: null);
             }
 
             if (chosenHandler == null)
@@ -2155,20 +2185,48 @@ namespace NetworkingLibrary.Services
                 handlersSnapshot = handlers.ToArray();
             }
 
-            IEnumerable<MessageHandler> candidates = handlersSnapshot.Where(h => h.Mask == message.Mask);
-            if (!string.IsNullOrEmpty(message.OverloadKey))
+            var deserialized = new List<(MessageHandler Handler, object[] CallParams, int Unread, string OverloadKey)>();
+            bool hasOverloadKey = !string.IsNullOrEmpty(message.OverloadKey);
+            bool hasPreferredOverload = false;
+            if (hasOverloadKey)
             {
-                var keyed = candidates.Where(h => BuildOverloadKey(h) == message.OverloadKey).ToArray();
-                if (keyed.Length > 0) candidates = keyed.Concat(candidates.Where(h => BuildOverloadKey(h) != message.OverloadKey));
+                for (int i = 0; i < handlersSnapshot.Length; i++)
+                {
+                    var handler = handlersSnapshot[i];
+                    if (handler.Mask != message.Mask) continue;
+                    if (handler.OverloadKey != message.OverloadKey) continue;
+                    hasPreferredOverload = true;
+                    break;
+                }
             }
 
-            var deserialized = new List<(MessageHandler Handler, object[] CallParams, int Unread, string OverloadKey)>();
-            foreach (var handler in candidates)
+            void CollectCandidates(bool? preferOverloadKeyMatch)
             {
-                if (!TryDeserializeForHandler(message, handler, localSender, out var callParams, out int unread))
-                    continue;
+                for (int i = 0; i < handlersSnapshot.Length; i++)
+                {
+                    var handler = handlersSnapshot[i];
+                    if (handler.Mask != message.Mask) continue;
+                    if (preferOverloadKeyMatch.HasValue)
+                    {
+                        bool isPreferred = handler.OverloadKey == message.OverloadKey;
+                        if (preferOverloadKeyMatch.Value != isPreferred) continue;
+                    }
 
-                deserialized.Add((handler, callParams, unread, BuildOverloadKey(handler)));
+                    if (!TryDeserializeForHandler(message, handler, localSender, out var callParams, out int unread))
+                        continue;
+
+                    deserialized.Add((handler, callParams, unread, handler.OverloadKey));
+                }
+            }
+
+            if (hasPreferredOverload)
+            {
+                CollectCandidates(preferOverloadKeyMatch: true);
+                CollectCandidates(preferOverloadKeyMatch: false);
+            }
+            else
+            {
+                CollectCandidates(preferOverloadKeyMatch: null);
             }
 
             if (deserialized.Count == 0)
@@ -2182,8 +2240,10 @@ namespace NetworkingLibrary.Services
             string chosenOverloadKey = deserialized[chosenIndex].OverloadKey;
 
             bool invokedAny = false;
-            foreach (var candidate in deserialized.Where(c => c.OverloadKey == chosenOverloadKey))
+            for (int i = 0; i < deserialized.Count; i++)
             {
+                var candidate = deserialized[i];
+                if (candidate.OverloadKey != chosenOverloadKey) continue;
                 try
                 {
                     candidate.Handler.Method.Invoke(candidate.Handler.Target, candidate.CallParams);
@@ -2207,7 +2267,7 @@ namespace NetworkingLibrary.Services
             {
                 var msgCopy = new Message(source.ToArray(), messageSizePolicy);
                 var paramInfos = handler.Parameters;
-                int paramCount = handler.TakesInfo ? paramInfos.Length - 1 : paramInfos.Length;
+                int paramCount = handler.ParameterCountWithoutRpcInfo;
                 callParams = new object[paramInfos.Length];
 
                 for (int i = 0; i < paramCount; i++) callParams[i] = msgCopy.ReadObject(paramInfos[i].ParameterType);
@@ -2245,7 +2305,7 @@ namespace NetworkingLibrary.Services
                     {
                         if (h.Mask != mask) continue;
                         var expected = h.Parameters;
-                        int expectedCount = h.TakesInfo ? expected.Length - 1 : expected.Length;
+                        int expectedCount = h.ParameterCountWithoutRpcInfo;
                         if (expectedCount != parameters.Length) continue;
 
                         bool ok = true;
@@ -2267,8 +2327,7 @@ namespace NetworkingLibrary.Services
                     {
                         chosen = handlersSnapshot.FirstOrDefault(h =>
                         {
-                            int expectedCount = h.TakesInfo ? h.Parameters.Length - 1 : h.Parameters.Length;
-                            return expectedCount == parameters.Length && h.Mask == mask;
+                            return h.ParameterCountWithoutRpcInfo == parameters.Length && h.Mask == mask;
                         });
                     }
 
@@ -2278,9 +2337,9 @@ namespace NetworkingLibrary.Services
                         return null;
                     }
 
-                    msg = new Message(modId, methodName, mask, BuildOverloadKey(chosen), messageSizePolicy);
+                    msg = new Message(modId, methodName, mask, chosen.OverloadKey, messageSizePolicy);
                     var expectedParams = chosen.Parameters;
-                    int expectedCountFinal = chosen.TakesInfo ? expectedParams.Length - 1 : expectedParams.Length;
+                    int expectedCountFinal = chosen.ParameterCountWithoutRpcInfo;
                     for (int i = 0; i < expectedCountFinal; i++)
                     {
                         var t = expectedParams[i].ParameterType;
@@ -2389,7 +2448,7 @@ namespace NetworkingLibrary.Services
         enum Priority { High = 0, Normal = 1, Low = 2 }
         class QueuedSend { public byte[] Framed = null!; public CSteamID Target; public ReliableType Reliable; public DateTime Enqueued; }
         class UnackedMessage { public byte[] Framed = null!; public CSteamID Target; public ReliableType Reliable; public DateTime LastSent; public int Attempts; public ulong msgId => BinaryPrimitives.ReadUInt64LittleEndian(Framed.AsSpan(1, 8)); }
-        class MessageHandler { public object Target = null!; public MethodInfo Method = null!; public ParameterInfo[] Parameters = null!; public bool TakesInfo; public int Mask; }
+        class MessageHandler { public object Target = null!; public MethodInfo Method = null!; public ParameterInfo[] Parameters = null!; public bool TakesInfo; public int Mask; public int ParameterCountWithoutRpcInfo; public string OverloadKey = string.Empty; }
 
         static byte[] HmacSha256RawStatic(byte[] key, byte[] payload) { using var h = new HMACSHA256(key); return h.ComputeHash(payload); }
     }

@@ -1,4 +1,4 @@
-﻿#if !UNITY_EDITOR
+#if !UNITY_EDITOR
 using NetworkingLibrary.Modules;
 using pworld.Scripts;
 using Steamworks;

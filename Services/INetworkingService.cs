@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using NetworkingLibrary.Modules;
 
 namespace NetworkingLibrary.Services

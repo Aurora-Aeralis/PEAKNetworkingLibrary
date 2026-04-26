@@ -758,31 +758,15 @@ namespace NetworkingLibrary.Services
             callParams = null!;
             unread = int.MaxValue;
             var originalCursor = source.SaveReadCursor();
-            var probeCursor = originalCursor;
+            var payloadCursor = originalCursor;
             try
             {
                 if (originalCursor.Position == 0)
                 {
-                    // Offline RPC/RPCTarget can dispatch the freshly built outbound message directly.
-                    // In that flow the read cursor is still at byte 0, so advance to payload start
-                    // before probing overload arguments.
-                    source.ReadByte();   // protocol version
-                    source.ReadUInt();   // mod id
-                    source.ReadString(); // method name
-                    source.ReadInt();    // mask
-                    if (source.ProtocolVersion >= 3)
-                    {
-                        var hasOverloadKey = source.ReadBool();
-                        if (hasOverloadKey)
-                        {
-                            source.ReadString();
-                        }
-                    }
-
-                    probeCursor = source.SaveReadCursor();
+                    payloadCursor = AdvanceCursorPastHeader(source);
                 }
 
-                source.RestoreReadCursor(probeCursor);
+                source.RestoreReadCursor(payloadCursor);
 
                 var pi = handler.Parameters;
                 int paramCount = handler.ParameterCountWithoutRpcInfo;
@@ -804,6 +788,16 @@ namespace NetworkingLibrary.Services
             {
                 source.RestoreReadCursor(originalCursor);
             }
+        }
+
+        static Message.ReadCursor AdvanceCursorPastHeader(Message message)
+        {
+            message.ReadByte();
+            message.ReadUInt();
+            message.ReadString();
+            message.ReadInt();
+            if (message.ProtocolVersion >= 3 && message.ReadBool()) message.ReadString();
+            return message.SaveReadCursor();
         }
 
         object CreateRpcInfoInstance(Type infoType, ulong from)

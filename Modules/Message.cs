@@ -207,9 +207,6 @@ namespace NetworkingLibrary.Modules
             readPos = cursor.Position;
         }
 
-        /// <summary>
-        /// Resets the message buffers when <paramref name="zero"/> is <see langword="true"/>.
-        /// </summary>
         public void Reset(bool zero = true)
         {
             ThrowIfDisposed();
@@ -220,7 +217,6 @@ namespace NetworkingLibrary.Modules
             readPos = 0;
         }
 
-        #region Write helpers
         private void EnsureCanAppend(int bytesToAppend, string opName)
         {
             if (bytesToAppend < 0) throw new InvalidDataException($"{opName} size out of range");
@@ -312,9 +308,6 @@ namespace NetworkingLibrary.Modules
         public Message WriteVector3(Vector3 v) { WriteFloat(v.x); WriteFloat(v.y); WriteFloat(v.z); return this; }
         public Message WriteQuaternion(Quaternion q) { WriteFloat(q.x); WriteFloat(q.y); WriteFloat(q.z); WriteFloat(q.w); return this; }
 
-        /// <summary>
-        /// Serializes an RPC payload value using the protocol wire format.
-        /// </summary>
         public void WriteObject(Type type, object value)
         {
             ThrowIfDisposed();
@@ -468,9 +461,6 @@ namespace NetworkingLibrary.Modules
                 return a;
             };
         }
-        #endregion
-
-        #region Read helpers
         private void EnsureReadable(int count, string opName)
         {
             EnsureReadableBuffer();
@@ -662,9 +652,6 @@ namespace NetworkingLibrary.Modules
         public Vector3 ReadVector3() => new Vector3(ReadFloat(), ReadFloat(), ReadFloat());
         public Quaternion ReadQuaternion() => new Quaternion(ReadFloat(), ReadFloat(), ReadFloat(), ReadFloat());
 
-        /// <summary>
-        /// Deserializes an RPC payload value; keep aligned with <see cref="WriteObject(Type, object)"/>.
-        /// </summary>
         public object ReadObject(Type type)
         {
             ThrowIfDisposed();
@@ -761,9 +748,6 @@ namespace NetworkingLibrary.Modules
 
             throw new NotSupportedException($"Unsupported read type {type.FullName}. Register a deserializer using Message.RegisterSerializer. Null handling: reference-like types (including arrays/lists/string/byte[]) are decoded from a leading presence flag and may be null; non-null payloads for unsupported reference types still require registration.");
         }
-        #endregion
-
-        #region Compression helpers
         public byte[] CompressPayload()
         {
             return CompressPayload(ToArray());
@@ -807,8 +791,6 @@ namespace NetworkingLibrary.Modules
             }
             return outMs.ToArray();
         }
-        #endregion
-
         public void Dispose()
         {
             if (_disposed) return;

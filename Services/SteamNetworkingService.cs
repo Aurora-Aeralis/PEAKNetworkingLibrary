@@ -80,14 +80,19 @@ namespace NetworkingLibrary.Services
                 int count = getNumLobbyMembers(Lobby);
                 if (count <= 0) return Array.Empty<ulong>();
 
-                var memberIds = new List<ulong>(count);
+                var memberIds = new ulong[count];
+                var resolvedMembers = 0;
                 for (int i = 0; i < count; i++)
                 {
                     var member = getLobbyMemberByIndex(Lobby, i);
                     if (member == CSteamID.Nil) continue;
-                    memberIds.Add(member.m_SteamID);
+                    memberIds[resolvedMembers++] = member.m_SteamID;
                 }
-                return memberIds.Count == 0 ? Array.Empty<ulong>() : memberIds.ToArray();
+                if (resolvedMembers == 0) return Array.Empty<ulong>();
+                if (resolvedMembers == memberIds.Length) return memberIds;
+                var compactMemberIds = new ulong[resolvedMembers];
+                Array.Copy(memberIds, compactMemberIds, resolvedMembers);
+                return compactMemberIds;
             }
             catch (Exception ex)
             {

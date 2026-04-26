@@ -32,6 +32,18 @@ public class MessageCompressionBoundsTests
         Assert.Contains("exceeds max allowed size", ex.Message);
     }
 
+    [Theory]
+    [InlineData(0)]
+    public void DecompressPayload_Rejects_NonPositive_Max_Output_Size(int maxOutputSize)
+    {
+        using var source = new Message(13u, "compress", 0);
+        source.WriteString("payload");
+        var compressed = source.CompressPayload();
+
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(() => Message.DecompressPayload(compressed, maxOutputSize));
+        Assert.Contains("greater than zero", ex.Message);
+    }
+
     [Fact]
     public void DecompressPayload_Allows_Data_Within_Logical_Message_Cap()
     {

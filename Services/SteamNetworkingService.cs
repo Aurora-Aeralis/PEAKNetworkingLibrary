@@ -173,8 +173,8 @@ namespace NetworkingLibrary.Services
         const byte ACK_FLAG = 0x10;
         const int FRAME_HEADER_SIZE = 25;
 
-        RSACryptoServiceProvider? LocalRsa;
-        private Func<RSACryptoServiceProvider> localRsaFactory = () => new RSACryptoServiceProvider(2048);
+        RSA? LocalRsa;
+        private Func<RSA> localRsaFactory = () => RSA.Create(2048);
         private readonly MessageSizePolicy messageSizePolicy;
 
         public SteamNetworkingService(MessageSizePolicy? messageSizePolicy = null)
@@ -1514,9 +1514,9 @@ namespace NetworkingLibrary.Services
 
                         try
                         {
-                            using var rsa = new RSACryptoServiceProvider();
+                            using var rsa = RSA.Create();
                             rsa.ImportParameters(rsaParams);
-                            if (!rsa.VerifyData(dataOnly, CryptoConfig.MapNameToOID("SHA256"), signature))
+                            if (!rsa.VerifyData(dataOnly, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
                             {
                                 continue;
                             }
@@ -2033,10 +2033,10 @@ namespace NetworkingLibrary.Services
             byte[] enc;
             try
             {
-                using var rsaPeer = new RSACryptoServiceProvider();
+                using var rsaPeer = RSA.Create();
                 var rsaParams = DeserializeRsaPublicKey(peerPubForSecret);
                 rsaPeer.ImportParameters(rsaParams);
-                enc = rsaPeer.Encrypt(sym, false);
+                enc = rsaPeer.Encrypt(sym, RSAEncryptionPadding.Pkcs1);
             }
             catch (Exception ex)
             {
@@ -2066,7 +2066,7 @@ namespace NetworkingLibrary.Services
             if (LocalRsa == null) return;
             try
             {
-                var sym = LocalRsa.Decrypt(encSecret, false);
+                var sym = LocalRsa.Decrypt(encSecret, RSAEncryptionPadding.Pkcs1);
                 lock (cryptoStateLock)
                 {
                     var state = handshakeStates.ContainsKey(sender.m_SteamID) ? handshakeStates[sender.m_SteamID] : new HandshakeState();
@@ -2128,7 +2128,7 @@ namespace NetworkingLibrary.Services
             return h.ComputeHash(payload);
         }
 
-        static string SerializeRsaPublicKey(RSACryptoServiceProvider rsa)
+        static string SerializeRsaPublicKey(RSA rsa)
         {
             var parms = rsa.ExportParameters(false);
             var mod = Convert.ToBase64String(parms.Modulus ?? Array.Empty<byte>());

@@ -85,7 +85,7 @@ namespace NetworkingLibrary
                 canonicalPoller.hideFlags = HideFlags.HideAndDontSave;
             }
 
-            CleanupDuplicatePollers(pollers.Skip(1), DestroyPollerDuringStartup);
+            CleanupDuplicatePollers(canonicalPoller, pollers.Skip(1), DestroyPollerDuringStartup);
 
             var go = canonicalPoller.gameObject;
             go.name = pollerName;
@@ -97,7 +97,10 @@ namespace NetworkingLibrary
             Logger.LogInfo($"{MyPluginInfo.PLUGIN_NAME} v{MyPluginInfo.PLUGIN_VERSION} has fully loaded!");
         }
 
-        private static void CleanupDuplicatePollers(IEnumerable<NetworkingPoller> duplicatePollers, Action<UnityEngine.Object> destroyAction)
+        private static void CleanupDuplicatePollers(
+            NetworkingPoller canonicalPoller,
+            IEnumerable<NetworkingPoller> duplicatePollers,
+            Action<UnityEngine.Object> destroyAction)
         {
             foreach (var extraPoller in duplicatePollers)
             {
@@ -115,7 +118,14 @@ namespace NetworkingLibrary
                 var hasOnlyTransformAndPoller = components.Length == 2
                     && components.Any(component => component is Transform)
                     && components.Any(component => component is NetworkingPoller);
-                destroyAction(hasOnlyTransformAndPoller ? duplicatePollerObject : extraPoller);
+                var destroyingObjectWouldDeleteCanonical = hasOnlyTransformAndPoller
+                    && duplicatePollerObject.transform != null
+                    && canonicalPoller != null
+                    && canonicalPoller.transform != null
+                    && canonicalPoller.transform.IsChildOf(duplicatePollerObject.transform);
+                destroyAction(hasOnlyTransformAndPoller && !destroyingObjectWouldDeleteCanonical
+                    ? duplicatePollerObject
+                    : extraPoller);
             }
         }
 

@@ -830,11 +830,12 @@ namespace NetworkingLibrary.Modules
         private static byte[] DecompressPayloadCore(byte[] compressed, int maxOutputSize)
         {
             if (compressed == null) throw new ArgumentNullException(nameof(compressed));
+            if (maxOutputSize <= 0) throw new ArgumentOutOfRangeException(nameof(maxOutputSize), maxOutputSize, "Decompression max output size must be greater than zero.");
             using var ms = new MemoryStream(compressed);
             using var gz = new GZipStream(ms, CompressionMode.Decompress);
             using var outMs = new MemoryStream();
             var buffer = new byte[8 * 1024];
-            var totalRead = 0;
+            long totalRead = 0;
             while (true)
             {
                 var bytesRead = gz.Read(buffer, 0, buffer.Length);

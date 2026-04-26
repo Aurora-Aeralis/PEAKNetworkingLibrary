@@ -92,9 +92,10 @@ public class SteamNetworkingServiceSignatureCompressionTests
         service.RegisterModPublicKey(TestModId, signerRsa.ExportParameters(false));
 
         var firstSnapshot = GetModPublicKeySnapshot(service);
-        var frame = BuildFrame(service, BuildMessage("snapshot"), ReliableType.Unreliable);
-        ProcessIncomingFrame(service, frame);
-        ProcessIncomingFrame(service, frame);
+        var firstFrame = BuildFrame(service, BuildMessage("snapshot"), ReliableType.Unreliable);
+        var secondFrame = BuildFrame(service, BuildMessage("snapshot"), ReliableType.Unreliable);
+        ProcessIncomingFrame(service, firstFrame);
+        ProcessIncomingFrame(service, secondFrame);
 
         var secondSnapshot = GetModPublicKeySnapshot(service);
         Assert.Same(firstSnapshot, secondSnapshot);

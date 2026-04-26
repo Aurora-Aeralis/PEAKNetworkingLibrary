@@ -27,6 +27,7 @@ namespace NetworkingLibrary.Modules
         static int rejectedEnqueueCount;
         static int coalescedEnqueueCount;
         static int suppressedOverflowWarnings;
+        static int emittedOverflowWarningCountForTests;
         static long lastOverflowWarningTicks;
         static readonly ManualResetEventSlim instanceReady = new(false);
         static readonly TimeSpan defaultBackgroundThreadWaitTimeout = TimeSpan.FromSeconds(2);
@@ -241,19 +242,24 @@ namespace NetworkingLibrary.Modules
 
         static void EmitOverflowWarning(string message)
         {
-            var nowTicks = DateTime.UtcNow.Ticks;
-            var previousTicks = Interlocked.Read(ref lastOverflowWarningTicks);
-            if (previousTicks != 0 && new TimeSpan(nowTicks - previousTicks) < overflowWarningCooldown)
+            while (true)
             {
-                Interlocked.Increment(ref suppressedOverflowWarnings);
-                return;
+                var nowTicks = DateTime.UtcNow.Ticks;
+                var previousTicks = Interlocked.Read(ref lastOverflowWarningTicks);
+                if (previousTicks != 0 && new TimeSpan(nowTicks - previousTicks) < overflowWarningCooldown)
+                {
+                    Interlocked.Increment(ref suppressedOverflowWarnings);
+                    return;
+                }
+
+                if (Interlocked.CompareExchange(ref lastOverflowWarningTicks, nowTicks, previousTicks) == previousTicks) break;
             }
 
-            Interlocked.Exchange(ref lastOverflowWarningTicks, nowTicks);
             try
             {
                 var suppressed = Interlocked.Exchange(ref suppressedOverflowWarnings, 0);
                 if (suppressed > 0) message = $"{message} Suppressed {suppressed} similar warnings.";
+                Interlocked.Increment(ref emittedOverflowWarningCountForTests);
                 Net.Logger?.LogWarning(message);
             }
             catch { }
@@ -292,6 +298,7 @@ namespace NetworkingLibrary.Modules
                     rejectedEnqueueCount = 0;
                     coalescedEnqueueCount = 0;
                     suppressedOverflowWarnings = 0;
+                    emittedOverflowWarningCountForTests = 0;
                     lastOverflowWarningTicks = 0;
                     CreateInstanceOnMainThreadFactory = CreateOrFindDispatcherOnMainThread;
                     BackgroundThreadInstanceWaitTimeout = defaultBackgroundThreadWaitTimeout;
@@ -314,6 +321,13 @@ namespace NetworkingLibrary.Modules
             internal static int DroppedEnqueueCountForTests => Volatile.Read(ref droppedEnqueueCount);
             internal static int RejectedEnqueueCountForTests => Volatile.Read(ref rejectedEnqueueCount);
             internal static int CoalescedEnqueueCountForTests => Volatile.Read(ref coalescedEnqueueCount);
+            internal static int SuppressedOverflowWarningsForTests => Volatile.Read(ref suppressedOverflowWarnings);
+            internal static int EmittedOverflowWarningCountForTests => Volatile.Read(ref emittedOverflowWarningCountForTests);
+            internal static long LastOverflowWarningTicksForTests
+            {
+                get => Interlocked.Read(ref lastOverflowWarningTicks);
+                set => Interlocked.Exchange(ref lastOverflowWarningTicks, value);
+            }
             internal static int MaxQueueDepthForTests => ResolveMaxQueueDepth();
         }
     }

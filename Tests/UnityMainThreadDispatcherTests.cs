@@ -200,4 +200,31 @@ public class UnityMainThreadDispatcherTests : IDisposable
         Assert.True(UnityMainThreadDispatcher.TestHooks.QueueHighWaterMarkForTests <= 64);
         Assert.True(UnityMainThreadDispatcher.TestHooks.DroppedEnqueueCountForTests > 0);
     }
+
+    [Fact]
+    public async Task Enqueue_ConcurrentOverflowWarnings_AreCooldownGatedToSingleEmissionPerWindow()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 1;
+        UnityMainThreadDispatcher.QueueOverflowBehaviorProvider = () => UnityMainThreadDispatcher.QueueOverflowBehavior.RejectNewWork;
+        dispatcher.Enqueue(() => { });
+
+        var tasks = Enumerable.Range(0, 24)
+            .Select(_ => Task.Run(() =>
+            {
+                for (var i = 0; i < 30; i++) dispatcher.Enqueue(() => { });
+            }))
+            .ToArray();
+
+        await Task.WhenAll(tasks);
+
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.EmittedOverflowWarningCountForTests);
+        Assert.True(UnityMainThreadDispatcher.TestHooks.SuppressedOverflowWarningsForTests > 0);
+
+        UnityMainThreadDispatcher.TestHooks.LastOverflowWarningTicksForTests = DateTime.UtcNow.Subtract(TimeSpan.FromSeconds(6)).Ticks;
+        dispatcher.Enqueue(() => { });
+
+        Assert.Equal(2, UnityMainThreadDispatcher.TestHooks.EmittedOverflowWarningCountForTests);
+        Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.SuppressedOverflowWarningsForTests);
+    }
 }

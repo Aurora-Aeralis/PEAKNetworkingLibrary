@@ -386,7 +386,7 @@ public class SteamNetworkingServiceLifecycleTests
     {
         var service = new SteamNetworkingService();
         var rsaFactoryField = typeof(SteamNetworkingService).GetField("localRsaFactory", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        rsaFactoryField.SetValue(service, (Func<RSACryptoServiceProvider>)(() => throw new InvalidOperationException("simulated init failure")));
+        rsaFactoryField.SetValue(service, (Func<RSA>)(() => throw new InvalidOperationException("simulated init failure")));
         SteamCallbackPump.EnablePumping();
 
         try

@@ -192,8 +192,16 @@ namespace NetworkingLibrary.Services
         const byte ACK_FLAG = 0x10;
         const int FRAME_HEADER_SIZE = 25; // flags[1] + msgId[8] + seq[8] + total[4] + index[4]
 
-        RSACryptoServiceProvider? LocalRsa;
-        private Func<RSACryptoServiceProvider> localRsaFactory = () => new RSACryptoServiceProvider(2048);
+        const string HANDSHAKE_SECRET_PADDING_OAEP_SHA256 = "OAEP_SHA256";
+        const string HANDSHAKE_SECRET_PADDING_PKCS1 = "PKCS1_V15";
+
+        RSA? LocalRsa;
+        private Func<RSA> localRsaFactory = () =>
+        {
+            var rsa = RSA.Create();
+            rsa.KeySize = 2048;
+            return rsa;
+        };
 
         public SteamNetworkingService() { }
 
@@ -1646,14 +1654,16 @@ namespace NetworkingLibrary.Services
                         {
                             string pub = message.ReadString();
                             string nonce = message.ReadString();
-                            StartHandshakeReply(sender, pub, nonce);
+                            string? peerPaddingPreference = message.UnreadLength() > 0 ? message.ReadString() : null;
+                            StartHandshakeReply(sender, pub, nonce, peerPaddingPreference);
                             break;
                         }
                     case "NETWORK_INTERNAL_HANDSHAKE_SECRET":
                         {
                             var enc = (byte[])message.ReadObject(typeof(byte[]));
                             string initiator = message.ReadString();
-                            CompleteHandshakeReceiver(sender, enc, initiator);
+                            string? padding = message.UnreadLength() > 0 ? message.ReadString() : null;
+                            CompleteHandshakeReceiver(sender, enc, initiator, padding);
                             break;
                         }
                     case "NETWORK_INTERNAL_HANDSHAKE_CONFIRM":
@@ -1879,11 +1889,12 @@ namespace NetworkingLibrary.Services
             var m = new Message(0u, "NETWORK_INTERNAL_HANDSHAKE_PUBKEY", 0);
             m.WriteString(pub);
             m.WriteString(nonce);
+            m.WriteString(HANDSHAKE_SECRET_PADDING_OAEP_SHA256);
             var framed = BuildFramedBytesWithMeta(m, 0, ReliableType.Reliable);
             SendBytes(framed, target, ReliableType.Reliable);
         }
 
-        void StartHandshakeReply(CSteamID sender, string peerPubKeySerialized, string peerNonce)
+        void StartHandshakeReply(CSteamID sender, string peerPubKeySerialized, string peerNonce, string? peerPaddingPreference)
         {
             if (LocalRsa == null) return;
             using var rng = RandomNumberGenerator.Create();
@@ -1917,6 +1928,7 @@ namespace NetworkingLibrary.Services
                 var m = new Message(0u, "NETWORK_INTERNAL_HANDSHAKE_PUBKEY", 0);
                 m.WriteString(myPub);
                 m.WriteString(localNonceToSend);
+                m.WriteString(HANDSHAKE_SECRET_PADDING_OAEP_SHA256);
                 var framed = BuildFramedBytesWithMeta(m, 0, ReliableType.Reliable);
                 SendBytes(framed, sender, ReliableType.Reliable);
                 return;
@@ -1928,16 +1940,33 @@ namespace NetworkingLibrary.Services
             rng.GetBytes(sym);
 
             byte[] enc;
+            var selectedPaddingMarker = string.Equals(peerPaddingPreference, HANDSHAKE_SECRET_PADDING_OAEP_SHA256, StringComparison.Ordinal)
+                ? HANDSHAKE_SECRET_PADDING_OAEP_SHA256
+                : HANDSHAKE_SECRET_PADDING_PKCS1;
             try
             {
-                using var rsaPeer = new RSACryptoServiceProvider();
+                using var rsaPeer = RSA.Create();
                 var rsaParams = DeserializeRsaPublicKey(peerPubForSecret);
                 rsaPeer.ImportParameters(rsaParams);
-                enc = rsaPeer.Encrypt(sym, false);
+                enc = selectedPaddingMarker == HANDSHAKE_SECRET_PADDING_OAEP_SHA256
+                    ? rsaPeer.Encrypt(sym, RSAEncryptionPadding.OaepSHA256)
+                    : rsaPeer.Encrypt(sym, RSAEncryptionPadding.Pkcs1);
+            }
+            catch (FormatException ex)
+            {
+                LogWarning($"Handshake secret encryption rejected for {sender}: malformed peer RSA public key serialization. {ex.Message}");
+                CryptographicOperations.ZeroMemory(sym);
+                return;
+            }
+            catch (CryptographicException ex)
+            {
+                LogWarning($"Handshake secret encryption rejected for {sender}: malformed peer RSA key or unsupported {selectedPaddingMarker}. {ex.Message}");
+                CryptographicOperations.ZeroMemory(sym);
+                return;
             }
             catch (Exception ex)
             {
-                LogWarning($"Handshake reply rejected invalid peer RSA key from {sender}: {ex.Message}");
+                LogWarning($"Handshake secret encryption failed for {sender}: {ex.Message}");
                 CryptographicOperations.ZeroMemory(sym);
                 return;
             }
@@ -1945,6 +1974,7 @@ namespace NetworkingLibrary.Services
             var m2 = new Message(0u, "NETWORK_INTERNAL_HANDSHAKE_SECRET", 0);
             m2.WriteBytes(enc);
             m2.WriteString(localNonceForSecret);
+            m2.WriteString(selectedPaddingMarker);
             var framed2 = BuildFramedBytesWithMeta(m2, 0, ReliableType.Reliable);
             SendBytes(framed2, sender, ReliableType.Reliable);
 
@@ -1958,12 +1988,27 @@ namespace NetworkingLibrary.Services
             }
         }
 
-        void CompleteHandshakeReceiver(CSteamID sender, byte[] encSecret, string initiatorNonce)
+        void CompleteHandshakeReceiver(CSteamID sender, byte[] encSecret, string initiatorNonce, string? negotiatedPadding)
         {
             if (LocalRsa == null) return;
             try
             {
-                var sym = LocalRsa.Decrypt(encSecret, false);
+                var requestedPadding = string.IsNullOrWhiteSpace(negotiatedPadding) ? HANDSHAKE_SECRET_PADDING_PKCS1 : negotiatedPadding;
+                byte[] sym;
+                if (string.Equals(requestedPadding, HANDSHAKE_SECRET_PADDING_OAEP_SHA256, StringComparison.Ordinal))
+                {
+                    sym = LocalRsa.Decrypt(encSecret, RSAEncryptionPadding.OaepSHA256);
+                }
+                else if (string.Equals(requestedPadding, HANDSHAKE_SECRET_PADDING_PKCS1, StringComparison.Ordinal))
+                {
+                    sym = LocalRsa.Decrypt(encSecret, RSAEncryptionPadding.Pkcs1);
+                }
+                else
+                {
+                    LogWarning($"Handshake secret rejected from {sender}: unknown padding marker '{requestedPadding}'.");
+                    return;
+                }
+
                 lock (cryptoStateLock)
                 {
                     var state = handshakeStates.ContainsKey(sender.m_SteamID) ? handshakeStates[sender.m_SteamID] : new HandshakeState();
@@ -1980,7 +2025,22 @@ namespace NetworkingLibrary.Services
                 var framed = BuildFramedBytesWithMeta(m, 0, ReliableType.Reliable);
                 SendBytes(framed, sender, ReliableType.Reliable);
             }
-            catch (Exception ex) { LogError($"Handshake decryption error: {ex}"); }
+            catch (CryptographicException ex)
+            {
+                var requestedPadding = string.IsNullOrWhiteSpace(negotiatedPadding) ? HANDSHAKE_SECRET_PADDING_PKCS1 : negotiatedPadding;
+                if (string.Equals(requestedPadding, HANDSHAKE_SECRET_PADDING_OAEP_SHA256, StringComparison.Ordinal))
+                    LogWarning($"Handshake secret rejected from {sender}: OAEP-SHA256 decrypt failed (padding/protocol mismatch or corrupted ciphertext). {ex.Message}");
+                else
+                    LogWarning($"Handshake secret rejected from {sender}: legacy PKCS#1 v1.5 decrypt failed (ciphertext malformed or key mismatch). {ex.Message}");
+            }
+            catch (FormatException ex)
+            {
+                LogWarning($"Handshake secret rejected from {sender}: malformed payload format. {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                LogError($"Handshake decryption error from {sender}: {ex}");
+            }
         }
 
         void CompleteHandshakeInitiator(CSteamID sender, string initiatorNonce, byte[] confirmHmac)
@@ -2025,7 +2085,7 @@ namespace NetworkingLibrary.Services
             return h.ComputeHash(payload);
         }
 
-        static string SerializeRsaPublicKey(RSACryptoServiceProvider rsa)
+        static string SerializeRsaPublicKey(RSA rsa)
         {
             var parms = rsa.ExportParameters(false);
             var mod = Convert.ToBase64String(parms.Modulus ?? Array.Empty<byte>());

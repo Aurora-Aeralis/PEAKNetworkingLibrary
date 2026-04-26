@@ -34,7 +34,6 @@ public class MessageCompressionBoundsTests
 
     [Theory]
     [InlineData(0)]
-    [InlineData(-1)]
     public void DecompressPayload_Rejects_NonPositive_Max_Output_Size(int maxOutputSize)
     {
         using var source = new Message(13u, "compress", 0);

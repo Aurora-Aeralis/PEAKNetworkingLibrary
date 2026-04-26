@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using System.Reflection;
 using NetworkingLibrary.Modules;
 #if !UNITY_EDITOR
@@ -13,6 +12,12 @@ namespace NetworkingLibrary.Services
     {
         const string LogSource = "NetworkingServiceFactory";
         const float ProbeDebugLogCooldownSeconds = 2f;
+        static readonly string[] CandidateSteamManagerTypeNames =
+        {
+            "pworld.Scripts.SteamManager, Assembly-CSharp",
+            "SteamManager, Assembly-CSharp",
+            "SteamManager"
+        };
 
 #if !UNITY_EDITOR
         internal static Func<bool> IsSteamClientRunning = () => SteamAPI.IsSteamRunning();
@@ -81,13 +86,7 @@ namespace NetworkingLibrary.Services
 
             try
             {
-                var candidateTypeNames = new[]
-                {
-                    "pworld.Scripts.SteamManager, Assembly-CSharp",
-                    "SteamManager, Assembly-CSharp",
-                    "SteamManager"
-                };
-                foreach (var candidateTypeName in candidateTypeNames)
+                foreach (var candidateTypeName in CandidateSteamManagerTypeNames)
                 {
                     var steamManagerType = ResolveType(candidateTypeName);
                     if (steamManagerType == null) continue;
@@ -116,14 +115,14 @@ namespace NetworkingLibrary.Services
                 var assembly = assemblies[index];
                 if (assembly == null || assembly.IsDynamic) continue;
 
-                Type[] types;
+                Type?[] types;
                 try
                 {
                     types = assembly.GetTypes();
                 }
                 catch (ReflectionTypeLoadException ex)
                 {
-                    types = ex.Types.Where(type => type != null).ToArray()!;
+                    types = ex.Types;
                 }
                 catch
                 {

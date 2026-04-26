@@ -71,9 +71,10 @@ namespace NetworkingLibrary.Features
 
         static string GetStoredVersion(string schemaVersion, string legacyVersion)
         {
-            if (!string.IsNullOrWhiteSpace(schemaVersion))
-                return schemaVersion;
-            return legacyVersion;
+            var normalizedSchemaVersion = NormalizeVersionToken(schemaVersion);
+            if (!string.IsNullOrWhiteSpace(normalizedSchemaVersion))
+                return normalizedSchemaVersion;
+            return NormalizeVersionToken(legacyVersion);
         }
 
         static void MigrateConfig(ConfigEntry<string> schemaVersionEntry, string previousVersion, string currentVersion, string legacyVersion)
@@ -105,7 +106,8 @@ namespace NetworkingLibrary.Features
         static bool TryParseSchemaVersion(string version, out int schemaVersion)
         {
             schemaVersion = 0;
-            if (string.IsNullOrWhiteSpace(version) || !int.TryParse(version, NumberStyles.Integer, CultureInfo.InvariantCulture, out schemaVersion))
+            var normalizedVersion = NormalizeVersionToken(version);
+            if (string.IsNullOrWhiteSpace(normalizedVersion) || !int.TryParse(normalizedVersion, NumberStyles.Integer, CultureInfo.InvariantCulture, out schemaVersion))
                 return false;
             return schemaVersion >= 0;
         }
@@ -166,7 +168,14 @@ namespace NetworkingLibrary.Features
             var commentIndex = semicolonIndex < 0 ? hashIndex : hashIndex < 0 ? semicolonIndex : Math.Min(semicolonIndex, hashIndex);
             if (commentIndex >= 0)
                 normalized = normalized[..commentIndex];
-            return normalized.Trim();
+            return NormalizeVersionToken(normalized);
+        }
+
+        static string NormalizeVersionToken(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+            return value.Trim();
         }
 
         static void DropLegacyVersionFromConfig(ConfigFile config)

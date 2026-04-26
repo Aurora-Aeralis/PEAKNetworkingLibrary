@@ -253,15 +253,7 @@ namespace NetworkingLibrary.Modules
         {
             if (bytes.Length == 0) return;
             EnsureCanAppend(bytes.Length, nameof(AppendSpan));
-            if (bytes.Length <= 32)
-            {
-                for (var index = 0; index < bytes.Length; index++) buffer.Add(bytes[index]);
-            }
-            else
-            {
-                var array = bytes.ToArray();
-                buffer.AddRange(array);
-            }
+            for (var index = 0; index < bytes.Length; index++) buffer.Add(bytes[index]);
             readableBufferDirty = true;
         }
 
@@ -322,11 +314,32 @@ namespace NetworkingLibrary.Modules
         public Message WriteString(string v)
         {
             ThrowIfDisposed();
-            var value = v ?? "";
+            var value = v ?? string.Empty;
             var payloadLength = Encoding.UTF8.GetByteCount(value);
             EnsureCanAppend(sizeof(int) + payloadLength, nameof(WriteString));
             WriteInt32LE(payloadLength);
-            if (payloadLength > 0) buffer.AddRange(Encoding.UTF8.GetBytes(value));
+            if (payloadLength > 0)
+            {
+                if (payloadLength <= 256)
+                {
+                    Span<byte> utf8Buffer = stackalloc byte[payloadLength];
+                    Encoding.UTF8.GetBytes(value.AsSpan(), utf8Buffer);
+                    for (var index = 0; index < utf8Buffer.Length; index++) buffer.Add(utf8Buffer[index]);
+                }
+                else
+                {
+                    var utf8Buffer = ArrayPool<byte>.Shared.Rent(payloadLength);
+                    try
+                    {
+                        var written = Encoding.UTF8.GetBytes(value.AsSpan(), utf8Buffer);
+                        for (var index = 0; index < written; index++) buffer.Add(utf8Buffer[index]);
+                    }
+                    finally
+                    {
+                        ArrayPool<byte>.Shared.Return(utf8Buffer);
+                    }
+                }
+            }
             readableBufferDirty = true;
             return this;
         }

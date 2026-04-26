@@ -55,4 +55,27 @@ public class NetworkingPhotonExtensionsTests
         Assert.True(NetworkingPhotonExtensions.ShouldEmitUnresolvedMappingWarning(2, "new issue", t0.AddSeconds(29)));
         Assert.Equal(1, NetworkingPhotonExtensions.GetUnresolvedMappingWarningThrottleCountForTests());
     }
+
+    [Fact]
+    public void TryParseSteamId_Accepts_Valid_Ulong_Long_And_Numeric_String()
+    {
+        const ulong validSteam64 = 76561198000000000UL;
+
+        Assert.True(NetworkingPhotonExtensions.TryParseSteamIdForTests(validSteam64, out var fromUlong));
+        Assert.Equal(validSteam64, fromUlong);
+
+        Assert.True(NetworkingPhotonExtensions.TryParseSteamIdForTests((long)validSteam64, out var fromLong));
+        Assert.Equal(validSteam64, fromLong);
+
+        Assert.True(NetworkingPhotonExtensions.TryParseSteamIdForTests(validSteam64.ToString(), out var fromString));
+        Assert.Equal(validSteam64, fromString);
+    }
+
+    [Fact]
+    public void TryParseSteamId_Rejects_Small_Numeric_Types()
+    {
+        Assert.False(NetworkingPhotonExtensions.TryParseSteamIdForTests((uint)7656119800, out _));
+        Assert.False(NetworkingPhotonExtensions.TryParseSteamIdForTests(765611980, out _));
+    }
+
 }

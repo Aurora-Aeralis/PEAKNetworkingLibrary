@@ -317,6 +317,40 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
+    public void LeaveLobby_ClearsRegisteredLobbyAndPlayerKeys()
+    {
+        var service = new OfflineNetworkingService();
+        service.Initialize();
+        service.CreateLobby();
+        service.RegisterLobbyDataKey("map");
+        service.RegisterPlayerDataKey("rank");
+
+        service.LeaveLobby();
+        service.CreateLobby();
+
+        Assert.False(IsLobbyDataKeyRegistered(service, "map"));
+        Assert.False(IsPlayerDataKeyRegistered(service, "rank"));
+    }
+
+    [Fact]
+    public void Shutdown_ClearsRegisteredLobbyAndPlayerKeys_EvenWhenAlreadyOutOfLobby()
+    {
+        var service = new OfflineNetworkingService();
+        service.Initialize();
+        service.CreateLobby();
+        service.RegisterLobbyDataKey("map");
+        service.RegisterPlayerDataKey("rank");
+        service.LeaveLobby();
+
+        service.Shutdown();
+        service.Initialize();
+        service.CreateLobby();
+
+        Assert.False(IsLobbyDataKeyRegistered(service, "map"));
+        Assert.False(IsPlayerDataKeyRegistered(service, "rank"));
+    }
+
+    [Fact]
     public void Shutdown_WhileInLobby_RaisesLobbyLeftOnce()
     {
         var service = new OfflineNetworkingService();
@@ -755,5 +789,21 @@ public class OfflineNetworkingServiceTests
             .GetValue(service)!;
         if (!rpcs.TryGetValue(modId, out var methods)) return 0;
         return methods.Sum(entry => entry.Value.Count);
+    }
+
+    static bool IsLobbyDataKeyRegistered(OfflineNetworkingService service, string key)
+    {
+        var lobbyKeys = (HashSet<string>)typeof(OfflineNetworkingService)
+            .GetField("lobbyKeys", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(service)!;
+        return lobbyKeys.Contains(key);
+    }
+
+    static bool IsPlayerDataKeyRegistered(OfflineNetworkingService service, string key)
+    {
+        var playerKeys = (HashSet<string>)typeof(OfflineNetworkingService)
+            .GetField("playerKeys", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(service)!;
+        return playerKeys.Contains(key);
     }
 }

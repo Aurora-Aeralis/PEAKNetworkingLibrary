@@ -774,10 +774,24 @@ namespace NetworkingLibrary.Modules
             return ms.ToArray();
         }
 
+        public byte[] DecompressPayloadForCurrentPolicy(byte[] compressed, int maxOutputSize = -1)
+        {
+            if (maxOutputSize < 0) maxOutputSize = sizePolicy.MaxLogicalSize;
+            return DecompressPayloadCore(compressed, maxOutputSize);
+        }
+
+        /// <summary>
+        /// Decompresses a GZip payload using the global default message size policy when no explicit max is provided.
+        /// </summary>
         public static byte[] DecompressPayload(byte[] compressed, int maxOutputSize = -1)
         {
+            if (maxOutputSize < 0) maxOutputSize = ResolveDefaultSizePolicy().MaxLogicalSize;
+            return DecompressPayloadCore(compressed, maxOutputSize);
+        }
+
+        private static byte[] DecompressPayloadCore(byte[] compressed, int maxOutputSize)
+        {
             if (compressed == null) throw new ArgumentNullException(nameof(compressed));
-            if (maxOutputSize < 0) maxOutputSize = MaxLogicalSize;
             using var ms = new MemoryStream(compressed);
             using var gz = new GZipStream(ms, CompressionMode.Decompress);
             using var outMs = new MemoryStream();

@@ -1547,7 +1547,8 @@ namespace NetworkingLibrary.Services
                 {
                     try
                     {
-                        payloadToProcess = Message.DecompressPayload(payloadToProcess, messageSizePolicy.MaxLogicalSize);
+                        using var decompressionMessage = new Message(0u, string.Empty, 0, messageSizePolicy);
+                        payloadToProcess = decompressionMessage.DecompressPayloadForCurrentPolicy(payloadToProcess);
                     }
                     catch (Exception ex)
                     {

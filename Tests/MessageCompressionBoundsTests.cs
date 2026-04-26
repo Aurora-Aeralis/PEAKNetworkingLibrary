@@ -108,4 +108,33 @@ public class MessageCompressionBoundsTests
         Assert.Equal(source.ToArray(), rebuilt.ToArray());
         Assert.Equal(compressed, rebuilt.CompressPayload());
     }
+
+    [Fact]
+    public void Instance_DecompressPayload_Rejects_Data_Exceeding_Custom_Policy_When_Global_Max_Is_Larger()
+    {
+        Message.SetMaxSize(Message.DefaultMaxSize);
+        var strictPolicy = new MessageSizePolicy(1024);
+
+        using var source = new Message(30u, "compress", 1);
+        source.WriteBytes(new byte[strictPolicy.MaxLogicalSize + 1]);
+        var compressed = source.CompressPayload();
+
+        using var scopedMessage = new Message(31u, "compress", 1, strictPolicy);
+        var ex = Assert.Throws<InvalidDataException>(() => scopedMessage.DecompressPayloadForCurrentPolicy(compressed));
+        Assert.Contains($"max allowed size {strictPolicy.MaxLogicalSize}", ex.Message);
+    }
+
+    [Fact]
+    public void Instance_DecompressPayload_Allows_Data_Within_Custom_Policy()
+    {
+        var policy = new MessageSizePolicy(1024);
+
+        using var source = new Message(40u, "compress", 1);
+        source.WriteBytes(new byte[policy.MaxLogicalSize]);
+        var compressed = source.CompressPayload();
+
+        using var scopedMessage = new Message(41u, "compress", 1, policy);
+        var decompressed = scopedMessage.DecompressPayloadForCurrentPolicy(compressed);
+        Assert.Equal(source.ToArray(), decompressed);
+    }
 }

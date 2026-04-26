@@ -1,7 +1,6 @@
 using BepInEx.Configuration;
 using NetworkingLibrary.Features;
 using System;
-using System.Collections;
 using System.IO;
 using Xunit;
 
@@ -96,7 +95,7 @@ public class FileManagerConfigMigrationTests
 
 
     [Fact]
-    public void MigrateConfigIfNeeded_UsesDirectRemoveReflectionPathWhenAvailable()
+    public void MigrateConfigIfNeeded_UsesRemovePathWhenAvailable()
     {
         using var scope = new TempConfigScope();
         var seedConfig = new ConfigFile(scope.ConfigPath, true);
@@ -108,11 +107,10 @@ public class FileManagerConfigMigrationTests
         FileManager.MigrateConfigIfNeeded(config, "1");
 
         Assert.Equal(1, config.RemoveCalls);
-        Assert.Equal(0, config.OrphanedEntriesAccesses);
     }
 
     [Fact]
-    public void MigrateConfigIfNeeded_RemoveReflectionFailure_UsesOrphanedEntriesFallback()
+    public void MigrateConfigIfNeeded_RemoveReflectionFailure_UsesFileRewriteFallback()
     {
         using var scope = new TempConfigScope();
         var seedConfig = new ConfigFile(scope.ConfigPath, true);
@@ -120,24 +118,23 @@ public class FileManagerConfigMigrationTests
         seedConfig.Save();
 
         var config = new ThrowingRemoveFallbackConfigFile(scope.ConfigPath, true);
-        Assert.True(config.HasLegacyEntry);
 
         FileManager.MigrateConfigIfNeeded(config, "1");
 
         Assert.Equal(1, config.RemoveCalls);
-        Assert.True(config.OrphanedEntriesAccesses > 0);
-        Assert.False(config.HasLegacyEntry);
+        var configText = File.ReadAllText(scope.ConfigPath);
+        Assert.DoesNotContain("Current Version = 1", configText, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void MigrateConfigIfNeeded_ReflectionCleanupFailure_StillNormalizesSchemaVersion()
+    public void MigrateConfigIfNeeded_RemovalPathUnavailable_MigratesByRewrite()
     {
         using var scope = new TempConfigScope();
-        var seedConfig = new ConfigFile(scope.ConfigPath, true);
-        seedConfig.Bind("Version", "Current Version", string.Empty).Value = "1";
-        seedConfig.Save();
+        File.WriteAllText(scope.ConfigPath,
+            "[Version]\n" +
+            "Current Version = 1\n");
 
-        var config = new ThrowingLegacyCleanupConfigFile(scope.ConfigPath, true);
+        var config = new MissingRemoveConfigFile(scope.ConfigPath, true);
 
         FileManager.MigrateConfigIfNeeded(config, "1");
 
@@ -175,7 +172,9 @@ public class FileManagerConfigMigrationTests
     [InlineData("Current Version=1")]
     [InlineData("Current Version    =    1")]
     [InlineData("    Current Version = 1")]
-    public void MigrateConfigIfNeeded_LegacyVersionSpacingVariants_ParsesAndClearsOrRemovesKey(string legacyLine)
+    [InlineData("; Current Version = 99\nCurrent Version = 1")]
+    [InlineData("# Current Version = 99\nCurrent Version = 1")]
+    public void MigrateConfigIfNeeded_LegacyVersionSpacingAndCommentVariants_ParsesAndClearsOrRemovesKey(string legacyLine)
     {
         using var scope = new TempConfigScope();
         File.WriteAllText(scope.ConfigPath,
@@ -190,6 +189,42 @@ public class FileManagerConfigMigrationTests
 
         Assert.Equal("1", schemaVersion);
         Assert.True(IsLegacyVersionClearedOrRemoved(configText));
+    }
+
+    [Fact]
+    public void MigrateConfigIfNeeded_ReRun_IsIdempotent()
+    {
+        using var scope = new TempConfigScope();
+        File.WriteAllText(scope.ConfigPath,
+            "[Version]\n" +
+            "Current Version = 1\n");
+
+        var config = new ConfigFile(scope.ConfigPath, true);
+        FileManager.MigrateConfigIfNeeded(config, "1");
+        var once = File.ReadAllText(scope.ConfigPath);
+
+        var reloaded = new ConfigFile(scope.ConfigPath, true);
+        FileManager.MigrateConfigIfNeeded(reloaded, "1");
+        var twice = File.ReadAllText(scope.ConfigPath);
+
+        Assert.Equal(once, twice);
+    }
+
+    [Fact]
+    public void MigrateConfigIfNeeded_MissingConfigAndRemovalUnavailable_DoesNotCreateSchemaEntry()
+    {
+        using var scope = new TempConfigScope();
+        if (File.Exists(scope.ConfigPath))
+            File.Delete(scope.ConfigPath);
+
+        var config = new MissingRemoveConfigFile(scope.ConfigPath, false);
+        if (File.Exists(scope.ConfigPath))
+            File.Delete(scope.ConfigPath);
+
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        Assert.Equal(string.Empty, schemaVersion);
     }
 
     static bool IsLegacyVersionClearedOrRemoved(string configText)
@@ -225,7 +260,6 @@ public class FileManagerConfigMigrationTests
     sealed class TrackingRemoveConfigFile : ConfigFile
     {
         internal int RemoveCalls { get; private set; }
-        internal int OrphanedEntriesAccesses { get; private set; }
 
         internal TrackingRemoveConfigFile(string configPath, bool saveOnInit) : base(configPath, saveOnInit) { }
 
@@ -234,56 +268,25 @@ public class FileManagerConfigMigrationTests
             RemoveCalls++;
             return true;
         }
-
-        public new IDictionary OrphanedEntries
-        {
-            get
-            {
-                OrphanedEntriesAccesses++;
-                return base.OrphanedEntries;
-            }
-        }
     }
 
     sealed class ThrowingRemoveFallbackConfigFile : ConfigFile
     {
-        readonly IDictionary _orphanedEntries = new Hashtable();
-
         internal int RemoveCalls { get; private set; }
-        internal int OrphanedEntriesAccesses { get; private set; }
-        internal bool HasLegacyEntry => _orphanedEntries.Contains(new ConfigDefinition("Version", "Current Version"));
 
         internal ThrowingRemoveFallbackConfigFile(string configPath, bool saveOnInit) : base(configPath, saveOnInit)
-        {
-            _orphanedEntries[new ConfigDefinition("Version", "Current Version")] = "1";
-        }
+        { }
 
         public new bool Remove(ConfigDefinition definition)
         {
             RemoveCalls++;
             throw new InvalidOperationException("Simulated Remove reflection failure.");
         }
-
-        public new IDictionary OrphanedEntries
-        {
-            get
-            {
-                OrphanedEntriesAccesses++;
-                return _orphanedEntries;
-            }
-        }
     }
 
-    sealed class ThrowingLegacyCleanupConfigFile : ConfigFile
+    sealed class MissingRemoveConfigFile : ConfigFile
     {
-        internal ThrowingLegacyCleanupConfigFile(string configPath, bool saveOnInit) : base(configPath, saveOnInit) { }
-
-        public new bool Remove(ConfigDefinition definition)
-        {
-            throw new InvalidOperationException("Simulated Remove reflection failure.");
-        }
-
-        public new IDictionary OrphanedEntries => throw new InvalidOperationException("Simulated OrphanedEntries reflection failure.");
+        internal MissingRemoveConfigFile(string configPath, bool saveOnInit) : base(configPath, saveOnInit) { }
     }
 
     sealed class TempConfigScope : IDisposable

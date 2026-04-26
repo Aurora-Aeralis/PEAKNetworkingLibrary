@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Collections;
 using System.Reflection;
 using System.Collections.Concurrent;
 using BepInEx.Configuration;
@@ -20,7 +19,6 @@ namespace NetworkingLibrary.Features
         const string DaModsFolderName = "DAa Mods";
         const string ConfigFileName = "config.cfg";
         static readonly ConcurrentDictionary<Type, Lazy<MethodInfo?>> RemoveMethodCache = new();
-        static readonly ConcurrentDictionary<Type, Lazy<PropertyInfo?>> OrphanedEntriesPropertyCache = new();
 
         internal static ConfigEntry<T> BindConfig<T>(string Header, string Features, T Value, string? Info = "")
         {
@@ -150,38 +148,24 @@ namespace NetworkingLibrary.Features
         static void DropLegacyVersionFromConfig(ConfigFile config)
         {
             var legacyDefinition = new ConfigDefinition(VersionSection, LegacyVersionKey);
-            Exception? removeException = null;
             var removeMethod = GetRemoveMethod(config);
-            var orphanedEntriesProperty = GetOrphanedEntriesProperty(config);
-            if (removeMethod == null && orphanedEntriesProperty == null)
+            if (removeMethod != null)
             {
-                ClearLegacyVersion(config);
-                return;
-            }
-
-            try
-            {
-                if (removeMethod != null)
+                try
                 {
                     removeMethod.Invoke(config, new object[] { legacyDefinition });
                     return;
                 }
-            }
-            catch (Exception exception)
-            {
-                removeException = exception;
+                catch (Exception exception)
+                {
+                    ClearLegacyVersion(config);
+                    Net.Logger?.LogWarning($"Failed migration cleanup via Remove(ConfigDefinition) for legacy key '{LegacyVersionKey}'. Chosen path: file rewrite fallback. Reason: {exception}");
+                    return;
+                }
             }
 
-            try
-            {
-                var orphanedEntries = GetOrphanedEntries(config, orphanedEntriesProperty);
-                orphanedEntries?.Remove(legacyDefinition);
-            }
-            catch (Exception orphanedEntriesException)
-            {
-                var removeContext = removeException == null ? string.Empty : $" Remove invocation error: {removeException}.";
-                Net.Logger?.LogWarning($"Failed to remove legacy config key '{LegacyVersionKey}' during migration.{removeContext} OrphanedEntries fallback error: {orphanedEntriesException}");
-            }
+            ClearLegacyVersion(config);
+            Net.Logger?.LogWarning($"Remove(ConfigDefinition) unavailable during migration cleanup for legacy key '{LegacyVersionKey}'. Chosen path: file rewrite fallback. Reason: targeted API not present on config type '{config.GetType().FullName}'.");
         }
 
         static void ClearLegacyVersion(ConfigFile config)
@@ -230,23 +214,8 @@ namespace NetworkingLibrary.Features
             var configType = config.GetType();
             var removeMethod = RemoveMethodCache.GetOrAdd(
                 configType,
-                type => new Lazy<MethodInfo?>(() => type.GetMethod("Remove", new[] { typeof(ConfigDefinition) })));
+                type => new Lazy<MethodInfo?>(() => type.GetMethod("Remove", BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly, null, new[] { typeof(ConfigDefinition) }, null)));
             return removeMethod.Value;
-        }
-
-        internal static PropertyInfo? GetOrphanedEntriesProperty(ConfigFile config)
-        {
-            var configType = config.GetType();
-            var orphanedEntriesProperty = OrphanedEntriesPropertyCache.GetOrAdd(
-                configType,
-                type => new Lazy<PropertyInfo?>(() => type.GetProperty("OrphanedEntries", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)));
-            return orphanedEntriesProperty.Value;
-        }
-
-        internal static IDictionary? GetOrphanedEntries(ConfigFile config, PropertyInfo? orphanedEntriesProperty = null)
-        {
-            orphanedEntriesProperty ??= GetOrphanedEntriesProperty(config);
-            return orphanedEntriesProperty?.GetValue(config) as IDictionary;
         }
 
         static ConfigEntry<string> BindPluginVersion(ConfigFile config, string value)

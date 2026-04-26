@@ -17,8 +17,6 @@ namespace NetworkingLibrary.Modules
         private const int DefaultMaxSize = 64 * 1024;
         private const int MinMaxSize = 1024;
         private const int MaxMaxSize = int.MaxValue / 16;
-        // NOTE: this must remain a field (not a property) for runtime ABI compatibility
-        // with precompiled assemblies that reference Message.MaxSize as a field symbol.
         public static int MaxSize = DefaultMaxSize;
         public static int MaxLogicalSize => MaxSize * 16;
 
@@ -142,7 +140,7 @@ namespace NetworkingLibrary.Modules
         {
             if (bytes.Length == 0) return;
             buffer.EnsureCapacity(buffer.Count + bytes.Length);
-            buffer.AddRange(bytes.ToArray());
+            for (var index = 0; index < bytes.Length; index++) buffer.Add(bytes[index]);
             readableBufferDirty = true;
         }
 
@@ -670,7 +668,6 @@ namespace NetworkingLibrary.Modules
             if (_disposed) return;
             _disposed = true;
             buffer.Clear();
-            buffer = new List<byte>();
             readableBuffer = Array.Empty<byte>();
             readableBufferDirty = true;
             readPos = 0;

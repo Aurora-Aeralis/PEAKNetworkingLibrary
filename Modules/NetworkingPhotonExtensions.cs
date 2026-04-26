@@ -21,10 +21,24 @@ namespace NetworkingLibrary.Modules
         static DateTime lastPersonaLookupExceptionUtc = DateTime.MinValue;
         static int suppressedPersonaLookupExceptions;
         static readonly object personaLookupExceptionLock = new object();
+        static readonly TimeSpan PersonaNameCacheTtl = TimeSpan.FromSeconds(5);
+        static readonly TimeSpan PersonaNameCachePruneAge = TimeSpan.FromSeconds(PersonaNameCacheTtl.TotalSeconds * 6);
+        const int PersonaNameCacheMaxEntries = 4096;
+        static readonly Dictionary<ulong, PersonaNameCacheEntry> PersonaNameCache = new Dictionary<ulong, PersonaNameCacheEntry>();
+        static readonly object PersonaNameCacheLock = new object();
+        static DateTime PersonaNameCacheNextPruneUtc = DateTime.MinValue;
+        internal static Func<ulong, string> PersonaNameLookup = sid => SteamFriends.GetFriendPersonaName(new CSteamID(sid));
+        internal static Func<DateTime> UtcNow = () => DateTime.UtcNow;
         static readonly string[] StableIdPropertyKeys =
         {
             "steam64", "steamid64", "steam_id64", "steamid", "steam_id", "steam", "authid", "auth_id", "userid", "user_id"
         };
+
+        struct PersonaNameCacheEntry
+        {
+            public string Name;
+            public DateTime UpdatedUtc;
+        }
 
         public static Dictionary<int, ulong> MapPhotonActorsToSteam(INetworkingService svc)
         {
@@ -38,21 +52,7 @@ namespace NetworkingLibrary.Modules
             if (room == null) return map;
 
             var lobbyIdSet = new HashSet<ulong>(lobbyIds);
-            var personaByName = new Dictionary<string, List<ulong>>(StringComparer.Ordinal);
-            foreach (var sid in lobbyIds)
-            {
-                try
-                {
-                    var name = SteamFriends.GetFriendPersonaName(new CSteamID(sid));
-                    if (string.IsNullOrEmpty(name)) continue;
-                    if (!personaByName.TryGetValue(name, out var ids)) personaByName[name] = ids = new List<ulong>(1);
-                    ids.Add(sid);
-                }
-                catch (Exception ex)
-                {
-                    LogPersonaLookupExceptionThrottled(ex, sid);
-                }
-            }
+            var personaByName = BuildPersonaLookupIndex(lobbyIds);
 
             foreach (var kv in room.Players)
             {
@@ -171,6 +171,117 @@ namespace NetworkingLibrary.Modules
         internal static bool TryParseSteamIdForTests(object raw, out ulong steamId)
         {
             return TryParseSteamId(raw, out steamId);
+        }
+
+        static Dictionary<string, List<ulong>> BuildPersonaLookupIndex(ulong[] lobbyIds)
+        {
+            var personaByName = new Dictionary<string, List<ulong>>(StringComparer.Ordinal);
+            if (lobbyIds == null || lobbyIds.Length == 0) return personaByName;
+
+            for (int i = 0; i < lobbyIds.Length; i++)
+            {
+                var sid = lobbyIds[i];
+                if (!TryGetPersonaName(sid, out var name) || string.IsNullOrEmpty(name)) continue;
+                if (!personaByName.TryGetValue(name, out var ids)) personaByName[name] = ids = new List<ulong>(1);
+                ids.Add(sid);
+            }
+
+            return personaByName;
+        }
+
+        static bool TryGetPersonaName(ulong sid, out string name)
+        {
+            var now = UtcNow();
+            lock (PersonaNameCacheLock)
+            {
+                if (now >= PersonaNameCacheNextPruneUtc)
+                {
+                    PrunePersonaNameCache(now);
+                    PersonaNameCacheNextPruneUtc = now + PersonaNameCacheTtl;
+                }
+
+                if (PersonaNameCache.TryGetValue(sid, out var cached) && now - cached.UpdatedUtc < PersonaNameCacheTtl)
+                {
+                    name = cached.Name;
+                    return true;
+                }
+            }
+
+            try
+            {
+                name = PersonaNameLookup(sid);
+            }
+            catch (Exception ex)
+            {
+                LogPersonaLookupExceptionThrottled(ex, sid);
+                name = null;
+                return false;
+            }
+
+            lock (PersonaNameCacheLock)
+            {
+                PersonaNameCache[sid] = new PersonaNameCacheEntry
+                {
+                    Name = name,
+                    UpdatedUtc = now
+                };
+                CapPersonaNameCache();
+            }
+
+            return true;
+        }
+
+        static void PrunePersonaNameCache(DateTime nowUtc)
+        {
+            if (PersonaNameCache.Count == 0) return;
+            var expiresBeforeUtc = nowUtc - PersonaNameCachePruneAge;
+            List<ulong> keysToRemove = null;
+            foreach (var entry in PersonaNameCache)
+            {
+                if (entry.Value.UpdatedUtc >= expiresBeforeUtc) continue;
+                if (keysToRemove == null) keysToRemove = new List<ulong>();
+                keysToRemove.Add(entry.Key);
+            }
+
+            if (keysToRemove == null) return;
+            for (int i = 0; i < keysToRemove.Count; i++) PersonaNameCache.Remove(keysToRemove[i]);
+        }
+
+        static void CapPersonaNameCache()
+        {
+            if (PersonaNameCache.Count <= PersonaNameCacheMaxEntries) return;
+
+            ulong oldestKey = 0;
+            var oldestTime = DateTime.MaxValue;
+            foreach (var entry in PersonaNameCache)
+            {
+                if (entry.Value.UpdatedUtc >= oldestTime) continue;
+                oldestTime = entry.Value.UpdatedUtc;
+                oldestKey = entry.Key;
+            }
+
+            if (oldestKey != 0) PersonaNameCache.Remove(oldestKey);
+        }
+
+        internal static Dictionary<string, List<ulong>> BuildPersonaLookupIndexForTests(ulong[] lobbyIds)
+        {
+            return BuildPersonaLookupIndex(lobbyIds);
+        }
+
+        internal static void ResetPersonaNameCacheForTests()
+        {
+            lock (PersonaNameCacheLock)
+            {
+                PersonaNameCache.Clear();
+                PersonaNameCacheNextPruneUtc = DateTime.MinValue;
+            }
+            lock (personaLookupExceptionLock)
+            {
+                lastPersonaLookupExceptionUtc = DateTime.MinValue;
+                suppressedPersonaLookupExceptions = 0;
+            }
+            PersonaNameLookup = sid => SteamFriends.GetFriendPersonaName(new CSteamID(sid));
+            UtcNow = () => DateTime.UtcNow;
         }
 
         static void LogWarning(string message)

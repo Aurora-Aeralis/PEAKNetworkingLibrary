@@ -134,12 +134,10 @@ namespace NetworkingLibrary.Services
             playerKeys.Clear();
             lobbyData.Clear();
             perPlayerData.Clear();
-            lobbyKeys.Clear();
-            playerKeys.Clear();
-            ClearPerPeerSymmetricKeys();
-            ClearGlobalSharedSecret();
             modSigners.Clear();
             modPublicKeys.Clear();
+            ClearPerPeerSymmetricKeys();
+            ClearGlobalSharedSecret();
             globalHmac?.Dispose(); globalHmac = null;
         }
 

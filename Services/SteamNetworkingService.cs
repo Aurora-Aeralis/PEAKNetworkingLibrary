@@ -2203,26 +2203,30 @@ namespace NetworkingLibrary.Services
         {
             callParams = null!;
             unread = int.MaxValue;
+            var cursor = source.SaveReadCursor();
             try
             {
-                var msgCopy = new Message(source.ToArray(), messageSizePolicy);
                 var paramInfos = handler.Parameters;
                 int paramCount = handler.TakesInfo ? paramInfos.Length - 1 : paramInfos.Length;
                 callParams = new object[paramInfos.Length];
 
-                for (int i = 0; i < paramCount; i++) callParams[i] = msgCopy.ReadObject(paramInfos[i].ParameterType);
+                for (int i = 0; i < paramCount; i++) callParams[i] = source.ReadObject(paramInfos[i].ParameterType);
                 if (handler.TakesInfo)
                 {
                     var infoType = paramInfos[paramInfos.Length - 1].ParameterType;
                     callParams[paramInfos.Length - 1] = CreateRpcInfoInstance(infoType, sender);
                 }
 
-                unread = msgCopy.UnreadLength();
+                unread = source.UnreadLength();
                 return true;
             }
             catch
             {
                 return false;
+            }
+            finally
+            {
+                source.RestoreReadCursor(cursor);
             }
         }
 

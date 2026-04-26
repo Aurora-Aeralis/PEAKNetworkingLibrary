@@ -693,24 +693,28 @@ namespace NetworkingLibrary.Services
         {
             callParams = null!;
             unread = int.MaxValue;
+            var cursor = source.SaveReadCursor();
             try
             {
-                var msgCopy = new Message(source.ToArray(), messageSizePolicy);
                 var pi = handler.Parameters;
                 int paramCount = handler.TakesInfo ? pi.Length - 1 : pi.Length;
                 callParams = new object[pi.Length];
-                for (int i = 0; i < paramCount; i++) callParams[i] = msgCopy.ReadObject(pi[i].ParameterType);
+                for (int i = 0; i < paramCount; i++) callParams[i] = source.ReadObject(pi[i].ParameterType);
                 if (handler.TakesInfo)
                 {
                     var t = pi[pi.Length - 1].ParameterType;
                     callParams[pi.Length - 1] = CreateRpcInfoInstance(t, from);
                 }
-                unread = msgCopy.UnreadLength();
+                unread = source.UnreadLength();
                 return true;
             }
             catch
             {
                 return false;
+            }
+            finally
+            {
+                source.RestoreReadCursor(cursor);
             }
         }
 

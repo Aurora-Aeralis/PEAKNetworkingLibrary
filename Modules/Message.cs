@@ -18,16 +18,20 @@ namespace NetworkingLibrary.Modules
         private const int DefaultMaxSize = 64 * 1024;
         private const int MinMaxSize = 1024;
         private const int MaxMaxSize = int.MaxValue / 16;
-        public static int MaxSize = DefaultMaxSize;
+        public static int MaxSize => DefaultMaxSize;
         public static int MaxLogicalSize => MaxSize * 16;
+        public int SizeLimit => sizeLimit;
+        public int LogicalSizeLimit => sizeLimit * 16;
 
-        public static void SetMaxSize(int bytes)
+        private readonly int sizeLimit;
+
+        public static int ValidateMaxSize(int bytes)
         {
             if (bytes < MinMaxSize || bytes > MaxMaxSize)
             {
                 throw new ArgumentOutOfRangeException(nameof(bytes), bytes, $"Message max size must be between {MinMaxSize} and {MaxMaxSize} bytes.");
             }
-            MaxSize = bytes;
+            return bytes;
         }
 
         public byte ProtocolVersion;
@@ -43,12 +47,13 @@ namespace NetworkingLibrary.Modules
         private bool _disposed;
         private bool UsesReferencePresenceFlags => ProtocolVersion >= 2;
 
-        public Message(uint modId, string methodName, int mask) : this(modId, methodName, mask, null)
+        public Message(uint modId, string methodName, int mask, int? sizeLimitOverride = null) : this(modId, methodName, mask, null, sizeLimitOverride)
         {
         }
 
-        public Message(uint modId, string methodName, int mask, string? overloadKey)
+        public Message(uint modId, string methodName, int mask, string? overloadKey, int? sizeLimitOverride = null)
         {
+            sizeLimit = ValidateMaxSize(sizeLimitOverride ?? MaxSize);
             ProtocolVersion = overloadKey == null ? (byte)2 : PROTOCOL_VERSION;
             ModID = modId;
             MethodName = methodName;
@@ -66,8 +71,9 @@ namespace NetworkingLibrary.Modules
             }
         }
 
-        public Message(byte[] data)
+        public Message(byte[] data, int? sizeLimitOverride = null)
         {
+            sizeLimit = ValidateMaxSize(sizeLimitOverride ?? MaxSize);
             SetBytes(data);
             ProtocolVersion = ReadByte();
             if (ProtocolVersion < 1 || ProtocolVersion > PROTOCOL_VERSION)
@@ -92,9 +98,9 @@ namespace NetworkingLibrary.Modules
         {
             ThrowIfDisposed();
             if (data == null) throw new ArgumentNullException(nameof(data));
-            if (data.Length > MaxLogicalSize)
+            if (data.Length > LogicalSizeLimit)
             {
-                throw new InvalidDataException($"Message payload exceeds max allowed size {MaxLogicalSize}");
+                throw new InvalidDataException($"Message payload exceeds max allowed size {LogicalSizeLimit}");
             }
             buffer.Clear();
             buffer.AddRange(data);
@@ -140,9 +146,9 @@ namespace NetworkingLibrary.Modules
         private void EnsureCanAppend(int bytesToAppend, string opName)
         {
             if (bytesToAppend < 0) throw new InvalidDataException($"{opName} size out of range");
-            if ((long)buffer.Count + bytesToAppend > MaxLogicalSize)
+            if ((long)buffer.Count + bytesToAppend > LogicalSizeLimit)
             {
-                throw new InvalidDataException($"{opName} exceeds max message size {MaxLogicalSize}");
+                throw new InvalidDataException($"{opName} exceeds max message size {LogicalSizeLimit}");
             }
         }
 
@@ -411,9 +417,9 @@ namespace NetworkingLibrary.Modules
             {
                 throw new InvalidDataException($"{opName} length out of range");
             }
-            if (len > MaxLogicalSize)
+            if (len > LogicalSizeLimit)
             {
-                throw new InvalidDataException($"{opName} length exceeds max {MaxLogicalSize}");
+                throw new InvalidDataException($"{opName} length exceeds max {LogicalSizeLimit}");
             }
             return len;
         }
@@ -566,9 +572,9 @@ namespace NetworkingLibrary.Modules
             {
                 throw new InvalidDataException("ReadString out of range");
             }
-            if (len > MaxLogicalSize)
+            if (len > LogicalSizeLimit)
             {
-                throw new InvalidDataException($"ReadString length exceeds max {MaxLogicalSize}");
+                throw new InvalidDataException($"ReadString length exceeds max {LogicalSizeLimit}");
             }
             if (len == 0) return string.Empty;
             EnsureReadable(len, nameof(ReadString));

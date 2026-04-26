@@ -83,6 +83,17 @@ public class SteamNetworkingServiceLifecycleTests
         }
     }
 
+    sealed class LargePayloadReceiver
+    {
+        public int CallCount { get; private set; }
+
+        [CustomRPC]
+        void OnLargePayload(string payload)
+        {
+            if (!string.IsNullOrEmpty(payload)) CallCount++;
+        }
+    }
+
     sealed class ScopeAction : IDisposable
     {
         Action? onDispose;
@@ -663,6 +674,31 @@ public class SteamNetworkingServiceLifecycleTests
         Assert.Equal(new IntPtr(10_000), secondBuffer[0]);
         Assert.Equal(new IntPtr(writes), firstBuffer[writes - 1]);
         Assert.Equal(new IntPtr(writes - 1 + 10_000), secondBuffer[writes - 1]);
+    }
+
+    [Fact]
+    public void MultipleInstances_UseIndependentTransportMessageSizePolicies()
+    {
+        var first = new SteamNetworkingService(1024);
+        var second = new SteamNetworkingService(4096);
+        var firstReceiver = new LargePayloadReceiver();
+        var secondReceiver = new LargePayloadReceiver();
+        using var _ = first.RegisterNetworkObject(firstReceiver, TestModId, mask: 0);
+        using var __ = second.RegisterNetworkObject(secondReceiver, TestModId, mask: 0);
+
+        var local = SteamUser.GetSteamID();
+        var msg = new Message(TestModId, "OnLargePayload", 0);
+        msg.WriteObject(typeof(string), new string('x', 1500));
+        var framed = BuildFramed(second, msg, TestModId, ReliableType.Unreliable);
+
+        Assert.True(framed.Length > 1024);
+        Assert.True(framed.Length < 4096);
+
+        InvokeNonPublic(first, "SendBytes", framed, local, ReliableType.Unreliable);
+        InvokeNonPublic(second, "SendBytes", framed, local, ReliableType.Unreliable);
+
+        Assert.Equal(0, firstReceiver.CallCount);
+        Assert.Equal(1, secondReceiver.CallCount);
     }
 
     [Fact]

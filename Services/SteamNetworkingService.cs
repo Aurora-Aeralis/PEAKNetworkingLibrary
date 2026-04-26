@@ -191,11 +191,17 @@ namespace NetworkingLibrary.Services
         const byte SIGN_FLAG = 0x8;
         const byte ACK_FLAG = 0x10;
         const int FRAME_HEADER_SIZE = 25; // flags[1] + msgId[8] + seq[8] + total[4] + index[4]
+        readonly int maxTransportMessageSize;
 
         RSACryptoServiceProvider? LocalRsa;
         private Func<RSACryptoServiceProvider> localRsaFactory = () => new RSACryptoServiceProvider(2048);
 
-        public SteamNetworkingService() { }
+        public SteamNetworkingService() : this((int)Constants.k_cbMaxSteamNetworkingSocketsMessageSizeSend) { }
+
+        internal SteamNetworkingService(int transportMessageSizeLimit)
+        {
+            maxTransportMessageSize = Message.ValidateMaxSize(transportMessageSizeLimit);
+        }
 
         readonly Dictionary<(ulong sender, ulong msgId), FragmentBuffer> fragmentBuffers = new();
         readonly object fragmentLock = new();
@@ -262,12 +268,6 @@ namespace NetworkingLibrary.Services
                     LogError($"Failed to create SteamCallbackPump: {ex}");
                 }
             }
-
-            try
-            {
-                Message.SetMaxSize((int)Constants.k_cbMaxSteamNetworkingSocketsMessageSizeSend);
-            }
-            catch { }
 
             if (!TryInitializeSteamCallbacksAndCrypto())
             {
@@ -1127,9 +1127,9 @@ namespace NetworkingLibrary.Services
         }
         void SendBytes(byte[] data, CSteamID target, ReliableType reliable)
         {
-            if (data.Length > Message.MaxSize)
+            if (data.Length > maxTransportMessageSize)
             {
-                LogError($"Send length {data.Length} exceeds Message.MaxSize {Message.MaxSize}");
+                LogError($"Send length {data.Length} exceeds service max transport size {maxTransportMessageSize}");
                 return;
             }
 
@@ -1249,7 +1249,7 @@ namespace NetworkingLibrary.Services
                         continue;
                     }
 
-                    if (size > Message.MaxSize)
+                    if (size > maxTransportMessageSize)
                     {
                         SteamNetworkingMessage_t.Release(outPtr);
                         continue;

@@ -74,7 +74,7 @@ public class NetworkingPhotonExtensionsTests
     [Fact]
     public void TryParseSteamId_Rejects_Small_Numeric_Types()
     {
-        Assert.False(NetworkingPhotonExtensions.TryParseSteamIdForTests((uint)7656119800, out _));
+        Assert.False(NetworkingPhotonExtensions.TryParseSteamIdForTests(uint.MaxValue, out _));
         Assert.False(NetworkingPhotonExtensions.TryParseSteamIdForTests(765611980, out _));
     }
 

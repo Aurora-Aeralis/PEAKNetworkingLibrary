@@ -5,6 +5,7 @@ using Steamworks;
 using System;
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Collections.Generic;
 using System.IO;
@@ -127,8 +128,8 @@ namespace NetworkingLibrary.Services
 
         public Func<Message, ulong, bool>? IncomingValidator { get; set; }
 
-        private readonly List<string> lobbyDataKeys = new();
-        private readonly List<string> playerDataKeys = new();
+        private readonly ConcurrentDictionary<string, byte> lobbyDataKeys = new(StringComparer.Ordinal);
+        private readonly ConcurrentDictionary<string, byte> playerDataKeys = new(StringComparer.Ordinal);
         private readonly Dictionary<CSteamID, Dictionary<string, string>> lastPlayerData = new();
         private readonly Dictionary<string, string> lastLobbyData = new();
         private Func<CSteamID, int> getNumLobbyMembers = SteamMatchmaking.GetNumLobbyMembers;
@@ -656,7 +657,7 @@ namespace NetworkingLibrary.Services
             if (param.m_ulSteamIDLobby == param.m_ulSteamIDMember)
             {
                 var changed = new List<string>();
-                foreach (var key in lobbyDataKeys)
+                foreach (var key in lobbyDataKeys.Keys)
                 {
                     var data = SteamMatchmaking.GetLobbyData(Lobby, key);
                     if (!lastLobbyData.TryGetValue(key, out var prev) || prev != data)
@@ -672,7 +673,7 @@ namespace NetworkingLibrary.Services
                 var player = new CSteamID(param.m_ulSteamIDMember);
                 if (!lastPlayerData.ContainsKey(player)) lastPlayerData[player] = new Dictionary<string, string>();
                 var changed = new List<string>();
-                foreach (var key in playerDataKeys)
+                foreach (var key in playerDataKeys.Keys)
                 {
                     var data = SteamMatchmaking.GetLobbyMemberData(Lobby, player, key);
                     if (!lastPlayerData[player].TryGetValue(key, out var prev) || prev != data)
@@ -687,14 +688,13 @@ namespace NetworkingLibrary.Services
 
         public void RegisterLobbyDataKey(string key)
         {
-            if (lobbyDataKeys.Contains(key)) NetLog.Warning(LogSource, $"Lobby key {key} already registered");
-            else lobbyDataKeys.Add(key);
+            if (!lobbyDataKeys.TryAdd(key, 0)) NetLog.Warning(LogSource, $"Lobby key {key} already registered");
         }
 
         public void SetLobbyData(string key, object value)
         {
             if (!InLobby) { NetLog.Error(LogSource, "Cannot set lobby data when not in lobby."); return; }
-            if (!lobbyDataKeys.Contains(key)) NetLog.Warning(LogSource, $"Accessing unregistered lobby key '{key}'.");
+            if (!lobbyDataKeys.ContainsKey(key)) NetLog.Warning(LogSource, $"Accessing unregistered lobby key '{key}'.");
             var serialized = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
             try
             {
@@ -709,7 +709,7 @@ namespace NetworkingLibrary.Services
         public T GetLobbyData<T>(string key)
         {
             if (!InLobby) { NetLog.Error(LogSource, "Cannot get lobby data when not in lobby."); return default(T)!; }
-            if (!lobbyDataKeys.Contains(key)) NetLog.Warning(LogSource, $"Accessing unregistered lobby key '{key}'.");
+            if (!lobbyDataKeys.ContainsKey(key)) NetLog.Warning(LogSource, $"Accessing unregistered lobby key '{key}'.");
             string v;
             try
             {
@@ -727,14 +727,13 @@ namespace NetworkingLibrary.Services
 
         public void RegisterPlayerDataKey(string key)
         {
-            if (playerDataKeys.Contains(key)) NetLog.Warning(LogSource, $"Player key {key} already registered");
-            else playerDataKeys.Add(key);
+            if (!playerDataKeys.TryAdd(key, 0)) NetLog.Warning(LogSource, $"Player key {key} already registered");
         }
 
         public void SetPlayerData(string key, object value)
         {
             if (!InLobby) { NetLog.Error(LogSource, "Cannot set player data when not in lobby."); return; }
-            if (!playerDataKeys.Contains(key)) NetLog.Warning(LogSource, $"Accessing unregistered player key '{key}'.");
+            if (!playerDataKeys.ContainsKey(key)) NetLog.Warning(LogSource, $"Accessing unregistered player key '{key}'.");
             var serialized = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
             try
             {
@@ -749,7 +748,7 @@ namespace NetworkingLibrary.Services
         public T GetPlayerData<T>(ulong steamId64, string key)
         {
             if (!InLobby) { NetLog.Error(LogSource, "Cannot get player data when not in lobby."); return default(T)!; }
-            if (!playerDataKeys.Contains(key)) NetLog.Warning(LogSource, $"Accessing unregistered player key '{key}'.");
+            if (!playerDataKeys.ContainsKey(key)) NetLog.Warning(LogSource, $"Accessing unregistered player key '{key}'.");
             var player = new CSteamID(steamId64);
             string v;
             try

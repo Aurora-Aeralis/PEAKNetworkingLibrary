@@ -723,6 +723,82 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void RegisterLobbyDataKey_AndRegisterPlayerDataKey_DuplicateRegistration_DoesNotThrow()
+    {
+        var service = new SteamNetworkingService();
+
+        var exception = Record.Exception(() =>
+        {
+            service.RegisterLobbyDataKey("map");
+            service.RegisterLobbyDataKey("map");
+            service.RegisterPlayerDataKey("rank");
+            service.RegisterPlayerDataKey("rank");
+        });
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public async Task LobbyAndPlayerDataKeyRegistration_AndReadWrites_AreThreadSafe()
+    {
+        var service = new SteamNetworkingService();
+        SetInLobby(service, true);
+        SetLobby(service, 9001UL);
+        SetField(service, "setLobbyData", (Action<CSteamID, string, string>)((_, _, _) => { }));
+        SetField(service, "getLobbyData", (Func<CSteamID, string, string>)((_, _) => "1"));
+        SetField(service, "setLobbyMemberData", (Action<CSteamID, string, string>)((_, _, _) => { }));
+        SetField(service, "getLobbyMemberData", (Func<CSteamID, CSteamID, string, string>)((_, _, _) => "2"));
+
+        Exception? registerError = null;
+        Exception? readWriteError = null;
+        var gate = new ManualResetEventSlim(false);
+
+        var registerTask = Task.Run(() =>
+        {
+            gate.Wait();
+            try
+            {
+                for (var i = 0; i < 500; i++)
+                {
+                    var key = $"k{i % 16}";
+                    service.RegisterLobbyDataKey(key);
+                    service.RegisterPlayerDataKey(key);
+                }
+            }
+            catch (Exception ex)
+            {
+                registerError = ex;
+            }
+        });
+
+        var readWriteTask = Task.Run(() =>
+        {
+            gate.Wait();
+            try
+            {
+                for (var i = 0; i < 500; i++)
+                {
+                    var key = $"k{i % 16}";
+                    service.SetLobbyData(key, i);
+                    _ = service.GetLobbyData<int>(key);
+                    service.SetPlayerData(key, i);
+                    _ = service.GetPlayerData<int>(1234UL, key);
+                }
+            }
+            catch (Exception ex)
+            {
+                readWriteError = ex;
+            }
+        });
+
+        gate.Set();
+        await Task.WhenAll(registerTask, readWriteTask);
+
+        Assert.Null(registerError);
+        Assert.Null(readWriteError);
+    }
+
+    [Fact]
     public async Task DispatchIncoming_AndBuildMessage_HandleConcurrentRpcRegistrationChanges()
     {
         var service = new SteamNetworkingService();

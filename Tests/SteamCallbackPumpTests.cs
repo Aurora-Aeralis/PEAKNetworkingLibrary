@@ -1,13 +1,18 @@
 using NetworkingLibrary.Modules;
+using NetworkingLibrary.Services;
 using System;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.Serialization;
+using UnityEngine;
 using Xunit;
 
 namespace NetworkingLibrary.Tests;
 
 public class SteamCallbackPumpTests : IDisposable
 {
+    sealed class DummyComponent : MonoBehaviour { }
+
     readonly Func<bool> originalIsSteamReady = SteamCallbackPump.IsSteamReady;
     readonly Func<float> originalTimeProvider = SteamCallbackPump.TimeProvider;
 
@@ -65,5 +70,68 @@ public class SteamCallbackPumpTests : IDisposable
     static bool ReadPrivateBool(SteamCallbackPump pump, string fieldName)
     {
         return (bool)(typeof(SteamCallbackPump).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(pump) ?? false);
+    }
+
+    [Fact]
+    public void PrepareCanonicalSteamCallbackPump_NormalizesDuplicates_AndKeepsSingleActiveEnabledPump()
+    {
+        var canonicalObject = new GameObject("canonical");
+        var duplicateOnlyObject = new GameObject("duplicate-only");
+        var duplicateWithExtraObject = new GameObject("duplicate-extra");
+        var canonicalPump = canonicalObject.AddComponent<SteamCallbackPump>();
+        var duplicateOnlyPump = duplicateOnlyObject.AddComponent<SteamCallbackPump>();
+        var duplicateWithExtraPump = duplicateWithExtraObject.AddComponent<SteamCallbackPump>();
+        duplicateWithExtraObject.AddComponent<DummyComponent>();
+        canonicalObject.SetActive(false);
+        canonicalPump.enabled = false;
+
+        try
+        {
+            var prepareMethod = typeof(SteamNetworkingService).GetMethod("PrepareCanonicalSteamCallbackPump", BindingFlags.Static | BindingFlags.NonPublic)!;
+            var args = new object?[] { null, null };
+            var selectedPump = (SteamCallbackPump)prepareMethod.Invoke(null, args)!;
+
+            Assert.Same(canonicalPump, selectedPump);
+            Assert.True(canonicalObject.activeSelf);
+            Assert.True(canonicalPump.enabled);
+            Assert.False(duplicateOnlyObject);
+            Assert.False(duplicateWithExtraPump);
+            Assert.True(duplicateWithExtraObject);
+
+            var allPumps = UnityEngine.Object.FindObjectsOfType<SteamCallbackPump>(true);
+            var alivePumps = allPumps.Where(p => p != null).ToArray();
+            Assert.Single(alivePumps);
+            Assert.Same(canonicalPump, alivePumps[0]);
+        }
+        finally
+        {
+            if (canonicalObject) UnityEngine.Object.DestroyImmediate(canonicalObject);
+            if (duplicateOnlyObject) UnityEngine.Object.DestroyImmediate(duplicateOnlyObject);
+            if (duplicateWithExtraObject) UnityEngine.Object.DestroyImmediate(duplicateWithExtraObject);
+        }
+    }
+
+    [Fact]
+    public void PrepareCanonicalSteamCallbackPump_SelectsDeterministically_WhenMultiplePumpsAreActive()
+    {
+        var firstObject = new GameObject("first-active");
+        var secondObject = new GameObject("second-active");
+        var firstPump = firstObject.AddComponent<SteamCallbackPump>();
+        var secondPump = secondObject.AddComponent<SteamCallbackPump>();
+
+        try
+        {
+            var prepareMethod = typeof(SteamNetworkingService).GetMethod("PrepareCanonicalSteamCallbackPump", BindingFlags.Static | BindingFlags.NonPublic)!;
+            var args = new object?[] { null, null };
+            var selectedPump = (SteamCallbackPump)prepareMethod.Invoke(null, args)!;
+
+            var expectedPump = firstPump.GetInstanceID() < secondPump.GetInstanceID() ? firstPump : secondPump;
+            Assert.Same(expectedPump, selectedPump);
+        }
+        finally
+        {
+            if (firstObject) UnityEngine.Object.DestroyImmediate(firstObject);
+            if (secondObject) UnityEngine.Object.DestroyImmediate(secondObject);
+        }
     }
 }

@@ -88,6 +88,11 @@ namespace NetworkingLibrary.Features
                 startVersion = 0;
                 Net.Logger?.LogWarning($"Invalid source schema version '{sourceVersion}'. Starting migration at schema 0.");
             }
+            else if (startVersion > targetVersion)
+            {
+                Net.Logger?.LogWarning($"Config schema version downgrade detected ({startVersion} -> {targetVersion}). Skipping downgrade migrations and retaining existing schema data.");
+                return;
+            }
 
             for (var fromSchemaVersion = startVersion; fromSchemaVersion < targetVersion; fromSchemaVersion++)
             {
@@ -134,7 +139,7 @@ namespace NetworkingLibrary.Features
                 if (trimmed.StartsWith("[", StringComparison.Ordinal) && trimmed.EndsWith("]", StringComparison.Ordinal))
                 {
                     var section = trimmed[1..^1].Trim();
-                    inVersionSection = section.Equals(VersionSection, StringComparison.Ordinal);
+                    inVersionSection = section.Equals(VersionSection, StringComparison.OrdinalIgnoreCase);
                     continue;
                 }
 
@@ -149,7 +154,7 @@ namespace NetworkingLibrary.Features
                     continue;
 
                 var key = line[..separatorIndex].Trim();
-                if (!key.Equals(LegacyVersionKey, StringComparison.Ordinal))
+                if (!key.Equals(LegacyVersionKey, StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 return NormalizeLegacyVersionValue(line[(separatorIndex + 1)..]);
@@ -248,7 +253,7 @@ namespace NetworkingLibrary.Features
                     if (trimmed.StartsWith("[", StringComparison.Ordinal) && trimmed.EndsWith("]", StringComparison.Ordinal))
                     {
                         var section = trimmed[1..^1].Trim();
-                        inVersionSection = section.Equals(VersionSection, StringComparison.Ordinal);
+                        inVersionSection = section.Equals(VersionSection, StringComparison.OrdinalIgnoreCase);
                         keptLines.Add(lines[i]);
                         continue;
                     }
@@ -273,7 +278,7 @@ namespace NetworkingLibrary.Features
                     }
 
                     var key = lines[i][..separatorIndex].Trim();
-                    if (!key.Equals(LegacyVersionKey, StringComparison.Ordinal))
+                    if (!key.Equals(LegacyVersionKey, StringComparison.OrdinalIgnoreCase))
                     {
                         keptLines.Add(lines[i]);
                         continue;

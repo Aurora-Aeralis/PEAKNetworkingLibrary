@@ -602,6 +602,27 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void RPCToHost_WhenOwnerLookupThrows_DoesNotThrow_AndHitsStableThrottleKey()
+    {
+        var service = new SteamNetworkingService();
+        NetLog.ResetForTests();
+        try
+        {
+            SetInLobby(service, true);
+            SetLobby(service, 9001UL);
+            SetField(service, "getLobbyOwner", (Func<CSteamID, CSteamID>)(_ => throw new InvalidOperationException("owner unavailable")));
+
+            var exception = Record.Exception(() => service.RPCToHost(1u, "Ping", ReliableType.No, Array.Empty<object>()));
+            Assert.Null(exception);
+            Assert.False(NetLog.TryEnterCooldown("SteamNetworkingService.LobbyOwner", 2d));
+        }
+        finally
+        {
+            NetLog.ResetForTests();
+        }
+    }
+
+    [Fact]
     public void ReceiveMessages_ProcessIncomingFrameException_UsesStableThrottleKey()
     {
         NetLog.ResetForTests();

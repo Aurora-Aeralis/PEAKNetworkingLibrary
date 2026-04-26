@@ -234,6 +234,24 @@ public class FileManagerConfigMigrationTests
         Assert.True(IsLegacyVersionRemoved(configText));
     }
 
+    [Fact]
+    public void MigrateConfigIfNeeded_LegacyVersionWithCaseVariants_ParsesAndRemovesKey()
+    {
+        using var scope = new TempConfigScope();
+        File.WriteAllText(scope.ConfigPath,
+            "[version]\n" +
+            "current version = 1\n");
+
+        var config = new ConfigFile(scope.ConfigPath, true);
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        var configText = File.ReadAllText(scope.ConfigPath);
+
+        Assert.Equal("1", schemaVersion);
+        Assert.True(IsLegacyVersionRemoved(configText));
+    }
+
     [Theory]
     [InlineData("Current Version = 0 ; migrated from old pack")]
     [InlineData("Current Version = 0 # comment")]
@@ -282,6 +300,20 @@ public class FileManagerConfigMigrationTests
     }
 
     [Fact]
+    public void MigrateConfigIfNeeded_DowngradeTargetVersion_PreservesStoredSchemaVersion()
+    {
+        using var scope = new TempConfigScope();
+        var config = new ConfigFile(scope.ConfigPath, true);
+        config.Bind("Version", "ConfigSchemaVersion", "3").Value = "3";
+        config.Save();
+
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        Assert.Equal("3", schemaVersion);
+    }
+
+    [Fact]
     public void MigrateConfigIfNeeded_RepeatedContentionLikeMigrations_AreIdempotentWithStableOutput()
     {
         using var scope = new TempConfigScope();
@@ -323,7 +355,7 @@ public class FileManagerConfigMigrationTests
             var trimmed = line.Trim();
             if (trimmed.StartsWith("[", StringComparison.Ordinal) && trimmed.EndsWith("]", StringComparison.Ordinal))
             {
-                inVersionSection = string.Equals(trimmed[1..^1].Trim(), "Version", StringComparison.Ordinal);
+                inVersionSection = string.Equals(trimmed[1..^1].Trim(), "Version", StringComparison.OrdinalIgnoreCase);
                 continue;
             }
 
@@ -335,7 +367,7 @@ public class FileManagerConfigMigrationTests
                 continue;
 
             var key = line[..separatorIndex].Trim();
-            if (!string.Equals(key, "Current Version", StringComparison.Ordinal))
+            if (!string.Equals(key, "Current Version", StringComparison.OrdinalIgnoreCase))
                 continue;
 
             return false;

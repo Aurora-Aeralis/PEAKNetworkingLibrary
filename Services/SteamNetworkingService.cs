@@ -29,6 +29,8 @@ namespace NetworkingLibrary.Services
         const double QueueOverflowWarningCooldownSeconds = 2d;
         const string GetLocalSteam64DebugCooldownKey = "SteamNetworkingService.GetLocalSteam64";
         const string IsHostDebugCooldownKey = "SteamNetworkingService.IsHost";
+        const string LocalSteamIdDebugCooldownKey = "SteamNetworkingService.LocalSteamId";
+        const string LobbyOwnerDebugCooldownKey = "SteamNetworkingService.LobbyOwner";
         const string ProcessIncomingFrameExceptionCooldownKey = "SteamNetworkingService.ReceiveMessages.ProcessIncomingFrameException";
         const string ReceiveMessagesOuterExceptionCooldownKey = "SteamNetworkingService.ReceiveMessages.OuterException";
         readonly IntPtr[] inMessages = new IntPtr[MAX_IN_MESSAGES];
@@ -59,15 +61,8 @@ namespace NetworkingLibrary.Services
 
         public ulong GetLocalSteam64()
         {
-            try
-            {
-                return getLocalSteamId().m_SteamID;
-            }
-            catch (Exception ex)
-            {
-                NetLog.DebugThrottled(LogSource, GetLocalSteam64DebugCooldownKey, DebugLogCooldownSeconds, $"GetLocalSteam64 failed: {ex.GetType().Name}: {ex.Message}");
-                return 0UL;
-            }
+            if (!TryGetLocalSteamId(out var localSteamId, GetLocalSteam64DebugCooldownKey, "GetLocalSteam64")) return 0UL;
+            return localSteamId.m_SteamID;
         }
 
         public ulong[] GetLobbyMemberSteamIds()
@@ -107,9 +102,10 @@ namespace NetworkingLibrary.Services
                 try
                 {
                     if (!InLobby) return false;
-                    var owner = getLobbyOwner(Lobby);
+                    if (!TryGetLobbyOwner(Lobby, out var owner, IsHostDebugCooldownKey, "IsHost")) return false;
                     if (owner == CSteamID.Nil) return false;
-                    return owner == getLocalSteamId();
+                    if (!TryGetLocalSteamId(out var localSteamId, IsHostDebugCooldownKey, "IsHost")) return false;
+                    return owner == localSteamId;
                 }
                 catch (Exception ex)
                 {
@@ -1020,17 +1016,18 @@ namespace NetworkingLibrary.Services
             if (!InLobby) { NetLog.Error(LogSource, "RPC called while not in lobby"); return; }
             var msg = BuildMessage(modId, methodName, 0, parameters, null);
             if (msg == null) return;
+            TryGetLocalSteamId(out var localSteamId, LocalSteamIdDebugCooldownKey, "RPC");
 
             foreach (var p in players)
             {
-                if (p == SteamUser.GetSteamID())
+                if (p == localSteamId)
                 {
                     continue;
                 }
                 EnqueueOrSend(BuildFramedBytesWithMeta(msg, modId, reliable), p, reliable, DeterminePriority(methodName));
             }
 
-            InvokeLocalMessage(new Message(msg.ToArray(), messageSizePolicy), SteamUser.GetSteamID());
+            InvokeLocalMessage(new Message(msg.ToArray(), messageSizePolicy), localSteamId);
         }
 
         public void RPC(uint modId, string methodName, ReliableType reliable, Type[] parameterTypes, params object?[] parameters)
@@ -1038,17 +1035,18 @@ namespace NetworkingLibrary.Services
             if (!InLobby) { NetLog.Error(LogSource, "RPC called while not in lobby"); return; }
             var msg = BuildMessage(modId, methodName, 0, parameters, parameterTypes);
             if (msg == null) return;
+            TryGetLocalSteamId(out var localSteamId, LocalSteamIdDebugCooldownKey, "RPC");
 
             foreach (var p in players)
             {
-                if (p == SteamUser.GetSteamID())
+                if (p == localSteamId)
                 {
                     continue;
                 }
                 EnqueueOrSend(BuildFramedBytesWithMeta(msg, modId, reliable), p, reliable, DeterminePriority(methodName));
             }
 
-            InvokeLocalMessage(new Message(msg.ToArray(), messageSizePolicy), SteamUser.GetSteamID());
+            InvokeLocalMessage(new Message(msg.ToArray(), messageSizePolicy), localSteamId);
         }
 
         public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, params object[] parameters)
@@ -1061,9 +1059,10 @@ namespace NetworkingLibrary.Services
             if (!InLobby) { NetLog.Error(LogSource, "Cannot RPC target when not in lobby"); return; }
             var msg = BuildMessage(modId, methodName, 0, parameters, null);
             if (msg == null) return;
-            if (target == SteamUser.GetSteamID())
+            TryGetLocalSteamId(out var localSteamId, LocalSteamIdDebugCooldownKey, "RPCTarget");
+            if (target == localSteamId)
             {
-                InvokeLocalMessage(new Message(msg.ToArray(), messageSizePolicy), SteamUser.GetSteamID());
+                InvokeLocalMessage(new Message(msg.ToArray(), messageSizePolicy), localSteamId);
                 return;
             }
             var framed = BuildFramedBytesWithMeta(msg, modId, reliable);
@@ -1080,9 +1079,10 @@ namespace NetworkingLibrary.Services
             if (!InLobby) { NetLog.Error(LogSource, "Cannot RPC target when not in lobby"); return; }
             var msg = BuildMessage(modId, methodName, 0, parameters, parameterTypes);
             if (msg == null) return;
-            if (target == SteamUser.GetSteamID())
+            TryGetLocalSteamId(out var localSteamId, LocalSteamIdDebugCooldownKey, "RPCTarget");
+            if (target == localSteamId)
             {
-                InvokeLocalMessage(new Message(msg.ToArray(), messageSizePolicy), SteamUser.GetSteamID());
+                InvokeLocalMessage(new Message(msg.ToArray(), messageSizePolicy), localSteamId);
                 return;
             }
             var framed = BuildFramedBytesWithMeta(msg, modId, reliable);
@@ -1092,7 +1092,11 @@ namespace NetworkingLibrary.Services
         public void RPCToHost(uint modId, string methodName, ReliableType reliable, params object[] parameters)
         {
             if (!InLobby) { NetLog.Error(LogSource, "Not in lobby"); return; }
-            var host = SteamMatchmaking.GetLobbyOwner(Lobby);
+            if (!TryGetLobbyOwner(Lobby, out var host, LobbyOwnerDebugCooldownKey, "RPCToHost"))
+            {
+                NetLog.Error(LogSource, "No host set");
+                return;
+            }
             if (host == CSteamID.Nil) { NetLog.Error(LogSource, "No host set"); return; }
             RPCTarget(modId, methodName, host, reliable, parameters);
         }
@@ -1297,9 +1301,10 @@ namespace NetworkingLibrary.Services
                 return;
             }
 
-            if (target == SteamUser.GetSteamID())
+            TryGetLocalSteamId(out var localSteamId, LocalSteamIdDebugCooldownKey, "SendBytes");
+            if (target == localSteamId)
             {
-                ProcessIncomingFrame(data, SteamUser.GetSteamID());
+                ProcessIncomingFrame(data, localSteamId);
                 return;
             }
 
@@ -1325,6 +1330,36 @@ namespace NetworkingLibrary.Services
             finally
             {
                 if (pinned.IsAllocated) pinned.Free();
+            }
+        }
+
+        bool TryGetLocalSteamId(out CSteamID steamId, string cooldownKey, string context)
+        {
+            steamId = CSteamID.Nil;
+            try
+            {
+                steamId = getLocalSteamId();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                NetLog.DebugThrottled(LogSource, cooldownKey, DebugLogCooldownSeconds, $"{context} local SteamID lookup failed: {ex.GetType().Name}: {ex.Message}");
+                return false;
+            }
+        }
+
+        bool TryGetLobbyOwner(CSteamID lobby, out CSteamID owner, string cooldownKey, string context)
+        {
+            owner = CSteamID.Nil;
+            try
+            {
+                owner = getLobbyOwner(lobby);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                NetLog.DebugThrottled(LogSource, cooldownKey, DebugLogCooldownSeconds, $"{context} lobby owner lookup failed: {ex.GetType().Name}: {ex.Message}");
+                return false;
             }
         }
 

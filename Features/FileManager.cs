@@ -52,14 +52,31 @@ namespace NetworkingLibrary.Features
 
         internal static void MigrateConfigIfNeeded(ConfigFile config, string currentVersion)
         {
+            if (!TryParseSchemaVersion(currentVersion, out var targetVersion))
+                throw new InvalidOperationException($"Current config schema version '{currentVersion}' is not a valid schema identifier.");
+
             var schemaVersionEntry = BindSchemaVersion(config, string.Empty);
             var legacyVersion = ReadLegacyVersion(config);
             var storedVersion = GetStoredVersion(schemaVersionEntry.Value, legacyVersion);
+            var sourceVersion = string.IsNullOrWhiteSpace(schemaVersionEntry.Value) ? legacyVersion : storedVersion;
+            var sourceVersionValid = TryParseSchemaVersion(sourceVersion, out var startVersion);
+            if (!sourceVersionValid || startVersion < 0)
+            {
+                startVersion = 0;
+                Net.Logger?.LogWarning($"Invalid source config schema version '{sourceVersion}'. Defaulting migration start version to 0.");
+            }
+
             var needsNormalization = string.IsNullOrWhiteSpace(schemaVersionEntry.Value) && !string.IsNullOrWhiteSpace(legacyVersion);
-            if (storedVersion == currentVersion && !needsNormalization)
+            if (startVersion == targetVersion && !needsNormalization)
                 return;
 
-            MigrateConfig(schemaVersionEntry, storedVersion, currentVersion, legacyVersion);
+            if (startVersion > targetVersion)
+            {
+                Net.Logger?.LogError($"Config schema downgrade is not supported. Stored schema version '{sourceVersion}' is newer than target schema version '{currentVersion}'.");
+                return;
+            }
+
+            MigrateConfig(schemaVersionEntry, startVersion, targetVersion, legacyVersion);
             schemaVersionEntry.Value = currentVersion;
             DropLegacyVersionFromConfig(config);
             config.Save();
@@ -72,20 +89,12 @@ namespace NetworkingLibrary.Features
             return legacyVersion;
         }
 
-        static void MigrateConfig(ConfigEntry<string> schemaVersionEntry, string previousVersion, string currentVersion, string legacyVersion)
+        static void MigrateConfig(ConfigEntry<string> schemaVersionEntry, int sourceVersion, int targetVersion, string legacyVersion)
         {
-            if (!TryParseSchemaVersion(currentVersion, out var targetVersion))
-                throw new InvalidOperationException($"Current config schema version '{currentVersion}' is not a valid schema identifier.");
+            if (sourceVersion > targetVersion)
+                throw new InvalidOperationException($"Config schema downgrade is not supported from {sourceVersion} to {targetVersion}.");
 
-            var sourceVersion = string.IsNullOrWhiteSpace(schemaVersionEntry.Value) ? legacyVersion : previousVersion;
-            var sourceVersionValid = TryParseSchemaVersion(sourceVersion, out var startVersion);
-            if (!sourceVersionValid || startVersion < 0)
-            {
-                startVersion = 0;
-                Net.Logger?.LogWarning($"Invalid source config schema version '{sourceVersion}'. Defaulting migration start version to 0.");
-            }
-
-            for (var schemaVersion = startVersion; schemaVersion < targetVersion; schemaVersion++)
+            for (var schemaVersion = sourceVersion; schemaVersion < targetVersion; schemaVersion++)
             {
                 switch (schemaVersion)
                 {

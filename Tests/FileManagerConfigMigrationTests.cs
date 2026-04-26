@@ -239,7 +239,7 @@ public class FileManagerConfigMigrationTests
     [InlineData("   ")]
     [InlineData("1.2")]
     [InlineData("1abc")]
-    public void MigrateConfigIfNeeded_InvalidLegacySourceVersion_DefaultsToSchemaZeroAndCompletes(string legacyVersion)
+    public void MigrateConfigIfNeeded_InvalidLegacySourceVersion_DefaultsToSchemaZeroAndLogsWarning(string legacyVersion)
     {
         using var scope = new TempConfigScope();
         File.WriteAllText(scope.ConfigPath,
@@ -247,6 +247,7 @@ public class FileManagerConfigMigrationTests
             $"Current Version = {legacyVersion}\n");
 
         var config = new ConfigFile(scope.ConfigPath, true);
+        using var loggerScope = new NetLoggerScope();
         FileManager.MigrateConfigIfNeeded(config, "1");
 
         var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
@@ -255,6 +256,28 @@ public class FileManagerConfigMigrationTests
         Assert.Equal("1", schemaVersion);
         Assert.Contains("ConfigSchemaVersion = 1", configText, StringComparison.Ordinal);
         Assert.True(IsLegacyVersionRemoved(configText));
+        Assert.Single(loggerScope.Warnings);
+    }
+
+    [Fact]
+    public void MigrateConfigIfNeeded_SourceVersionGreaterThanTarget_LogsErrorAndDoesNotRewriteVersion()
+    {
+        using var scope = new TempConfigScope();
+        var seedConfig = new ConfigFile(scope.ConfigPath, true);
+        seedConfig.Bind("Version", "ConfigSchemaVersion", string.Empty).Value = "2";
+        seedConfig.Save();
+
+        var config = new ConfigFile(scope.ConfigPath, true);
+        using var loggerScope = new NetLoggerScope();
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        var configText = File.ReadAllText(scope.ConfigPath);
+
+        Assert.Equal("2", schemaVersion);
+        Assert.Contains("ConfigSchemaVersion = 2", configText, StringComparison.Ordinal);
+        Assert.DoesNotContain("ConfigSchemaVersion = 1", configText, StringComparison.Ordinal);
+        Assert.Single(loggerScope.Errors);
     }
 
     static bool IsLegacyVersionRemoved(string configText)
@@ -412,6 +435,7 @@ public class FileManagerConfigMigrationTests
         readonly TestLogListener _listener = new();
 
         internal IReadOnlyList<string> Warnings => _listener.Warnings;
+        internal IReadOnlyList<string> Errors => _listener.Errors;
 
         internal NetLoggerScope()
         {
@@ -435,12 +459,16 @@ public class FileManagerConfigMigrationTests
     sealed class TestLogListener : ILogListener
     {
         readonly List<string> _warnings = new();
+        readonly List<string> _errors = new();
         internal IReadOnlyList<string> Warnings => _warnings;
+        internal IReadOnlyList<string> Errors => _errors;
 
         public void LogEvent(object sender, LogEventArgs eventArgs)
         {
             if (eventArgs.Level == LogLevel.Warning)
                 _warnings.Add(eventArgs.Data?.ToString() ?? string.Empty);
+            if (eventArgs.Level == LogLevel.Error)
+                _errors.Add(eventArgs.Data?.ToString() ?? string.Empty);
         }
 
         public void Dispose() { }

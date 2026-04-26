@@ -98,23 +98,34 @@ public class NetLifecycleTeardownTests
     [Fact]
     public void OnDestroy_ShutsDownService_ClearsStaticService_AndUnpatchesHarmony()
     {
-        var harmony = GetHarmony();
-        var method = AccessTools.Method(typeof(TeardownPatchTarget), nameof(TeardownPatchTarget.Ping));
-        var prefix = AccessTools.Method(typeof(TeardownPatchPrefix), nameof(TeardownPatchPrefix.Prefix));
-        harmony.Patch(method, prefix: new HarmonyMethod(prefix));
+        var harmonyField = typeof(Net).GetField("Harmony", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var originalHarmony = harmonyField.GetValue(null);
+        var harmony = EnsureHarmony();
 
-        var service = new FakeNetworkingService();
-        SetService(service);
+        try
+        {
+            var method = AccessTools.Method(typeof(TeardownPatchTarget), nameof(TeardownPatchTarget.Ping));
+            var prefix = AccessTools.Method(typeof(TeardownPatchPrefix), nameof(TeardownPatchPrefix.Prefix));
+            harmony.Patch(method, prefix: new HarmonyMethod(prefix));
 
-        var net = (Net)FormatterServices.GetUninitializedObject(typeof(Net));
-        InvokeOnDestroy(net);
+            var service = new FakeNetworkingService();
+            SetService(service);
 
-        Assert.True(service.ShutdownCalled);
-        Assert.Null(GetService());
+            var net = (Net)FormatterServices.GetUninitializedObject(typeof(Net));
+            InvokeOnDestroy(net);
 
-        TeardownPatchTarget.Calls = 0;
-        TeardownPatchTarget.Ping();
-        Assert.Equal(1, TeardownPatchTarget.Calls);
+            Assert.True(service.ShutdownCalled);
+            Assert.Null(GetService());
+
+            TeardownPatchTarget.Calls = 0;
+            TeardownPatchTarget.Ping();
+            Assert.Equal(1, TeardownPatchTarget.Calls);
+            Assert.Null(harmonyField.GetValue(null));
+        }
+        finally
+        {
+            harmonyField.SetValue(null, originalHarmony);
+        }
     }
 
     [Fact]
@@ -334,9 +345,16 @@ public class NetLifecycleTeardownTests
         }
     }
 
-    static Harmony GetHarmony()
+    static Harmony EnsureHarmony()
     {
-        return (Harmony)typeof(Net).GetField("Harmony", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
+        var harmonyField = typeof(Net).GetField("Harmony", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var harmony = (Harmony?)harmonyField.GetValue(null);
+        if (harmony != null)
+            return harmony;
+
+        harmony = new Harmony("NetworkingLibrary.Tests.NetLifecycleTeardownTests");
+        harmonyField.SetValue(null, harmony);
+        return harmony;
     }
 
     static INetworkingService? GetService()

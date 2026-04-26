@@ -175,6 +175,22 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void PollReceive_AfterShutdown_IsNoOp()
+    {
+        var service = new SteamNetworkingService();
+        service.Shutdown();
+
+        EnqueueTo(service, "normalQueue");
+        SeedUnacked(service, count: 1);
+        SetUnackedLastSent(service, DateTime.UtcNow - TimeSpan.FromSeconds(10));
+
+        service.PollReceive();
+
+        AssertQueueCount(service, "normalQueue", 1);
+        Assert.Equal(1, GetFirstUnackedAttempts(service));
+    }
+
+    [Fact]
     public void CreateJoinInvite_BeforeInitialize_AreNoOps_AndDoNotThrow()
     {
         var service = new SteamNetworkingService();
@@ -825,6 +841,26 @@ public class SteamNetworkingServiceLifecycleTests
 
             dict.Add(ValueTuple.Create((ulong)(i + 1000), (ulong)i + 1), unacked);
         }
+    }
+
+    static void SetUnackedLastSent(SteamNetworkingService service, DateTime value)
+    {
+        var dict = (IDictionary)GetField(service, "unacked")!;
+        foreach (DictionaryEntry entry in dict)
+        {
+            var unacked = entry.Value!;
+            var unackedType = unacked.GetType();
+            unackedType.GetField("LastSent", BindingFlags.Instance | BindingFlags.Public)!.SetValue(unacked, value);
+            dict[entry.Key] = unacked;
+        }
+    }
+
+    static int GetFirstUnackedAttempts(SteamNetworkingService service)
+    {
+        var dict = (IDictionary)GetField(service, "unacked")!;
+        foreach (DictionaryEntry entry in dict)
+            return (int)entry.Value!.GetType().GetField("Attempts", BindingFlags.Instance | BindingFlags.Public)!.GetValue(entry.Value)!;
+        throw new InvalidOperationException("Expected at least one unacked entry.");
     }
 
     static void SeedLastSeenSequence(SteamNetworkingService service)

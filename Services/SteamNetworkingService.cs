@@ -1242,9 +1242,23 @@ namespace NetworkingLibrary.Services
 
         public void PollReceive()
         {
+            if (!IsInitialized) return;
+            if (!IsSteamReadyForPolling()) return;
             FlushQueues();
             RetransmitUnacked();
             ReceiveMessages();
+        }
+
+        static bool IsSteamReadyForPolling()
+        {
+            try
+            {
+                return SteamUser.GetSteamID() != CSteamID.Nil;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         void RetransmitUnacked()

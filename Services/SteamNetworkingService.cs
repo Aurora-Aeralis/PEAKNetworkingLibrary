@@ -2008,7 +2008,8 @@ namespace NetworkingLibrary.Services
             string? localNonceForSecret = null;
             lock (cryptoStateLock)
             {
-                var state = handshakeStates.ContainsKey(sender.m_SteamID) ? handshakeStates[sender.m_SteamID] : new HandshakeState();
+                handshakeStates.TryGetValue(sender.m_SteamID, out var state);
+                state ??= new HandshakeState();
                 state.PeerPub = peerPubKeySerialized;
                 if (string.IsNullOrEmpty(state.LocalNonce))
                 {
@@ -2062,7 +2063,8 @@ namespace NetworkingLibrary.Services
 
             lock (cryptoStateLock)
             {
-                var state = handshakeStates.ContainsKey(sender.m_SteamID) ? handshakeStates[sender.m_SteamID] : new HandshakeState();
+                handshakeStates.TryGetValue(sender.m_SteamID, out var state);
+                state ??= new HandshakeState();
                 state.Sym = sym;
                 state.Completed = true;
                 handshakeStates[sender.m_SteamID] = state;
@@ -2078,7 +2080,8 @@ namespace NetworkingLibrary.Services
                 var sym = LocalRsa.Decrypt(encSecret, RSAEncryptionPadding.Pkcs1);
                 lock (cryptoStateLock)
                 {
-                    var state = handshakeStates.ContainsKey(sender.m_SteamID) ? handshakeStates[sender.m_SteamID] : new HandshakeState();
+                    handshakeStates.TryGetValue(sender.m_SteamID, out var state);
+                    state ??= new HandshakeState();
                     state.Sym = sym;
                     state.Completed = true;
                     handshakeStates[sender.m_SteamID] = state;

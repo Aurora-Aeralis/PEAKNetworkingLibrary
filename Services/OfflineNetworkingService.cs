@@ -174,8 +174,7 @@ namespace NetworkingLibrary.Services
         {
             if (target == null) throw new ArgumentNullException(nameof(target));
 
-            (object instance, uint modId, int mask)[] objectRegistrations;
-            (Type type, uint modId, int mask)[] typeRegistrations;
+            (object? instance, Type? type, uint modId, int mask, RegistrationTransferToken token)[] rpcRegistrations;
             string[] lobbyKeysSnapshot;
             string[] playerKeysSnapshot;
             KeyValuePair<uint, Func<byte[], byte[]>>[] signersSnapshot;
@@ -183,22 +182,9 @@ namespace NetworkingLibrary.Services
 
             lock (rpcLock)
             {
-                var objectSet = new HashSet<(object instance, uint modId, int mask)>();
-                var typeSet = new HashSet<(Type type, uint modId, int mask)>();
-                foreach (var modEntry in rpcs)
-                {
-                    foreach (var handlers in modEntry.Value.Values)
-                    {
-                        foreach (var handler in handlers)
-                        {
-                            if (handler.Method.IsStatic) typeSet.Add((handler.Method.DeclaringType!, modEntry.Key, handler.Mask));
-                            else if (handler.Target != null) objectSet.Add((handler.Target, modEntry.Key, handler.Mask));
-                        }
-                    }
-                }
-
-                objectRegistrations = objectSet.ToArray();
-                typeRegistrations = typeSet.ToArray();
+                rpcRegistrations = runtimeRegistrations
+                    .Select(registration => (registration.Instance, registration.Type, registration.ModId, registration.Mask, registration.Token))
+                    .ToArray();
                 lobbyKeysSnapshot = lobbyKeys.ToArray();
                 playerKeysSnapshot = playerKeys.ToArray();
             }
@@ -212,8 +198,13 @@ namespace NetworkingLibrary.Services
             }
 
             target.IncomingValidator = IncomingValidator;
-            foreach (var registration in objectRegistrations) target.RegisterNetworkObject(registration.instance, registration.modId, registration.mask);
-            foreach (var registration in typeRegistrations) target.RegisterNetworkType(registration.type, registration.modId, registration.mask);
+            foreach (var registration in rpcRegistrations)
+            {
+                var migratedHandle = registration.type != null
+                    ? target.RegisterNetworkType(registration.type, registration.modId, registration.mask)
+                    : target.RegisterNetworkObject(registration.instance!, registration.modId, registration.mask);
+                registration.token.SetDisposeAction(migratedHandle.Dispose);
+            }
             foreach (var key in lobbyKeysSnapshot) target.RegisterLobbyDataKey(key);
             foreach (var key in playerKeysSnapshot) target.RegisterPlayerDataKey(key);
             foreach (var signer in signersSnapshot) target.RegisterModSigner(signer.Key, signer.Value);
@@ -225,16 +216,47 @@ namespace NetworkingLibrary.Services
 
         public ulong LocalSteamId { get; private set; } = 1000;
 
-        class Token : IDisposable
+        sealed class RegistrationTransferToken : IDisposable
         {
-            Action? on;
-            public Token(Action on) { this.on = on; }
+            readonly object sync = new();
+            Action? onDispose;
+            bool isDisposed;
+
+            public void SetDisposeAction(Action? action)
+            {
+                Action? previousAction = null;
+                var disposeIncomingNow = false;
+                lock (sync)
+                {
+                    if (isDisposed) disposeIncomingNow = true;
+                    else
+                    {
+                        previousAction = onDispose;
+                        onDispose = action;
+                    }
+                }
+
+                if (disposeIncomingNow)
+                {
+                    action?.Invoke();
+                    return;
+                }
+
+                previousAction?.Invoke();
+            }
+
             public void Dispose()
             {
-                var action = on;
-                if (action == null) return;
-                on = null;
-                action();
+                Action? action;
+                lock (sync)
+                {
+                    if (isDisposed) return;
+                    isDisposed = true;
+                    action = onDispose;
+                    onDispose = null;
+                }
+
+                action?.Invoke();
             }
         }
 
@@ -246,6 +268,16 @@ namespace NetworkingLibrary.Services
 
         bool offlineIsHost = false;
         public bool IsHost => offlineIsHost;
+        readonly List<RuntimeRegistration> runtimeRegistrations = new();
+
+        sealed class RuntimeRegistration
+        {
+            public object? Instance;
+            public Type? Type;
+            public uint ModId;
+            public int Mask;
+            public RegistrationTransferToken Token = null!;
+        }
 
         public OfflineNetworkingService(MessageSizePolicy? messageSizePolicy = null)
         {
@@ -271,6 +303,7 @@ namespace NetworkingLibrary.Services
             lock (rpcLock)
             {
                 rpcs.Clear();
+                runtimeRegistrations.Clear();
             }
             lobbyKeys.Clear();
             playerKeys.Clear();
@@ -427,6 +460,7 @@ namespace NetworkingLibrary.Services
             if (instance == null) throw new ArgumentNullException(nameof(instance));
             var t = instance.GetType();
             var registeredHandlers = new List<HandlerRegistration>();
+            var token = new RegistrationTransferToken();
             lock (rpcLock)
             {
                 foreach (var method in t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
@@ -457,13 +491,30 @@ namespace NetworkingLibrary.Services
                     handlers.Add(handler);
                     registeredHandlers.Add(new HandlerRegistration { MethodName = method.Name, Handler = handler });
                 }
+
+                if (registeredHandlers.Count > 0)
+                {
+                    runtimeRegistrations.Add(new RuntimeRegistration
+                    {
+                        Instance = instance,
+                        ModId = modId,
+                        Mask = mask,
+                        Token = token
+                    });
+                }
             }
-            return new Token(() => DeregisterHandlers(modId, registeredHandlers));
+            token.SetDisposeAction(() =>
+            {
+                DeregisterHandlers(modId, registeredHandlers);
+                RemoveRuntimeRegistration(token);
+            });
+            return token;
         }
         public IDisposable RegisterNetworkType(Type type, uint modId, int mask = 0)
         {
             if (type == null) throw new ArgumentNullException(nameof(type));
             var registeredHandlers = new List<HandlerRegistration>();
+            var token = new RegistrationTransferToken();
             lock (rpcLock)
             {
                 foreach (var method in type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
@@ -496,8 +547,24 @@ namespace NetworkingLibrary.Services
                     handlers.Add(handler);
                     registeredHandlers.Add(new HandlerRegistration { MethodName = method.Name, Handler = handler });
                 }
+
+                if (registeredHandlers.Count > 0)
+                {
+                    runtimeRegistrations.Add(new RuntimeRegistration
+                    {
+                        Type = type,
+                        ModId = modId,
+                        Mask = mask,
+                        Token = token
+                    });
+                }
             }
-            return new Token(() => DeregisterHandlers(modId, registeredHandlers));
+            token.SetDisposeAction(() =>
+            {
+                DeregisterHandlers(modId, registeredHandlers);
+                RemoveRuntimeRegistration(token);
+            });
+            return token;
         }
 
         void DeregisterHandlers(uint modId, List<HandlerRegistration> handlersToRemove)
@@ -530,6 +597,11 @@ namespace NetworkingLibrary.Services
                     if (handlers.Count == 0) methods.Remove(method.Name);
                 }
                 if (methods.Count == 0) rpcs.Remove(modId);
+                runtimeRegistrations.RemoveAll(registration =>
+                    registration.Type == null &&
+                    registration.ModId == modId &&
+                    registration.Mask == mask &&
+                    ReferenceEquals(registration.Instance, instance));
             }
         }
         public void DeregisterNetworkType(Type type, uint modId, int mask = 0)
@@ -546,6 +618,18 @@ namespace NetworkingLibrary.Services
                     if (handlers.Count == 0) methods.Remove(methodName);
                 }
                 if (methods.Count == 0) rpcs.Remove(modId);
+                runtimeRegistrations.RemoveAll(registration =>
+                    registration.Type == type &&
+                    registration.ModId == modId &&
+                    registration.Mask == mask);
+            }
+        }
+
+        void RemoveRuntimeRegistration(RegistrationTransferToken token)
+        {
+            lock (rpcLock)
+            {
+                runtimeRegistrations.RemoveAll(registration => ReferenceEquals(registration.Token, token));
             }
         }
 

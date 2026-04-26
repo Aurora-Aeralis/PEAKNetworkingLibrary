@@ -804,19 +804,17 @@ namespace NetworkingLibrary.Services
                     if (!rpcs.ContainsKey(modId)) rpcs[modId] = new Dictionary<string, List<MessageHandler>>();
                     if (!rpcs[modId].ContainsKey(method.Name)) rpcs[modId][method.Name] = new List<MessageHandler>();
                     var handlers = rpcs[modId][method.Name];
-                    // Preserve historical instance registration fan-out semantics: repeated
-                    // RegisterNetworkObject calls for the same receiver should add another slot.
-                    // Only static/type registrations are deduplicated.
                     var alreadyRegisteredStatic = instance == null
                         && handlers.Any(existing => existing.Mask == mask && existing.Method == method);
                     if (alreadyRegisteredStatic) continue;
+                    var methodParameters = method.GetParameters();
 
                     var mh = new MessageHandler
                     {
                         Target = method.IsStatic ? null! : instance!,
                         Method = method,
-                        Parameters = method.GetParameters(),
-                        TakesInfo = method.GetParameters().Length > 0 && IsRpcInfoParameterType(method.GetParameters().Last().ParameterType),
+                        Parameters = methodParameters,
+                        TakesInfo = methodParameters.Length > 0 && IsRpcInfoParameterType(methodParameters.Last().ParameterType),
                         Mask = mask
                     };
                     handlers.Add(mh);

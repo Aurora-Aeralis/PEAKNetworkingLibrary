@@ -3,6 +3,7 @@ using NetworkingLibrary.Modules;
 using pworld.Scripts;
 using Steamworks;
 using System;
+using System.Buffers;
 using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Collections.Generic;
@@ -142,6 +143,7 @@ namespace NetworkingLibrary.Services
 
         readonly Dictionary<(ulong target, ulong msgId), UnackedMessage> unacked = new();
         readonly object unackedLock = new();
+        readonly List<(ulong sender, ulong msgId)> staleFragmentKeys = new();
         TimeSpan ackTimeout = TimeSpan.FromSeconds(1.2);
         int maxRetransmitAttempts = 5;
 
@@ -158,6 +160,7 @@ namespace NetworkingLibrary.Services
 
         readonly Dictionary<uint, Func<byte[], byte[]>> modSigners = new();
         readonly Dictionary<uint, RSAParameters> modPublicKeys = new();
+        RSAParameters[] modPublicKeysSnapshot = Array.Empty<RSAParameters>();
 
         static void LogError(string message)
         {
@@ -371,9 +374,6 @@ namespace NetworkingLibrary.Services
             {
                 rpcs.Clear();
             }
-            modSigners.Clear();
-            modPublicKeys.Clear();
-
             ClearOutboundState();
             lobbyDataKeys.Clear();
             playerDataKeys.Clear();
@@ -384,6 +384,9 @@ namespace NetworkingLibrary.Services
             InLobby = false;
             lock (cryptoStateLock)
             {
+                modSigners.Clear();
+                modPublicKeys.Clear();
+                modPublicKeysSnapshot = Array.Empty<RSAParameters>();
                 handshakeStates.Clear();
                 ClearPerPeerSymmetricKeysUnderLock();
                 ClearGlobalSharedSecretUnderLock();
@@ -1249,14 +1252,29 @@ namespace NetworkingLibrary.Services
 
         void RetransmitUnacked()
         {
-            var toRetransmit = new List<UnackedMessage>();
+            (ulong target, ulong msgId)[]? keysBuffer = null;
+            UnackedMessage[]? retransmitBuffer = null;
+            int retransmitCount = 0;
             lock (unackedLock)
             {
                 var now = DateTime.UtcNow;
-                var keys = unacked.Keys.ToArray();
-                foreach (var key in keys)
+                if (unacked.Count == 0)
                 {
-                    var info = unacked[key];
+                    return;
+                }
+
+                keysBuffer = ArrayPool<(ulong target, ulong msgId)>.Shared.Rent(unacked.Count);
+                int keyCount = 0;
+                foreach (var key in unacked.Keys)
+                {
+                    keysBuffer[keyCount++] = key;
+                }
+
+                retransmitBuffer = ArrayPool<UnackedMessage>.Shared.Rent(keyCount);
+                for (int i = 0; i < keyCount; i++)
+                {
+                    var key = keysBuffer[i];
+                    if (!unacked.TryGetValue(key, out var info)) continue;
                     if (now - info.LastSent > ackTimeout)
                     {
                         if (info.Attempts >= maxRetransmitAttempts)
@@ -1268,21 +1286,34 @@ namespace NetworkingLibrary.Services
                             info.Attempts++;
                             info.LastSent = now;
                             unacked[key] = info;
-                            toRetransmit.Add(info);
+                            retransmitBuffer[retransmitCount++] = info;
                         }
                     }
                 }
             }
 
-            foreach (var item in toRetransmit)
+            try
             {
-                try
+                for (int i = 0; i < retransmitCount; i++)
                 {
-                    SendBytes(item.Framed, item.Target, item.Reliable);
+                    var item = retransmitBuffer![i];
+                    try
+                    {
+                        SendBytes(item.Framed, item.Target, item.Reliable);
+                    }
+                    catch (Exception ex)
+                    {
+                        LogError($"RetransmitUnacked: retransmit SendBytes exception: {ex}");
+                    }
                 }
-                catch (Exception ex)
+            }
+            finally
+            {
+                if (keysBuffer != null) ArrayPool<(ulong target, ulong msgId)>.Shared.Return(keysBuffer);
+                if (retransmitBuffer != null)
                 {
-                    LogError($"RetransmitUnacked: retransmit SendBytes exception: {ex}");
+                    Array.Clear(retransmitBuffer, 0, retransmitCount);
+                    ArrayPool<UnackedMessage>.Shared.Return(retransmitBuffer);
                 }
             }
         }
@@ -1408,21 +1439,18 @@ namespace NetworkingLibrary.Services
                         if (nowUtc >= nextFragmentCleanupAt)
                         {
                             nextFragmentCleanupAt = nowUtc + FragmentCleanupInterval;
-                            List<(ulong sender, ulong msgId)>? staleKeys = null;
+                            staleFragmentKeys.Clear();
                             foreach (var entry in fragmentBuffers)
                             {
                                 if (nowUtc - entry.Value.FirstSeen <= FragmentTimeout) continue;
-                                staleKeys ??= new List<(ulong sender, ulong msgId)>();
-                                staleKeys.Add(entry.Key);
+                                staleFragmentKeys.Add(entry.Key);
                             }
 
-                            if (staleKeys != null)
+                            for (int i = 0; i < staleFragmentKeys.Count; i++)
                             {
-                                foreach (var staleKey in staleKeys)
-                                {
-                                    fragmentBuffers.Remove(staleKey);
-                                }
+                                fragmentBuffers.Remove(staleFragmentKeys[i]);
                             }
+                            staleFragmentKeys.Clear();
                         }
 
                         if (fb.Fragments.Count != fb.Total)
@@ -1465,12 +1493,11 @@ namespace NetworkingLibrary.Services
                     RSAParameters[] publicKeys;
                     lock (cryptoStateLock)
                     {
-                        if (modPublicKeys.Count == 0)
+                        publicKeys = modPublicKeysSnapshot;
+                        if (publicKeys.Length == 0)
                         {
                             return;
                         }
-
-                        publicKeys = modPublicKeys.Values.ToArray();
                     }
 
                     bool verified = false;
@@ -2138,8 +2165,30 @@ namespace NetworkingLibrary.Services
                 throw new ArgumentException("RSA public key exponent must not be empty.", nameof(pub));
             lock (cryptoStateLock)
             {
-                modPublicKeys[modId] = pub;
+                modPublicKeys[modId] = CloneRsaParameters(pub);
+                modPublicKeysSnapshot = BuildModPublicKeySnapshotUnderLock();
             }
+        }
+
+        static RSAParameters CloneRsaParameters(RSAParameters source)
+        {
+            return new RSAParameters
+            {
+                Modulus = source.Modulus == null ? null : (byte[])source.Modulus.Clone(),
+                Exponent = source.Exponent == null ? null : (byte[])source.Exponent.Clone()
+            };
+        }
+
+        RSAParameters[] BuildModPublicKeySnapshotUnderLock()
+        {
+            var snapshot = new RSAParameters[modPublicKeys.Count];
+            int index = 0;
+            foreach (var key in modPublicKeys.Values)
+            {
+                snapshot[index++] = CloneRsaParameters(key);
+            }
+
+            return snapshot;
         }
 
         void InvokeLocalMessage(Message message, CSteamID localSender)

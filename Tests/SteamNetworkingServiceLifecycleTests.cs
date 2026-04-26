@@ -729,6 +729,24 @@ public class SteamNetworkingServiceLifecycleTests
         Assert.Equal(0, receiver.CallCount);
     }
 
+    [Fact]
+    public void RetransmitUnacked_TimeoutPath_RetransmitsAndEventuallyEvicts()
+    {
+        var service = new SteamNetworkingService();
+        SeedUnacked(service, count: 1);
+        SetField(service, "ackTimeout", TimeSpan.Zero);
+        SetField(service, "maxRetransmitAttempts", 2);
+
+        SetUnackedState(service, target: 1000UL, msgId: 1UL, attempts: 1, lastSent: DateTime.UtcNow - TimeSpan.FromSeconds(2));
+        InvokeNonPublic(service, "RetransmitUnacked");
+        AssertUnackedCount(service, 1);
+        Assert.Equal(2, GetUnackedAttempts(service, target: 1000UL, msgId: 1UL));
+
+        SetUnackedState(service, target: 1000UL, msgId: 1UL, attempts: 2, lastSent: DateTime.UtcNow - TimeSpan.FromSeconds(2));
+        InvokeNonPublic(service, "RetransmitUnacked");
+        AssertUnackedCount(service, 0);
+    }
+
 
     [Fact]
     public void ProcessIncomingFrame_FragmentCleanupGate_DefersStaleSweepUntilInterval()
@@ -825,6 +843,25 @@ public class SteamNetworkingServiceLifecycleTests
 
             dict.Add(ValueTuple.Create((ulong)(i + 1000), (ulong)i + 1), unacked);
         }
+    }
+
+    static void SetUnackedState(SteamNetworkingService service, ulong target, ulong msgId, int attempts, DateTime lastSent)
+    {
+        var dict = (IDictionary)GetField(service, "unacked")!;
+        var key = ValueTuple.Create(target, msgId);
+        var unacked = dict[key]!;
+        var type = unacked.GetType();
+        type.GetField("Attempts", BindingFlags.Instance | BindingFlags.Public)!.SetValue(unacked, attempts);
+        type.GetField("LastSent", BindingFlags.Instance | BindingFlags.Public)!.SetValue(unacked, lastSent);
+    }
+
+    static int GetUnackedAttempts(SteamNetworkingService service, ulong target, ulong msgId)
+    {
+        var dict = (IDictionary)GetField(service, "unacked")!;
+        var key = ValueTuple.Create(target, msgId);
+        var unacked = dict[key]!;
+        var type = unacked.GetType();
+        return (int)type.GetField("Attempts", BindingFlags.Instance | BindingFlags.Public)!.GetValue(unacked)!;
     }
 
     static void SeedLastSeenSequence(SteamNetworkingService service)

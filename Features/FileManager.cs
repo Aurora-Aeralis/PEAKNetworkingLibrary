@@ -175,7 +175,9 @@ namespace NetworkingLibrary.Features
 
             try
             {
-                removeMethod.Invoke(config, new object[] { legacyDefinition });
+                var result = removeMethod.Invoke(config, new object[] { legacyDefinition });
+                if (removeMethod.ReturnType == typeof(bool))
+                    return result is bool removed && removed;
                 return true;
             }
             catch (Exception ex)
@@ -195,7 +197,10 @@ namespace NetworkingLibrary.Features
             try
             {
                 var orphanedEntries = GetOrphanedEntries(config, orphanedEntriesProperty);
-                orphanedEntries?.Remove(legacyDefinition);
+                if (orphanedEntries == null)
+                    return false;
+
+                orphanedEntries.Remove(legacyDefinition);
                 return true;
             }
             catch (Exception ex)

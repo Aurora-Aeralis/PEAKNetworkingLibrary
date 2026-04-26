@@ -86,7 +86,7 @@ namespace NetworkingLibrary.Modules
             return map;
         }
 
-        static bool TryResolveStableIdentity(Player player, HashSet<ulong> lobbyIdSet, out ulong matchedSteamId, out string issue)
+        static bool TryResolveStableIdentity(Player player, HashSet<ulong> lobbyIdSet, out ulong matchedSteamId, out string? issue)
         {
             matchedSteamId = 0;
             issue = null;

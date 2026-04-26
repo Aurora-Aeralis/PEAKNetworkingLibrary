@@ -28,6 +28,8 @@ namespace NetworkingLibrary.Modules
         static int coalescedEnqueueCount;
         static int suppressedOverflowWarnings;
         static long lastOverflowWarningTicks;
+        static int suppressedOverflowLoggerFailures;
+        static long lastOverflowLoggerFailureTicks;
         static readonly ManualResetEventSlim instanceReady = new(false);
         static readonly TimeSpan defaultBackgroundThreadWaitTimeout = TimeSpan.FromSeconds(2);
 
@@ -256,7 +258,25 @@ namespace NetworkingLibrary.Modules
                 if (suppressed > 0) message = $"{message} Suppressed {suppressed} similar warnings.";
                 Net.Logger?.LogWarning(message);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                EmitOverflowLoggerFailureWarning(ex, message, nowTicks);
+            }
+        }
+
+        static void EmitOverflowLoggerFailureWarning(Exception ex, string originalMessage, long nowTicks)
+        {
+            var previousTicks = Interlocked.Read(ref lastOverflowLoggerFailureTicks);
+            if (previousTicks != 0 && new TimeSpan(nowTicks - previousTicks) < overflowWarningCooldown)
+            {
+                Interlocked.Increment(ref suppressedOverflowLoggerFailures);
+                return;
+            }
+
+            Interlocked.Exchange(ref lastOverflowLoggerFailureTicks, nowTicks);
+            var suppressed = Interlocked.Exchange(ref suppressedOverflowLoggerFailures, 0);
+            var suppressedSuffix = suppressed > 0 ? $" Suppressed {suppressed} similar logger failures." : string.Empty;
+            Debug.LogWarning($"[UnityMainThreadDispatcher] Failed to write overflow warning. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {originalMessage}.{suppressedSuffix}");
         }
 
         void Update()
@@ -293,6 +313,8 @@ namespace NetworkingLibrary.Modules
                     coalescedEnqueueCount = 0;
                     suppressedOverflowWarnings = 0;
                     lastOverflowWarningTicks = 0;
+                    suppressedOverflowLoggerFailures = 0;
+                    lastOverflowLoggerFailureTicks = 0;
                     CreateInstanceOnMainThreadFactory = CreateOrFindDispatcherOnMainThread;
                     BackgroundThreadInstanceWaitTimeout = defaultBackgroundThreadWaitTimeout;
                     MaxQueueDepthProvider = null;

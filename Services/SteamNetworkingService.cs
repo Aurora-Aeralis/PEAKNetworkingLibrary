@@ -161,22 +161,61 @@ namespace NetworkingLibrary.Services
 
         static void LogError(string message)
         {
-            try { Net.Logger?.LogError(message); } catch { }
+            try { Net.Logger?.LogError(message); }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[SteamNetworkingService] Failed to write error log. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
+            }
         }
 
         static void LogWarning(string message)
         {
-            try { Net.Logger?.LogWarning(message); } catch { }
+            try { Net.Logger?.LogWarning(message); }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[SteamNetworkingService] Failed to write warning log. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
+            }
         }
 
         static void LogInfo(string message)
         {
-            try { Net.Logger?.LogInfo(message); } catch { }
+            try { Net.Logger?.LogInfo(message); }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[SteamNetworkingService] Failed to write info log. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
+            }
         }
 
         static void LogDebug(string message)
         {
-            try { Net.Logger?.LogDebug(message); } catch { }
+            try { Net.Logger?.LogDebug(message); }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[SteamNetworkingService] Failed to write debug log. Exception: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        static readonly Dictionary<string, DateTime> debugThrottleByKey = new();
+        static readonly TimeSpan DebugLogCooldown = TimeSpan.FromSeconds(2);
+        static readonly object debugThrottleLock = new();
+
+        static void LogDebugThrottled(string key, string message)
+        {
+            bool shouldLog;
+            lock (debugThrottleLock)
+            {
+                var now = DateTime.UtcNow;
+                if (debugThrottleByKey.TryGetValue(key, out var lastAt) && now - lastAt < DebugLogCooldown)
+                {
+                    shouldLog = false;
+                }
+                else
+                {
+                    debugThrottleByKey[key] = now;
+                    shouldLog = true;
+                }
+            }
+            if (shouldLog) LogDebug(message);
         }
 
         readonly Dictionary<ulong, HandshakeState> handshakeStates = new();
@@ -281,7 +320,11 @@ namespace NetworkingLibrary.Services
             {
                 if (enabledPumpingInThisInitialize && !pumpingWasEnabledBeforeInitialize)
                 {
-                    try { SteamCallbackPump.DisablePumping(); } catch { }
+                    try { SteamCallbackPump.DisablePumping(); }
+                    catch (Exception ex)
+                    {
+                        LogDebugThrottled("Initialize.DisablePumpingAfterPumpSetupFailure", $"Initialize failed pump setup cleanup at SteamCallbackPump.DisablePumping: {ex.GetType().Name}: {ex.Message}");
+                    }
                 }
                 try
                 {
@@ -308,7 +351,11 @@ namespace NetworkingLibrary.Services
             {
                 if (enabledPumpingInThisInitialize && !pumpingWasEnabledBeforeInitialize)
                 {
-                    try { SteamCallbackPump.DisablePumping(); } catch { }
+                    try { SteamCallbackPump.DisablePumping(); }
+                    catch (Exception ex)
+                    {
+                        LogDebugThrottled("Initialize.DisablePumpingAfterCallbackFailure", $"Initialize failed callback/crypto cleanup at SteamCallbackPump.DisablePumping: {ex.GetType().Name}: {ex.Message}");
+                    }
                 }
                 try
                 {
@@ -394,7 +441,11 @@ namespace NetworkingLibrary.Services
             LocalRsa = null;
 
             IsInitialized = false;
-            try { SteamCallbackPump.DisableAndDestroyExisting(); } catch { }
+            try { SteamCallbackPump.DisableAndDestroyExisting(); }
+            catch (Exception ex)
+            {
+                LogDebugThrottled("Shutdown.DisableAndDestroyExisting", $"Shutdown cleanup at SteamCallbackPump.DisableAndDestroyExisting failed: {ex.GetType().Name}: {ex.Message}");
+            }
             lock (lastSeenSequence) lastSeenSequence.Clear();
             lock (rateLimiters) rateLimiters.Clear();
             lock (outgoingSequencePerMod) outgoingSequencePerMod.Clear();
@@ -1825,7 +1876,12 @@ namespace NetworkingLibrary.Services
                 if (ctorFull != null)
                 {
                     bool isLocal = false;
-                    try { isLocal = (sender == SteamUser.GetSteamID()); } catch { isLocal = false; }
+                    try { isLocal = (sender == SteamUser.GetSteamID()); }
+                    catch (Exception ex)
+                    {
+                        isLocal = false;
+                        LogDebugThrottled("CreateRpcInfoInstance.GetSteamID", $"CreateRpcInfoInstance failed local sender probe via SteamUser.GetSteamID: {ex.GetType().Name}: {ex.Message}");
+                    }
                     return ctorFull.Invoke(new object[] { sender.m_SteamID, sender.ToString(), isLocal });
                 }
 
@@ -1843,7 +1899,10 @@ namespace NetworkingLibrary.Services
                     return obj;
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                LogDebugThrottled("CreateRpcInfoInstance", $"CreateRpcInfoInstance failed for {infoType?.FullName ?? "<unknown type>"}: {ex.GetType().Name}: {ex.Message}");
+            }
             return null!;
         }
 

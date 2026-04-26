@@ -8,14 +8,37 @@ namespace NetworkingLibrary.Services
 {
     public static class NetworkingServiceFactory
     {
+        const float ProbeDebugLogCooldownSeconds = 2f;
+        static float probeLastDebugLogTime = float.NegativeInfinity;
+
         static void LogInfo(string message)
         {
-            try { Net.Logger?.LogInfo(message); } catch { }
+            try { Net.Logger?.LogInfo(message); }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[NetworkingServiceFactory] Failed to write info log. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
+            }
         }
 
         static void LogError(string message)
         {
-            try { Net.Logger?.LogError(message); } catch { }
+            try { Net.Logger?.LogError(message); }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[NetworkingServiceFactory] Failed to write error log. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
+            }
+        }
+
+        static void LogDebugThrottled(string message)
+        {
+            var now = Time.unscaledTime;
+            if (now - probeLastDebugLogTime < ProbeDebugLogCooldownSeconds) return;
+            probeLastDebugLogTime = now;
+            try { Net.Logger?.LogDebug(message); }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[NetworkingServiceFactory] Failed to write debug log. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
+            }
         }
 
 #if !UNITY_EDITOR
@@ -70,8 +93,9 @@ namespace NetworkingLibrary.Services
             {
                 return SteamUser.GetSteamID() != CSteamID.Nil;
             }
-            catch
+            catch (Exception ex)
             {
+                LogDebugThrottled($"ProbeSteamApiInitialized fallback SteamUser.GetSteamID failed: {ex.GetType().Name}: {ex.Message}");
                 return false;
             }
         }
@@ -96,8 +120,9 @@ namespace NetworkingLibrary.Services
                 }
                 return false;
             }
-            catch
+            catch (Exception ex)
             {
+                LogDebugThrottled($"TryReadSteamManagerInitialized reflection probe failed: {ex.GetType().Name}: {ex.Message}");
                 return false;
             }
         }

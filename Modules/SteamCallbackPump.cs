@@ -7,11 +7,18 @@ namespace NetworkingLibrary.Modules
 {
     public class SteamCallbackPump : MonoBehaviour
     {
+        const float ErrorLogCooldownSeconds = 2f;
+
         public static bool CallbackPumpingEnabled { get; private set; }
         internal static Func<bool> IsSteamReady = ProbeSteamReady;
+        internal static Func<float> TimeProvider = () => Time.unscaledTime;
 
         string? lastSkipReason;
         bool runCallbacksFaulted;
+        static float probeSteamReadyLastErrorLogTime = float.NegativeInfinity;
+        static bool probeSteamReadySuppressedFault;
+        float isSteamReadyHookLastErrorLogTime = float.NegativeInfinity;
+        bool isSteamReadyHookSuppressedFault;
 
         public static void EnablePumping() => CallbackPumpingEnabled = true;
         public static void DisablePumping() => CallbackPumpingEnabled = false;
@@ -86,14 +93,18 @@ namespace NetworkingLibrary.Modules
             {
                 return NetworkingServiceFactory.IsSteamClientRunning() && NetworkingServiceFactory.IsSteamApiInitialized();
             }
-            catch
+            catch (Exception ex)
             {
+                LogExceptionWithCooldownStatic(
+                    ref probeSteamReadyLastErrorLogTime,
+                    ref probeSteamReadySuppressedFault,
+                    $"ProbeSteamReady failed while checking Steam readiness. Exception: {ex.GetType().Name}: {ex.Message}");
                 return false;
             }
 #endif
         }
 
-        static bool TryIsSteamReady(out bool isReady)
+        bool TryIsSteamReady(out bool isReady)
         {
             isReady = false;
             try
@@ -101,10 +112,42 @@ namespace NetworkingLibrary.Modules
                 isReady = IsSteamReady();
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
+                LogExceptionWithCooldown(
+                    ref isSteamReadyHookLastErrorLogTime,
+                    ref isSteamReadyHookSuppressedFault,
+                    $"TryIsSteamReady failed while invoking IsSteamReady hook. Exception: {ex.GetType().Name}: {ex.Message}");
                 return false;
             }
+        }
+
+        void LogExceptionWithCooldown(ref float lastErrorLogTime, ref bool suppressedFault, string message)
+        {
+            var now = TimeProvider();
+            if (now - lastErrorLogTime >= ErrorLogCooldownSeconds)
+            {
+                lastErrorLogTime = now;
+                suppressedFault = false;
+                TryLogError(message);
+                return;
+            }
+
+            suppressedFault = true;
+        }
+
+        static void LogExceptionWithCooldownStatic(ref float lastErrorLogTime, ref bool suppressedFault, string message)
+        {
+            var now = TimeProvider();
+            if (now - lastErrorLogTime >= ErrorLogCooldownSeconds)
+            {
+                lastErrorLogTime = now;
+                suppressedFault = false;
+                TryLogError(message);
+                return;
+            }
+
+            suppressedFault = true;
         }
 
         void LogSkipReasonOnce(string message)
@@ -117,12 +160,20 @@ namespace NetworkingLibrary.Modules
 
         static void TryLogError(string message)
         {
-            try { NetworkingLibrary.Net.Logger.LogError(message); } catch { }
+            try { NetworkingLibrary.Net.Logger.LogError(message); }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[SteamCallbackPump] Failed to write error log. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
+            }
         }
 
         static void TryLogInfo(string message)
         {
-            try { NetworkingLibrary.Net.Logger.LogInfo(message); } catch { }
+            try { NetworkingLibrary.Net.Logger.LogInfo(message); }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[SteamCallbackPump] Failed to write info log. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
+            }
         }
     }
 }

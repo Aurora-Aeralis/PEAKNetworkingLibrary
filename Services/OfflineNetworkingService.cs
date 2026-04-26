@@ -693,9 +693,33 @@ namespace NetworkingLibrary.Services
         {
             callParams = null!;
             unread = int.MaxValue;
-            var cursor = source.SaveReadCursor();
+            var originalCursor = source.SaveReadCursor();
+            var probeCursor = originalCursor;
             try
             {
+                if (originalCursor.Position == 0)
+                {
+                    // Offline RPC/RPCTarget can dispatch the freshly built outbound message directly.
+                    // In that flow the read cursor is still at byte 0, so advance to payload start
+                    // before probing overload arguments.
+                    source.ReadByte();   // protocol version
+                    source.ReadUInt();   // mod id
+                    source.ReadString(); // method name
+                    source.ReadInt();    // mask
+                    if (source.ProtocolVersion >= 3)
+                    {
+                        var hasOverloadKey = source.ReadBool();
+                        if (hasOverloadKey)
+                        {
+                            source.ReadString();
+                        }
+                    }
+
+                    probeCursor = source.SaveReadCursor();
+                }
+
+                source.RestoreReadCursor(probeCursor);
+
                 var pi = handler.Parameters;
                 int paramCount = handler.TakesInfo ? pi.Length - 1 : pi.Length;
                 callParams = new object[pi.Length];
@@ -714,7 +738,7 @@ namespace NetworkingLibrary.Services
             }
             finally
             {
-                source.RestoreReadCursor(cursor);
+                source.RestoreReadCursor(originalCursor);
             }
         }
 

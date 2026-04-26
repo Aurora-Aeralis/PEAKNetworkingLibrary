@@ -30,15 +30,13 @@
   </ItemGroup>
 
   <Target Name="PackTS" AfterTargets="Build" Condition="'$(Configuration)' == 'Release' And '$(ThunderstorePackable)' != 'false'">
-    <Error
-      Text=" PackTS must be called with Release configuration."
-      Condition="'$(Configuration)' != 'Release'"
-    />
     <PropertyGroup>
       <BuildArgument Condition="'$(PublishTS)' != 'true'">build</BuildArgument>
       <BuildArgument Condition="'$(PublishTS)' == 'true'">publish</BuildArgument>
     </PropertyGroup>
+    <Message Text="PackTS mode: $(BuildArgument)" Importance="high" />
     <Exec Command="dotnet tool restore" />
+    <Exec Command="dotnet tool run tcli thunderstore $(BuildArgument)" />
   </Target>
 
 </Project>

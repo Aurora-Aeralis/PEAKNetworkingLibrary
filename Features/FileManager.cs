@@ -191,8 +191,8 @@ namespace NetworkingLibrary.Features
 
             try
             {
-                removeMethod.Invoke(config, new object[] { legacyDefinition });
-                return true;
+                var removeResult = removeMethod.Invoke(config, new object[] { legacyDefinition });
+                return removeResult is bool removed ? removed : true;
             }
             catch (Exception ex)
             {

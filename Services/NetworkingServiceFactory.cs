@@ -1,5 +1,5 @@
 using System;
-using System.Linq;
+using System.Collections.Generic;
 using System.Reflection;
 using NetworkingLibrary.Modules;
 #if !UNITY_EDITOR
@@ -110,6 +110,7 @@ namespace NetworkingLibrary.Services
         static Type? ResolveLoadedSteamManagerType()
         {
             const BindingFlags AnyStaticVisibility = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+            Type? fallbackCandidate = null;
             var assemblies = AppDomain.CurrentDomain.GetAssemblies();
             for (var index = 0; index < assemblies.Length; index++)
             {
@@ -123,7 +124,17 @@ namespace NetworkingLibrary.Services
                 }
                 catch (ReflectionTypeLoadException ex)
                 {
-                    types = ex.Types.Where(type => type != null).ToArray()!;
+                    var loadedTypes = ex.Types;
+                    var loadedTypesCount = loadedTypes.Length;
+                    var filteredTypes = new List<Type>(loadedTypesCount);
+                    for (var i = 0; i < loadedTypesCount; i++)
+                    {
+                        var loadedType = loadedTypes[i];
+                        if (loadedType == null) continue;
+                        filteredTypes.Add(loadedType);
+                    }
+
+                    types = filteredTypes.ToArray();
                 }
                 catch
                 {
@@ -140,11 +151,12 @@ namespace NetworkingLibrary.Services
 
                     if (IsPreferredSteamManagerType(candidate))
                         return candidate;
-
+                    if (fallbackCandidate == null) fallbackCandidate = candidate;
+                    else if (!ReferenceEquals(fallbackCandidate, candidate)) return null;
                 }
             }
 
-            return null;
+            return fallbackCandidate;
         }
 
         static bool IsPreferredSteamManagerType(Type steamManagerType)

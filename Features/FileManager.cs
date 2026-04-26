@@ -46,7 +46,7 @@ namespace NetworkingLibrary.Features
             if (storedVersion == currentVersion && !needsNormalization)
                 return;
 
-            MigrateConfig(config, schemaVersionEntry, legacyVersionEntry, storedVersion, currentVersion);
+            MigrateConfig(schemaVersionEntry, legacyVersionEntry, storedVersion, currentVersion);
             schemaVersionEntry.Value = currentVersion;
             config.Save();
         }
@@ -59,7 +59,7 @@ namespace NetworkingLibrary.Features
             return legacyVersionEntry.Value;
         }
 
-        static void MigrateConfig(ConfigFile config, ConfigEntry<string> schemaVersionEntry, ConfigEntry<string> legacyVersionEntry, string previousVersion, string currentVersion)
+        static void MigrateConfig(ConfigEntry<string> schemaVersionEntry, ConfigEntry<string> legacyVersionEntry, string previousVersion, string currentVersion)
         {
             if (!TryParseSchemaVersion(currentVersion, out var targetVersion))
                 throw new InvalidOperationException($"Current config schema version '{currentVersion}' is not a valid schema identifier.");

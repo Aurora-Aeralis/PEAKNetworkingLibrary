@@ -178,12 +178,8 @@ namespace NetworkingLibrary.Modules
         }
 
         /// <summary>
-        /// Resets this message instance.
+        /// Resets the message buffers when <paramref name="zero"/> is <see langword="true"/>.
         /// </summary>
-        /// <param name="zero">
-        /// When <see langword="true"/>, clears all buffered bytes and resets the read cursor.
-        /// When <see langword="false"/>, this method intentionally performs no operation for compatibility with older callers.
-        /// </param>
         public void Reset(bool zero = true)
         {
             ThrowIfDisposed();
@@ -287,8 +283,7 @@ namespace NetworkingLibrary.Modules
         public Message WriteQuaternion(Quaternion q) { WriteFloat(q.x); WriteFloat(q.y); WriteFloat(q.z); WriteFloat(q.w); return this; }
 
         /// <summary>
-        /// Serializes an object using the protocol's fixed primitive map and dynamic collection handling.
-        /// This method defines wire-format compatibility expectations for RPC payload arguments.
+        /// Serializes an RPC payload value using the protocol wire format.
         /// </summary>
         public void WriteObject(Type type, object value)
         {
@@ -638,8 +633,7 @@ namespace NetworkingLibrary.Modules
         public Quaternion ReadQuaternion() => new Quaternion(ReadFloat(), ReadFloat(), ReadFloat(), ReadFloat());
 
         /// <summary>
-        /// Deserializes an object using the protocol's fixed primitive map and dynamic collection handling.
-        /// Keep this logic aligned with <see cref="WriteObject(Type, object)"/> to preserve wire compatibility.
+        /// Deserializes an RPC payload value; keep aligned with <see cref="WriteObject(Type, object)"/>.
         /// </summary>
         public object ReadObject(Type type)
         {

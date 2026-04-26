@@ -57,8 +57,8 @@ namespace NetworkingLibrary.Features
 
             MigrateConfig(schemaVersionEntry, storedVersion, currentVersion, legacyVersion);
             schemaVersionEntry.Value = currentVersion;
-            ClearLegacyVersion(config);
-            DropLegacyVersionFromConfig(config);
+            if (!DropLegacyVersionFromConfig(config))
+                ClearLegacyVersion(config);
             config.Save();
         }
 
@@ -131,9 +131,17 @@ namespace NetworkingLibrary.Features
 
             var lines = File.ReadAllLines(configPath);
             var changed = false;
+            var inVersionSection = false;
             for (var i = 0; i < lines.Length; i++)
             {
-                if (!lines[i].StartsWith($"{LegacyVersionKey} = ", StringComparison.Ordinal))
+                var line = lines[i];
+                if (line.StartsWith("[", StringComparison.Ordinal) && line.EndsWith("]", StringComparison.Ordinal))
+                {
+                    inVersionSection = line.Equals($"[{VersionSection}]", StringComparison.Ordinal);
+                    continue;
+                }
+
+                if (!inVersionSection || !line.StartsWith($"{LegacyVersionKey} = ", StringComparison.Ordinal))
                     continue;
 
                 lines[i] = $"{LegacyVersionKey} =";
@@ -145,18 +153,20 @@ namespace NetworkingLibrary.Features
         }
 
 
-        static void DropLegacyVersionFromConfig(ConfigFile config)
+        static bool DropLegacyVersionFromConfig(ConfigFile config)
         {
             var legacyDefinition = new ConfigDefinition(VersionSection, LegacyVersionKey);
             Exception? removeException = null;
+            var reflectivePathAvailable = false;
 
             try
             {
                 var removeMethod = GetRemoveMethod(config);
                 if (removeMethod != null)
                 {
+                    reflectivePathAvailable = true;
                     removeMethod.Invoke(config, new object[] { legacyDefinition });
-                    return;
+                    return true;
                 }
             }
             catch (Exception exception)
@@ -167,13 +177,20 @@ namespace NetworkingLibrary.Features
             try
             {
                 var orphanedEntries = GetOrphanedEntries(config);
-                orphanedEntries?.Remove(legacyDefinition);
+                if (orphanedEntries != null)
+                {
+                    reflectivePathAvailable = true;
+                    orphanedEntries.Remove(legacyDefinition);
+                    return true;
+                }
             }
             catch (Exception orphanedEntriesException)
             {
                 var removeContext = removeException == null ? string.Empty : $" Remove invocation error: {removeException}.";
                 Net.Logger?.LogWarning($"Failed to remove legacy config key '{LegacyVersionKey}' during migration.{removeContext} OrphanedEntries fallback error: {orphanedEntriesException}");
             }
+
+            return reflectivePathAvailable;
         }
 
         internal static MethodInfo? GetRemoveMethod(ConfigFile config)

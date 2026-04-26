@@ -235,6 +235,29 @@ public class FileManagerConfigMigrationTests
     }
 
     [Theory]
+    [InlineData("Current Version = 0 ; migrated from old pack")]
+    [InlineData("Current Version = 0 # comment")]
+    public void MigrateConfigIfNeeded_LegacyVersionWithInlineComments_UsesSchemaZeroWithoutWarning(string legacyLine)
+    {
+        using var scope = new TempConfigScope();
+        File.WriteAllText(scope.ConfigPath,
+            "[Version]\n" +
+            $"{legacyLine}\n");
+
+        var config = new ConfigFile(scope.ConfigPath, true);
+        using var loggerScope = new NetLoggerScope();
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        var configText = File.ReadAllText(scope.ConfigPath);
+
+        Assert.Equal("1", schemaVersion);
+        Assert.Contains("ConfigSchemaVersion = 1", configText, StringComparison.Ordinal);
+        Assert.True(IsLegacyVersionRemoved(configText));
+        Assert.DoesNotContain(loggerScope.Warnings, warning => warning.Contains("Invalid source config schema version", StringComparison.Ordinal));
+    }
+
+    [Theory]
     [InlineData("-1")]
     [InlineData("abc")]
     [InlineData("   ")]

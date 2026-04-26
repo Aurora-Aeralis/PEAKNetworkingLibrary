@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Security.Cryptography;
+using System.Buffers.Binary;
 using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
@@ -147,28 +148,28 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
-    public void Leave_PreservesOutgoingSequence_AndShutdown_ClearsAllTransientState()
+    public void LeaveLobby_ResetsOutgoingSequenceCounters_BeforeNextLobbySession()
     {
         var service = new SteamNetworkingService();
+        var msg = new Message(TestModId, nameof(RpcReceiver.OnPing), 0);
+        msg.WriteObject(typeof(int), 1);
 
         SeedLastSeenSequence(service);
         SeedRateLimiters(service);
-        SeedOutgoingSequencePerMod(service);
+        BuildFramed(service, msg, TestModId, ReliableType.Unreliable);
+        BuildFramed(service, msg, TestModId, ReliableType.Unreliable);
 
         InvokeNonPublic(service, "OnLobbyLeftInternal");
 
         AssertDictionaryCount(service, "lastSeenSequence", 0);
         AssertDictionaryCount(service, "rateLimiters", 0);
-        AssertDictionaryCount(service, "outgoingSequencePerMod", 1);
+        AssertDictionaryCount(service, "outgoingSequencePerMod", 0);
 
-        SeedLastSeenSequence(service);
-        SeedRateLimiters(service);
+        var nextLobbyFrame = BuildFramed(service, msg, TestModId, ReliableType.Unreliable);
+        Assert.Equal(1UL, ReadFrameSequence(nextLobbyFrame));
+
         SeedOutgoingSequencePerMod(service, 778);
-
         service.Shutdown();
-
-        AssertDictionaryCount(service, "lastSeenSequence", 0);
-        AssertDictionaryCount(service, "rateLimiters", 0);
         AssertDictionaryCount(service, "outgoingSequencePerMod", 0);
     }
 
@@ -1061,6 +1062,11 @@ public class SteamNetworkingServiceLifecycleTests
     static byte[] BuildFramed(SteamNetworkingService service, Message message, uint modId, ReliableType reliable)
     {
         return (byte[])InvokeNonPublic(service, "BuildFramedBytesWithMeta", message, modId, reliable)!;
+    }
+
+    static ulong ReadFrameSequence(byte[] framed)
+    {
+        return BinaryPrimitives.ReadUInt64LittleEndian(framed.AsSpan(9, sizeof(ulong)));
     }
 
     static object? InvokeNonPublic(SteamNetworkingService service, string methodName, params object[] args)

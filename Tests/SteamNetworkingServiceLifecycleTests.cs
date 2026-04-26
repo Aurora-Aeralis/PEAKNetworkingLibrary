@@ -247,6 +247,26 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void Shutdown_ClearsRegisteredHandlers_AndModSecurityArtifacts()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new RpcReceiver();
+        using var rsa = RSA.Create(2048);
+
+        service.RegisterNetworkObject(receiver, TestModId);
+        service.RegisterModSigner(TestModId, bytes => bytes);
+        service.RegisterModPublicKey(TestModId, rsa.ExportParameters(false));
+        service.Shutdown();
+
+        var rpcs = (IDictionary)GetField(service, "rpcs")!;
+        var modSigners = (IDictionary)GetField(service, "modSigners")!;
+        var modPublicKeys = (IDictionary)GetField(service, "modPublicKeys")!;
+        Assert.Equal(0, rpcs.Count);
+        Assert.Equal(0, modSigners.Count);
+        Assert.Equal(0, modPublicKeys.Count);
+    }
+
+    [Fact]
     public async Task Shutdown_RacingWithRetransmitAndFlush_DoesNotThrow()
     {
         var service = new SteamNetworkingService();

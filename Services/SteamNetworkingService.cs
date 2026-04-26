@@ -342,6 +342,12 @@ namespace NetworkingLibrary.Services
             cbLobbyCreated = null;
             cbLobbyChatUpdate = null;
             cbLobbyDataUpdate = null;
+            lock (rpcLock)
+            {
+                rpcs.Clear();
+            }
+            modSigners.Clear();
+            modPublicKeys.Clear();
 
             ClearOutboundState();
             lobbyDataKeys.Clear();

@@ -1,4 +1,5 @@
 using NetworkingLibrary.Services;
+using NetworkingLibrary.Modules;
 using System;
 using System.Reflection;
 using Xunit;
@@ -111,6 +112,7 @@ public class NetworkingServiceFactoryTests
         finally
         {
             NetworkingServiceFactory.ResetTestHooks();
+            NetLog.ResetForTests();
         }
     }
 
@@ -246,12 +248,48 @@ public class NetworkingServiceFactoryTests
         Assert.True(isInitialized);
     }
 
+    [Fact]
+    public void TryReadSteamManagerInitialized_ReflectionFailure_UsesThrottledProbeLogging()
+    {
+        var simulatedTime = 10f;
+        NetworkingServiceFactory.UnscaledTimeProvider = () => simulatedTime;
+        NetworkingServiceFactory.ResolveType = _ => throw new InvalidOperationException("probe boom");
+
+        try
+        {
+            var read = InvokeTryReadSteamManagerInitialized(out _);
+            Assert.False(read);
+
+            simulatedTime += 0.25f;
+            read = InvokeTryReadSteamManagerInitialized(out _);
+            Assert.False(read);
+
+            const string key = "NetworkingServiceFactory.TryReadSteamManagerInitialized";
+            Assert.False(NetLog.TryEnterCooldown(key, 2d, simulatedTime));
+            Assert.True(NetLog.TryEnterCooldown(key, 2d, simulatedTime + 2.1f));
+        }
+        finally
+        {
+            NetworkingServiceFactory.ResetTestHooks();
+            NetLog.ResetForTests();
+        }
+    }
+
     static bool InvokeTryReadInitializedFromType(Type steamManagerType, out bool isInitialized)
     {
         var method = typeof(NetworkingServiceFactory).GetMethod("TryReadInitializedFromType", BindingFlags.Static | BindingFlags.NonPublic)!;
         var args = new object?[] { steamManagerType, false };
         var read = (bool)method.Invoke(null, args)!;
         isInitialized = (bool)(args[1] ?? false);
+        return read;
+    }
+
+    static bool InvokeTryReadSteamManagerInitialized(out bool isInitialized)
+    {
+        var method = typeof(NetworkingServiceFactory).GetMethod("TryReadSteamManagerInitialized", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var args = new object?[] { false };
+        var read = (bool)method.Invoke(null, args)!;
+        isInitialized = (bool)(args[0] ?? false);
         return read;
     }
 }

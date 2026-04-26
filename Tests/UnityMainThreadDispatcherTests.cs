@@ -174,13 +174,10 @@ public class UnityMainThreadDispatcherTests : IDisposable
         Assert.False(dispatcher.TryEnqueue(() => { }, 1f));
         var delayed = (System.Collections.IEnumerator)typeof(UnityMainThreadDispatcher)
             .GetMethod("EnqueueDelayed", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(dispatcher, new object[] { (Action)(() => { }), 0f })!;
+            .Invoke(dispatcher, new object[] { (Action)(() => { }), 0f, false })!;
 
         Assert.True(delayed.MoveNext());
-        var error = Record.Exception(() => delayed.MoveNext());
-        Assert.IsType<InvalidOperationException>(error);
-        Assert.Contains("RejectNewWork", error!.Message);
-        Assert.Contains("delayed", error.Message);
+        Assert.Null(Record.Exception(() => delayed.MoveNext()));
 
         Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
         Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.RejectedEnqueueCountForTests);
@@ -212,6 +209,25 @@ public class UnityMainThreadDispatcherTests : IDisposable
         Assert.Contains("Coalesce", error.Message);
         Assert.Contains("delayed", error.Message);
         Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.CoalescedEnqueueCountForTests);
+    }
+
+    [Fact]
+    public void EnqueueDelayed_WhenThrowOnFailureEnabled_ThrowsOnRejectedWork()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 1;
+        UnityMainThreadDispatcher.QueueOverflowBehaviorProvider = () => UnityMainThreadDispatcher.QueueOverflowBehavior.RejectNewWork;
+
+        Assert.True(dispatcher.TryEnqueue(() => { }));
+        var delayed = (System.Collections.IEnumerator)typeof(UnityMainThreadDispatcher)
+            .GetMethod("EnqueueDelayed", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(dispatcher, new object[] { (Action)(() => { }), 0f, true })!;
+
+        Assert.True(delayed.MoveNext());
+        var error = Record.Exception(() => delayed.MoveNext());
+        Assert.IsType<InvalidOperationException>(error);
+        Assert.Contains("RejectNewWork", error!.Message);
+        Assert.Contains("delayed", error.Message);
     }
 
     [Fact]

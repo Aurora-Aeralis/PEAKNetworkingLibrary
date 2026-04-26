@@ -177,7 +177,7 @@ namespace NetworkingLibrary.Modules
             if (a == null) throw new ArgumentNullException(nameof(a));
             if (delaySeconds <= 0f) return TryEnqueueBounded(a, delayed: false);
 
-            return TryEnqueueBounded(CreateDelayedEnqueueAction(a, delaySeconds), delayed: true);
+            return TryEnqueueBounded(CreateDelayedEnqueueAction(a, delaySeconds, throwOnFailure: false), delayed: true);
         }
 
         public void Enqueue(Action a, float delaySeconds = 0f)
@@ -187,22 +187,29 @@ namespace NetworkingLibrary.Modules
 
         public void EnqueueOrThrow(Action a, float delaySeconds = 0f)
         {
+            if (delaySeconds > 0f)
+            {
+                if (TryEnqueueBounded(CreateDelayedEnqueueAction(a, delaySeconds, throwOnFailure: true), delayed: true)) return;
+                ThrowEnqueueFailure(delayed: true);
+                return;
+            }
+
             if (TryEnqueue(a, delaySeconds)) return;
             ThrowEnqueueFailure(delaySeconds > 0f);
         }
 
-        Action CreateDelayedEnqueueAction(Action action, float delaySeconds)
+        Action CreateDelayedEnqueueAction(Action action, float delaySeconds, bool throwOnFailure)
         {
-            var delayedWork = new DelayedEnqueueWork(this, action, delaySeconds);
+            var delayedWork = new DelayedEnqueueWork(this, action, delaySeconds, throwOnFailure);
             return delayedWork.Invoke;
         }
 
-        IEnumerator EnqueueDelayed(Action a, float d)
+        IEnumerator EnqueueDelayed(Action a, float d, bool throwOnFailure)
         {
             if (a == null) throw new ArgumentNullException(nameof(a));
             yield return new WaitForSeconds(d);
             if (TryEnqueueBounded(a, delayed: true)) yield break;
-            ThrowEnqueueFailure(delayed: true);
+            if (throwOnFailure) ThrowEnqueueFailure(delayed: true);
         }
 
         sealed class DelayedEnqueueWork
@@ -210,15 +217,17 @@ namespace NetworkingLibrary.Modules
             readonly UnityMainThreadDispatcher dispatcher;
             readonly Action action;
             readonly float delaySeconds;
+            readonly bool throwOnFailure;
 
-            internal DelayedEnqueueWork(UnityMainThreadDispatcher dispatcher, Action action, float delaySeconds)
+            internal DelayedEnqueueWork(UnityMainThreadDispatcher dispatcher, Action action, float delaySeconds, bool throwOnFailure)
             {
                 this.dispatcher = dispatcher;
                 this.action = action;
                 this.delaySeconds = delaySeconds;
+                this.throwOnFailure = throwOnFailure;
             }
 
-            internal void Invoke() => dispatcher.StartCoroutine(dispatcher.EnqueueDelayed(action, delaySeconds));
+            internal void Invoke() => dispatcher.StartCoroutine(dispatcher.EnqueueDelayed(action, delaySeconds, throwOnFailure));
 
             public override bool Equals(object? obj)
             {
@@ -226,10 +235,11 @@ namespace NetworkingLibrary.Modules
                 return ReferenceEquals(dispatcher, other.dispatcher)
                     && action.Method == other.action.Method
                     && Equals(action.Target, other.action.Target)
-                    && delaySeconds.Equals(other.delaySeconds);
+                    && delaySeconds.Equals(other.delaySeconds)
+                    && throwOnFailure == other.throwOnFailure;
             }
 
-            public override int GetHashCode() => HashCode.Combine(dispatcher, action.Method, action.Target, delaySeconds);
+            public override int GetHashCode() => HashCode.Combine(dispatcher, action.Method, action.Target, delaySeconds, throwOnFailure);
         }
 
         static bool TryEnqueueBounded(Action action, bool delayed)

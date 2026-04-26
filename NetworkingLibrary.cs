@@ -40,9 +40,6 @@ namespace NetworkingLibrary
                 Service = null;
             }
 
-            if (Harmony == null)
-                return;
-
             try
             {
                 Harmony.UnpatchSelf();
@@ -93,7 +90,6 @@ namespace NetworkingLibrary
             var go = canonicalPoller.gameObject;
             go.name = pollerName;
             var foundExistingObject = pollers.Count > 0;
-            
             if (foundExistingObject && go.scene.IsValid() && go.scene.name != "DontDestroyOnLoad")
                 Logger.LogDebug($"Promoting existing poller object '{go.name}' from scene '{go.scene.name}' to DontDestroyOnLoad lifecycle.");
             DontDestroyOnLoad(go);

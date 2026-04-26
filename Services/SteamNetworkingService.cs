@@ -30,6 +30,8 @@ namespace NetworkingLibrary.Services
         const double QueueOverflowWarningCooldownSeconds = 2d;
         const string GetLocalSteam64DebugCooldownKey = "SteamNetworkingService.GetLocalSteam64";
         const string IsHostDebugCooldownKey = "SteamNetworkingService.IsHost";
+        const string ProcessIncomingFrameExceptionCooldownKey = "SteamNetworkingService.ReceiveMessages.ProcessIncomingFrameException";
+        const string ReceiveMessagesOuterExceptionCooldownKey = "SteamNetworkingService.ReceiveMessages.OuterException";
         readonly IntPtr[] inMessages = new IntPtr[MAX_IN_MESSAGES];
         private readonly object rpcLock = new object();
         private readonly object cryptoStateLock = new();
@@ -139,6 +141,7 @@ namespace NetworkingLibrary.Services
         private Func<CSteamID, string, string> getLobbyData = SteamMatchmaking.GetLobbyData;
         private Action<CSteamID, string, string> setLobbyMemberData = SteamMatchmaking.SetLobbyMemberData;
         private Func<CSteamID, CSteamID, string, string> getLobbyMemberData = SteamMatchmaking.GetLobbyMemberData;
+        private Func<int, IntPtr[], int, int> receiveMessagesOnChannel = SteamNetworkingMessages.ReceiveMessagesOnChannel;
 
         Callback<LobbyEnter_t>? cbLobbyEnter;
         Callback<LobbyCreated_t>? cbLobbyCreated;
@@ -1332,7 +1335,7 @@ namespace NetworkingLibrary.Services
         {
             try
             {
-                int count = SteamNetworkingMessages.ReceiveMessagesOnChannel(CHANNEL, this.inMessages, MAX_IN_MESSAGES);
+                int count = receiveMessagesOnChannel(CHANNEL, this.inMessages, MAX_IN_MESSAGES);
                 if (count <= 0) return;
 
                 for (int i = 0; i < count; i++)
@@ -1358,7 +1361,7 @@ namespace NetworkingLibrary.Services
                         }
                         catch (Exception ex)
                         {
-                            NetLog.Error(LogSource, $"ProcessIncomingFrame exception: {ex}");
+                            LogReceiveProcessIncomingFrameException(ex);
                         }
                         finally
                         {
@@ -1373,9 +1376,15 @@ namespace NetworkingLibrary.Services
             }
             catch (Exception ex)
             {
-                NetLog.Error(LogSource, $"ReceiveMessages outer exception: {ex}");
+                LogReceiveMessagesOuterException(ex);
             }
         }
+
+        static void LogReceiveProcessIncomingFrameException(Exception ex)
+            => NetLog.ErrorThrottled(LogSource, ProcessIncomingFrameExceptionCooldownKey, DebugLogCooldownSeconds, $"ProcessIncomingFrame exception: {ex}");
+
+        static void LogReceiveMessagesOuterException(Exception ex)
+            => NetLog.ErrorThrottled(LogSource, ReceiveMessagesOuterExceptionCooldownKey, DebugLogCooldownSeconds, $"ReceiveMessages outer exception: {ex}");
 
         void ProcessIncomingFrame(ReadOnlySpan<byte> frame, CSteamID sender)
         {

@@ -602,6 +602,54 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void ReceiveMessages_ProcessIncomingFrameException_UsesStableThrottleKey()
+    {
+        NetLog.ResetForTests();
+        try
+        {
+            InvokeStaticNonPublic(typeof(SteamNetworkingService), "LogReceiveProcessIncomingFrameException", new InvalidOperationException("boom"));
+            Assert.False(NetLog.TryEnterCooldown("SteamNetworkingService.ReceiveMessages.ProcessIncomingFrameException", 2d));
+        }
+        finally
+        {
+            NetLog.ResetForTests();
+        }
+    }
+
+    [Fact]
+    public void ReceiveMessages_OuterException_UsesStableThrottleKey()
+    {
+        NetLog.ResetForTests();
+        try
+        {
+            InvokeStaticNonPublic(typeof(SteamNetworkingService), "LogReceiveMessagesOuterException", new InvalidOperationException("boom"));
+            Assert.False(NetLog.TryEnterCooldown("SteamNetworkingService.ReceiveMessages.OuterException", 2d));
+        }
+        finally
+        {
+            NetLog.ResetForTests();
+        }
+    }
+
+    [Fact]
+    public void ReceiveMessages_ThrottledErrors_TrackSuppressedCountBetweenCooldownWindows()
+    {
+        NetLog.ResetForTests();
+        try
+        {
+            InvokeStaticNonPublic(typeof(SteamNetworkingService), "LogReceiveMessagesOuterException", new InvalidOperationException("first"));
+            InvokeStaticNonPublic(typeof(SteamNetworkingService), "LogReceiveMessagesOuterException", new InvalidOperationException("second"));
+
+            var suppressed = GetNetLogSuppressedCount("SteamNetworkingService.ReceiveMessages.OuterException");
+            Assert.Equal(1, suppressed);
+        }
+        finally
+        {
+            NetLog.ResetForTests();
+        }
+    }
+
+    [Fact]
     public void OnLobbyEnter_RefreshPlayerList_UsesConfiguredLobbyMemberDelegates()
     {
         var service = new SteamNetworkingService();
@@ -1126,6 +1174,22 @@ public class SteamNetworkingServiceLifecycleTests
         var method = typeof(SteamNetworkingService).GetMethod(methodName, flags, null, types, null)
             ?? typeof(SteamNetworkingService).GetMethod(methodName, flags)!;
         return method.Invoke(service, args);
+    }
+
+    static object? InvokeStaticNonPublic(Type type, string methodName, params object[] args)
+    {
+        var flags = BindingFlags.Static | BindingFlags.NonPublic;
+        var types = Array.ConvertAll(args, a => a.GetType());
+        var method = type.GetMethod(methodName, flags, null, types, null)
+            ?? type.GetMethod(methodName, flags)!;
+        return method.Invoke(null, args);
+    }
+
+    static int GetNetLogSuppressedCount(string key)
+    {
+        var field = typeof(NetLog).GetField("suppressedByKey", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var values = (Dictionary<string, int>)field.GetValue(null)!;
+        return values.TryGetValue(key, out var count) ? count : 0;
     }
 
     static void InvokeLobbyEnter(SteamNetworkingService service, ulong lobbyId)

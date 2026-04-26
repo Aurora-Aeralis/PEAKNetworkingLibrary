@@ -8,6 +8,7 @@ namespace NetworkingLibrary.Modules
     {
         static readonly object throttleLock = new();
         static readonly Dictionary<string, double> throttleByKey = new();
+        static readonly Dictionary<string, int> suppressedByKey = new();
 
         internal static Func<double> TimeProvider = () => DateTime.UtcNow.Subtract(DateTime.UnixEpoch).TotalSeconds;
 
@@ -34,6 +35,29 @@ namespace NetworkingLibrary.Modules
             Debug(source, message, includeOriginalMessageInFallback);
         }
 
+        public static void ErrorThrottled(string source, string key, double cooldownSeconds, string message, Func<double>? timeProvider = null)
+        {
+            var now = timeProvider?.Invoke() ?? TimeProvider();
+            var suppressed = 0;
+            lock (throttleLock)
+            {
+                if (throttleByKey.TryGetValue(key, out var lastAt) && now - lastAt < cooldownSeconds)
+                {
+                    suppressedByKey[key] = suppressedByKey.TryGetValue(key, out var currentSuppressed) ? currentSuppressed + 1 : 1;
+                    return;
+                }
+
+                throttleByKey[key] = now;
+                if (suppressedByKey.TryGetValue(key, out suppressed))
+                {
+                    suppressedByKey.Remove(key);
+                }
+            }
+
+            var suffix = suppressed > 0 ? $" Suppressed {suppressed} similar exceptions." : string.Empty;
+            Error(source, $"{message}{suffix}");
+        }
+
         static void Guarded(string source, string level, string message, Action write, bool fallbackAsError, bool includeOriginalMessage)
         {
             try { write(); }
@@ -48,7 +72,11 @@ namespace NetworkingLibrary.Modules
 
         internal static void ResetForTests()
         {
-            lock (throttleLock) throttleByKey.Clear();
+            lock (throttleLock)
+            {
+                throttleByKey.Clear();
+                suppressedByKey.Clear();
+            }
             TimeProvider = () => DateTime.UtcNow.Subtract(DateTime.UnixEpoch).TotalSeconds;
         }
     }

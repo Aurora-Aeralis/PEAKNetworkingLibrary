@@ -192,7 +192,6 @@ namespace NetworkingLibrary.Modules
             if (accepted || rejection == null) return;
 
             var message = FormatEnqueueRejectionMessage(rejection.Value);
-            EmitOverflowWarning(message);
             if (throwOnRejection) throw new InvalidOperationException(message);
         }
 
@@ -264,19 +263,19 @@ namespace NetworkingLibrary.Modules
                         {
                             coalescedEnqueueCount++;
                             rejection = EnqueueRejectionInfo.Create(delayed, behavior, queue.Count, maxDepth, "coalesced duplicate action");
-                            EmitOverflowWarning($"UnityMainThreadDispatcher queue depth limit ({maxDepth}) reached; coalescing duplicate {(delayed ? "delayed" : "immediate")} action.");
+                            EmitOverflowWarning(FormatEnqueueRejectionMessage(rejection.Value));
                             return false;
                         }
 
                         rejectedEnqueueCount++;
                         rejection = EnqueueRejectionInfo.Create(delayed, behavior, queue.Count, maxDepth, "coalesce fallback rejected non-duplicate action");
-                        EmitOverflowWarning($"UnityMainThreadDispatcher queue depth limit ({maxDepth}) reached; coalesce fallback rejected non-duplicate {(delayed ? "delayed" : "immediate")} action.");
+                        EmitOverflowWarning(FormatEnqueueRejectionMessage(rejection.Value));
                         return false;
                     case QueueOverflowBehavior.RejectNewWork:
                     default:
                         rejectedEnqueueCount++;
                         rejection = EnqueueRejectionInfo.Create(delayed, behavior, queue.Count, maxDepth, "rejected new action");
-                        EmitOverflowWarning($"UnityMainThreadDispatcher queue depth limit ({maxDepth}) reached; rejecting new {(delayed ? "delayed" : "immediate")} action.");
+                        EmitOverflowWarning(FormatEnqueueRejectionMessage(rejection.Value));
                         return false;
                 }
             }

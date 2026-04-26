@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Collections;
 using System.Reflection;
+using System.Collections.Concurrent;
 using BepInEx.Configuration;
 using BepInEx;
 
@@ -18,6 +19,8 @@ namespace NetworkingLibrary.Features
         const string PluginVersionInfo = "Tracks plugin release version.";
         const string DaModsFolderName = "DAa Mods";
         const string ConfigFileName = "config.cfg";
+        static readonly ConcurrentDictionary<Type, Lazy<MethodInfo?>> RemoveMethodCache = new();
+        static readonly ConcurrentDictionary<Type, Lazy<PropertyInfo?>> OrphanedEntriesPropertyCache = new();
 
         internal static ConfigEntry<T> BindConfig<T>(string Header, string Features, T Value, string? Info = "")
         {
@@ -57,7 +60,6 @@ namespace NetworkingLibrary.Features
 
             MigrateConfig(schemaVersionEntry, storedVersion, currentVersion, legacyVersion);
             schemaVersionEntry.Value = currentVersion;
-            ClearLegacyVersion(config);
             DropLegacyVersionFromConfig(config);
             config.Save();
         }
@@ -123,6 +125,43 @@ namespace NetworkingLibrary.Features
             return string.Empty;
         }
 
+        static void DropLegacyVersionFromConfig(ConfigFile config)
+        {
+            var legacyDefinition = new ConfigDefinition(VersionSection, LegacyVersionKey);
+            Exception? removeException = null;
+            var removeMethod = GetRemoveMethod(config);
+            var orphanedEntriesProperty = GetOrphanedEntriesProperty(config);
+            if (removeMethod == null && orphanedEntriesProperty == null)
+            {
+                ClearLegacyVersion(config);
+                return;
+            }
+
+            try
+            {
+                if (removeMethod != null)
+                {
+                    removeMethod.Invoke(config, new object[] { legacyDefinition });
+                    return;
+                }
+            }
+            catch (Exception exception)
+            {
+                removeException = exception;
+            }
+
+            try
+            {
+                var orphanedEntries = GetOrphanedEntries(config, orphanedEntriesProperty);
+                orphanedEntries?.Remove(legacyDefinition);
+            }
+            catch (Exception orphanedEntriesException)
+            {
+                var removeContext = removeException == null ? string.Empty : $" Remove invocation error: {removeException}.";
+                Net.Logger?.LogWarning($"Failed to remove legacy config key '{LegacyVersionKey}' during migration.{removeContext} OrphanedEntries fallback error: {orphanedEntriesException}");
+            }
+        }
+
         static void ClearLegacyVersion(ConfigFile config)
         {
             var configPath = config.ConfigFilePath;
@@ -144,46 +183,27 @@ namespace NetworkingLibrary.Features
                 File.WriteAllLines(configPath, lines);
         }
 
-
-        static void DropLegacyVersionFromConfig(ConfigFile config)
-        {
-            var legacyDefinition = new ConfigDefinition(VersionSection, LegacyVersionKey);
-            Exception? removeException = null;
-
-            try
-            {
-                var removeMethod = GetRemoveMethod(config);
-                if (removeMethod != null)
-                {
-                    removeMethod.Invoke(config, new object[] { legacyDefinition });
-                    return;
-                }
-            }
-            catch (Exception exception)
-            {
-                removeException = exception;
-            }
-
-            try
-            {
-                var orphanedEntries = GetOrphanedEntries(config);
-                orphanedEntries?.Remove(legacyDefinition);
-            }
-            catch (Exception orphanedEntriesException)
-            {
-                var removeContext = removeException == null ? string.Empty : $" Remove invocation error: {removeException}.";
-                Net.Logger?.LogWarning($"Failed to remove legacy config key '{LegacyVersionKey}' during migration.{removeContext} OrphanedEntries fallback error: {orphanedEntriesException}");
-            }
-        }
-
         internal static MethodInfo? GetRemoveMethod(ConfigFile config)
         {
-            return config.GetType().GetMethod("Remove", new[] { typeof(ConfigDefinition) });
+            var configType = config.GetType();
+            var removeMethod = RemoveMethodCache.GetOrAdd(
+                configType,
+                type => new Lazy<MethodInfo?>(() => type.GetMethod("Remove", new[] { typeof(ConfigDefinition) })));
+            return removeMethod.Value;
         }
 
-        internal static IDictionary? GetOrphanedEntries(ConfigFile config)
+        internal static PropertyInfo? GetOrphanedEntriesProperty(ConfigFile config)
         {
-            var orphanedEntriesProperty = config.GetType().GetProperty("OrphanedEntries", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            var configType = config.GetType();
+            var orphanedEntriesProperty = OrphanedEntriesPropertyCache.GetOrAdd(
+                configType,
+                type => new Lazy<PropertyInfo?>(() => type.GetProperty("OrphanedEntries", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)));
+            return orphanedEntriesProperty.Value;
+        }
+
+        internal static IDictionary? GetOrphanedEntries(ConfigFile config, PropertyInfo? orphanedEntriesProperty = null)
+        {
+            orphanedEntriesProperty ??= GetOrphanedEntriesProperty(config);
             return orphanedEntriesProperty?.GetValue(config) as IDictionary;
         }
 

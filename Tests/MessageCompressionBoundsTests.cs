@@ -120,7 +120,7 @@ public class MessageCompressionBoundsTests
         var compressed = source.CompressPayload();
 
         using var scopedMessage = new Message(31u, "compress", 1, strictPolicy);
-        var ex = Assert.Throws<InvalidDataException>(() => scopedMessage.DecompressPayload(compressed));
+        var ex = Assert.Throws<InvalidDataException>(() => scopedMessage.DecompressPayloadForCurrentPolicy(compressed));
         Assert.Contains($"max allowed size {strictPolicy.MaxLogicalSize}", ex.Message);
     }
 
@@ -134,7 +134,7 @@ public class MessageCompressionBoundsTests
         var compressed = source.CompressPayload();
 
         using var scopedMessage = new Message(41u, "compress", 1, policy);
-        var decompressed = scopedMessage.DecompressPayload(compressed);
+        var decompressed = scopedMessage.DecompressPayloadForCurrentPolicy(compressed);
         Assert.Equal(source.ToArray(), decompressed);
     }
 }

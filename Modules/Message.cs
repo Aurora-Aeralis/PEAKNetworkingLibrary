@@ -774,7 +774,7 @@ namespace NetworkingLibrary.Modules
             return ms.ToArray();
         }
 
-        public byte[] DecompressPayload(byte[] compressed, int maxOutputSize = -1)
+        public byte[] DecompressPayloadForCurrentPolicy(byte[] compressed, int maxOutputSize = -1)
         {
             if (maxOutputSize < 0) maxOutputSize = sizePolicy.MaxLogicalSize;
             return DecompressPayloadCore(compressed, maxOutputSize);

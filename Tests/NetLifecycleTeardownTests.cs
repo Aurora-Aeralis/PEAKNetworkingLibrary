@@ -80,7 +80,7 @@ public class NetLifecycleTeardownTests
     sealed class RetryService : INetworkingService
     {
         public bool IsInitialized { get; private set; }
-        public bool InLobby => false;
+        public bool InLobby { get; set; }
         public ulong HostSteamId64 => 0;
         public string HostIdString => string.Empty;
         public bool IsHost => false;
@@ -470,6 +470,37 @@ public class NetLifecycleTeardownTests
             Assert.Same(offline, GetService());
             Assert.All(candidates, candidate => Assert.Equal(1, candidate.ShutdownCallCount));
             Assert.Equal(0, offline.ShutdownCallCount);
+        }
+        finally
+        {
+            SetService(null);
+            Net.ResetNetworkingStartupHooks();
+        }
+    }
+
+    [Fact]
+    public void RetrySteamInitializationForStartupWindow_DoesNotReplaceService_WhenPreviousServiceIsInLobby()
+    {
+        var offline = new RetryService { InLobby = true };
+        offline.Initialize();
+        var steam = new RetryService();
+        SetService(offline);
+
+        Net.CreateDefaultNetworkingServiceWithReason = () => (steam, DefaultServiceSelectionReason.SteamReady);
+        var now = 0f;
+        Net.RealtimeSinceStartupProvider = () => now += 1f;
+        Net.WaitForSecondsRealtimeFactory = _ => null!;
+
+        try
+        {
+            var net = (Net)FormatterServices.GetUninitializedObject(typeof(Net));
+            var routine = InvokeRetrySteamInitializationForStartupWindow(net, 3f);
+            while (routine.MoveNext()) { }
+
+            Assert.Same(offline, GetService());
+            Assert.Equal(0, offline.ShutdownCallCount);
+            Assert.True(steam.InitializeCallCount > 0);
+            Assert.Equal(steam.InitializeCallCount, steam.ShutdownCallCount);
         }
         finally
         {

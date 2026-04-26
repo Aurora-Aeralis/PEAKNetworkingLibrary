@@ -302,6 +302,14 @@ namespace NetworkingLibrary
 
                         if (ReferenceEquals(Service, previousService))
                         {
+                            if (previousService.InLobby)
+                            {
+                                LogStartupRetryTransitionThrottled("Skipping Steam promotion during startup retry because the active service is currently in a lobby.");
+                                SafeShutdown(candidateService, "startup retry steam candidate while active lobby");
+                                delaySeconds = Mathf.Min(StartupRetryMaxDelaySeconds, delaySeconds * StartupRetryBackoffMultiplier);
+                                continue;
+                            }
+
                             ReplaceService(previousService, candidateService, "Steam became ready during startup retry window.");
                         }
                         else

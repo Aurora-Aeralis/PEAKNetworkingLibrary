@@ -153,6 +153,27 @@ public class FileManagerConfigMigrationTests
     }
 
     [Fact]
+    public void MigrateConfigIfNeeded_OrphanedEntriesUnavailable_UsesFileFallback()
+    {
+        using var scope = new TempConfigScope();
+        var seedConfig = new ConfigFile(scope.ConfigPath, true);
+        seedConfig.Bind("Version", "Current Version", string.Empty).Value = "1";
+        seedConfig.Save();
+
+        var config = new MissingLegacyOrphanedEntriesConfigFile(scope.ConfigPath, true);
+
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        var configText = File.ReadAllText(scope.ConfigPath);
+
+        Assert.Equal("1", schemaVersion);
+        Assert.Equal(1, config.RemoveCalls);
+        Assert.True(config.OrphanedEntriesAccesses > 0);
+        Assert.DoesNotContain("Current Version = 1", configText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void MigrateConfigIfNeeded_TotalCleanupFailure_LogsSingleWarning()
     {
         using var scope = new TempConfigScope();
@@ -336,6 +357,31 @@ public class FileManagerConfigMigrationTests
             {
                 OrphanedEntriesAccesses++;
                 throw new InvalidOperationException("Simulated OrphanedEntries reflection failure.");
+            }
+        }
+    }
+
+    sealed class MissingLegacyOrphanedEntriesConfigFile : ConfigFile
+    {
+        readonly IDictionary _orphanedEntries = new Hashtable();
+
+        internal int RemoveCalls { get; private set; }
+        internal int OrphanedEntriesAccesses { get; private set; }
+
+        internal MissingLegacyOrphanedEntriesConfigFile(string configPath, bool saveOnInit) : base(configPath, saveOnInit) { }
+
+        public new bool Remove(ConfigDefinition definition)
+        {
+            RemoveCalls++;
+            throw new InvalidOperationException("Simulated Remove reflection failure.");
+        }
+
+        public new IDictionary OrphanedEntries
+        {
+            get
+            {
+                OrphanedEntriesAccesses++;
+                return _orphanedEntries;
             }
         }
     }

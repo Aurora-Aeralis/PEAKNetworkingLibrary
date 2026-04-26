@@ -196,8 +196,13 @@ namespace NetworkingLibrary.Features
             try
             {
                 var orphanedEntries = GetOrphanedEntries(config, orphanedEntriesProperty);
-                orphanedEntries?.Remove(legacyDefinition);
-                return true;
+                if (orphanedEntries == null)
+                    return false;
+
+                var existedBeforeRemoval = orphanedEntries.Contains(legacyDefinition);
+                orphanedEntries.Remove(legacyDefinition);
+                var removed = existedBeforeRemoval && !orphanedEntries.Contains(legacyDefinition);
+                return removed;
             }
             catch (Exception ex)
             {

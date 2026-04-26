@@ -16,9 +16,11 @@ public class MessageWriteBoundsTests
         Assert.True(remaining > 0);
 
         message.WriteBytes(new byte[remaining]);
+        var lengthBeforeOverflowWrite = message.Length();
 
         var ex = Assert.Throws<InvalidDataException>(() => message.WriteBytes(new byte[1]));
         Assert.Contains("WriteBytes exceeds max message size", ex.Message);
+        Assert.Equal(lengthBeforeOverflowWrite, message.Length());
     }
 
     [Fact]
@@ -29,8 +31,10 @@ public class MessageWriteBoundsTests
         Assert.True(remaining > 0);
 
         message.WriteString(new string('a', remaining));
+        var lengthBeforeOverflowWrite = message.Length();
 
         var ex = Assert.Throws<InvalidDataException>(() => message.WriteString("b"));
         Assert.Contains("WriteString exceeds max message size", ex.Message);
+        Assert.Equal(lengthBeforeOverflowWrite, message.Length());
     }
 }

@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using System.Reflection;
 using NetworkingLibrary.Modules;
 #if !UNITY_EDITOR
@@ -111,6 +110,8 @@ namespace NetworkingLibrary.Services
         {
             const BindingFlags AnyStaticVisibility = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
             var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            Type? fallbackCandidate = null;
+            var hasAmbiguousFallbackCandidates = false;
             for (var index = 0; index < assemblies.Length; index++)
             {
                 var assembly = assemblies[index];
@@ -123,7 +124,7 @@ namespace NetworkingLibrary.Services
                 }
                 catch (ReflectionTypeLoadException ex)
                 {
-                    types = ex.Types.Where(type => type != null).ToArray()!;
+                    types = GetLoadableTypes(ex);
                 }
                 catch
                 {
@@ -141,10 +142,40 @@ namespace NetworkingLibrary.Services
                     if (IsPreferredSteamManagerType(candidate))
                         return candidate;
 
+                    if (fallbackCandidate == null)
+                    {
+                        fallbackCandidate = candidate;
+                        continue;
+                    }
+
+                    if (!ReferenceEquals(fallbackCandidate, candidate))
+                        hasAmbiguousFallbackCandidates = true;
+
                 }
             }
 
-            return null;
+            return hasAmbiguousFallbackCandidates ? null : fallbackCandidate;
+        }
+
+        static Type[] GetLoadableTypes(ReflectionTypeLoadException exception)
+        {
+            var source = exception.Types;
+            var count = 0;
+            for (var i = 0; i < source.Length; i++)
+            {
+                if (source[i] != null) count++;
+            }
+
+            if (count == 0) return Array.Empty<Type>();
+            var loadable = new Type[count];
+            var index = 0;
+            for (var i = 0; i < source.Length; i++)
+            {
+                var type = source[i];
+                if (type == null) continue;
+                loadable[index++] = type;
+            }
+            return loadable;
         }
 
         static bool IsPreferredSteamManagerType(Type steamManagerType)

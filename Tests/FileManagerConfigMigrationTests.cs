@@ -236,6 +236,19 @@ public class FileManagerConfigMigrationTests
         Assert.True(IsLegacyVersionClearedOrRemoved(configText));
     }
 
+    [Fact]
+    public void MigrateConfigIfNeeded_FirstRunWithoutStoredVersion_DoesNotWarn()
+    {
+        using var scope = new TempConfigScope();
+        File.WriteAllText(scope.ConfigPath, string.Empty);
+
+        var config = new ConfigFile(scope.ConfigPath, true);
+        using var loggerScope = new NetLoggerScope();
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        Assert.Empty(loggerScope.Warnings);
+    }
+
     static bool IsLegacyVersionClearedOrRemoved(string configText)
     {
         var inVersionSection = false;

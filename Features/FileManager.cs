@@ -51,14 +51,17 @@ namespace NetworkingLibrary.Features
 
         internal static void MigrateConfigIfNeeded(ConfigFile config, string currentVersion)
         {
+            var sourceMetadata = ReadVersionMetadata(config);
             var schemaVersionEntry = BindSchemaVersion(config, string.Empty);
-            var legacyVersion = ReadLegacyVersion(config);
-            var storedVersion = GetStoredVersion(schemaVersionEntry.Value, legacyVersion);
-            var needsNormalization = string.IsNullOrWhiteSpace(schemaVersionEntry.Value) && !string.IsNullOrWhiteSpace(legacyVersion);
+            var schemaVersion = sourceMetadata.HasSchemaVersion ? sourceMetadata.SchemaVersion : schemaVersionEntry.Value;
+            var legacyVersion = sourceMetadata.HasLegacyVersion ? sourceMetadata.LegacyVersion : string.Empty;
+            var storedVersion = GetStoredVersion(schemaVersion, legacyVersion);
+            var needsNormalization = string.IsNullOrWhiteSpace(schemaVersion) && !string.IsNullOrWhiteSpace(legacyVersion);
+            var isFreshInstall = !sourceMetadata.ConfigExists || (!sourceMetadata.HasSchemaVersion && !sourceMetadata.HasLegacyVersion);
             if (storedVersion == currentVersion && !needsNormalization)
                 return;
 
-            MigrateConfig(schemaVersionEntry, storedVersion, currentVersion, legacyVersion);
+            MigrateConfig(schemaVersionEntry, storedVersion, currentVersion, legacyVersion, isFreshInstall);
             schemaVersionEntry.Value = currentVersion;
             DropLegacyVersionFromConfig(config);
             config.Save();
@@ -71,7 +74,7 @@ namespace NetworkingLibrary.Features
             return legacyVersion;
         }
 
-        static void MigrateConfig(ConfigEntry<string> schemaVersionEntry, string previousVersion, string currentVersion, string legacyVersion)
+        static void MigrateConfig(ConfigEntry<string> schemaVersionEntry, string previousVersion, string currentVersion, string legacyVersion, bool isFreshInstall)
         {
             if (!TryParseSchemaVersion(currentVersion, out var targetVersion))
                 throw new InvalidOperationException($"Current config schema version '{currentVersion}' is not a valid schema identifier.");
@@ -81,7 +84,8 @@ namespace NetworkingLibrary.Features
             if (!sourceVersionValid || startVersion < 0)
             {
                 startVersion = 0;
-                Net.Logger?.LogWarning($"Invalid source config schema version '{sourceVersion}'. Defaulting migration start version to 0.");
+                if (!isFreshInstall)
+                    Net.Logger?.LogWarning($"Invalid source config schema version '{sourceVersion}'. Defaulting migration start version to 0.");
             }
 
             for (var schemaVersion = startVersion; schemaVersion < targetVersion; schemaVersion++)
@@ -116,13 +120,17 @@ namespace NetworkingLibrary.Features
             return config.Bind(VersionSection, VersionKey, value, SchemaVersionInfo);
         }
 
-        static string ReadLegacyVersion(ConfigFile config)
+        static VersionSourceMetadata ReadVersionMetadata(ConfigFile config)
         {
             var configPath = config.ConfigFilePath;
             if (!File.Exists(configPath))
-                return string.Empty;
+                return new VersionSourceMetadata(false, false, string.Empty, false, string.Empty);
 
             var inVersionSection = false;
+            var schemaVersion = string.Empty;
+            var legacyVersion = string.Empty;
+            var hasSchemaVersion = false;
+            var hasLegacyVersion = false;
             foreach (var line in File.ReadLines(configPath))
             {
                 var trimmed = line.Trim();
@@ -144,14 +152,25 @@ namespace NetworkingLibrary.Features
                     continue;
 
                 var key = line[..separatorIndex].Trim();
-                if (!key.Equals(LegacyVersionKey, StringComparison.Ordinal))
+                var value = line[(separatorIndex + 1)..].Trim();
+                if (key.Equals(VersionKey, StringComparison.Ordinal))
+                {
+                    hasSchemaVersion = true;
+                    schemaVersion = value;
                     continue;
+                }
 
-                return line[(separatorIndex + 1)..].Trim();
+                if (key.Equals(LegacyVersionKey, StringComparison.Ordinal))
+                {
+                    hasLegacyVersion = true;
+                    legacyVersion = value;
+                }
             }
 
-            return string.Empty;
+            return new VersionSourceMetadata(true, hasSchemaVersion, schemaVersion, hasLegacyVersion, legacyVersion);
         }
+
+        readonly record struct VersionSourceMetadata(bool ConfigExists, bool HasSchemaVersion, string SchemaVersion, bool HasLegacyVersion, string LegacyVersion);
 
         static void DropLegacyVersionFromConfig(ConfigFile config)
         {

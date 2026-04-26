@@ -734,33 +734,39 @@ namespace NetworkingLibrary.Services
 
             if (param.m_ulSteamIDLobby == param.m_ulSteamIDMember)
             {
-                var changed = new List<string>();
+                List<string>? changed = null;
                 foreach (var key in lobbyDataKeys)
                 {
-                    var data = SteamMatchmaking.GetLobbyData(Lobby, key);
+                    var data = getLobbyData(Lobby, key);
                     if (!lastLobbyData.TryGetValue(key, out var prev) || prev != data)
                     {
+                        changed ??= new List<string>();
                         changed.Add(key);
                         lastLobbyData[key] = data;
                     }
                 }
-                if (changed.Count > 0) LobbyDataChanged?.Invoke(changed.ToArray());
+                if (changed != null) LobbyDataChanged?.Invoke(changed.ToArray());
             }
             else
             {
                 var player = new CSteamID(param.m_ulSteamIDMember);
-                if (!lastPlayerData.ContainsKey(player)) lastPlayerData[player] = new Dictionary<string, string>();
-                var changed = new List<string>();
+                if (!lastPlayerData.TryGetValue(player, out var playerDataCache))
+                {
+                    playerDataCache = new Dictionary<string, string>();
+                    lastPlayerData[player] = playerDataCache;
+                }
+                List<string>? changed = null;
                 foreach (var key in playerDataKeys)
                 {
-                    var data = SteamMatchmaking.GetLobbyMemberData(Lobby, player, key);
-                    if (!lastPlayerData[player].TryGetValue(key, out var prev) || prev != data)
+                    var data = getLobbyMemberData(Lobby, player, key);
+                    if (!playerDataCache.TryGetValue(key, out var prev) || prev != data)
                     {
+                        changed ??= new List<string>();
                         changed.Add(key);
-                        lastPlayerData[player][key] = data;
+                        playerDataCache[key] = data;
                     }
                 }
-                if (changed.Count > 0) PlayerDataChanged?.Invoke(player.m_SteamID, changed.ToArray());
+                if (changed != null) PlayerDataChanged?.Invoke(player.m_SteamID, changed.ToArray());
             }
         }
 

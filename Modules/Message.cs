@@ -492,6 +492,7 @@ namespace NetworkingLibrary.Modules
             readCasters[typeof(int[])] = (m) => {
                 int len = m.ReadCollectionLength(nameof(Int32[]));
                 if (len == 0) return Array.Empty<int>();
+                m.ValidateCollectionLengthForMaterialization(nameof(Int32[]), len, typeof(int));
                 var a = new int[len];
                 for (int i = 0; i < len; i++) a[i] = m.ReadInt();
                 return a;
@@ -532,6 +533,31 @@ namespace NetworkingLibrary.Modules
                 throw new InvalidDataException($"{opName} length exceeds max {sizePolicy.MaxLogicalSize}");
             }
             return len;
+        }
+
+        private int ResolveCollectionElementLowerBound(Type elementType)
+        {
+            var nt = Nullable.GetUnderlyingType(elementType);
+            if (nt != null) return 1;
+            if (!elementType.IsValueType) return 1;
+            if (!readCasters.TryGetValue(elementType, out _)) return 1;
+
+            if (elementType == typeof(byte) || elementType == typeof(bool)) return 1;
+            if (elementType == typeof(int) || elementType == typeof(uint) || elementType == typeof(float)) return 4;
+            if (elementType == typeof(long) || elementType == typeof(ulong) || elementType == typeof(CSteamID)) return 8;
+            if (elementType == typeof(Vector3)) return 12;
+            if (elementType == typeof(Quaternion)) return 16;
+            return 1;
+        }
+
+        private void ValidateCollectionLengthForMaterialization(string opName, int length, Type elementType)
+        {
+            var lowerBound = ResolveCollectionElementLowerBound(elementType);
+            var maxCount = sizePolicy.MaxLogicalSize / lowerBound;
+            if (length > maxCount)
+            {
+                throw new InvalidDataException($"{opName} length exceeds max materializable element count {maxCount} for element type {elementType.FullName}");
+            }
         }
 
         private static bool IsConcreteConstructible(Type type)
@@ -727,6 +753,7 @@ namespace NetworkingLibrary.Modules
             {
                 var elemType = type.GetElementType()!;
                 int len = ReadCollectionLength(type.FullName ?? nameof(Array));
+                ValidateCollectionLengthForMaterialization(type.FullName ?? nameof(Array), len, elemType);
                 var arr = Array.CreateInstance(elemType, len);
                 for (int i = 0; i < len; i++)
                 {
@@ -743,6 +770,7 @@ namespace NetworkingLibrary.Modules
                 {
                     var elemType = type.GetGenericArguments()[0];
                     int len = ReadCollectionLength(type.FullName ?? "List");
+                    ValidateCollectionLengthForMaterialization(type.FullName ?? "List", len, elemType);
                     var listType = typeof(List<>).MakeGenericType(elemType);
                     var list = (IList)Activator.CreateInstance(listType)!;
                     for (int i = 0; i < len; i++)
@@ -758,6 +786,7 @@ namespace NetworkingLibrary.Modules
                 if (elemType != null && isListLike)
                 {
                     int len = ReadCollectionLength(type.FullName ?? "List");
+                    ValidateCollectionLengthForMaterialization(type.FullName ?? "List", len, elemType);
                     var tempListType = typeof(List<>).MakeGenericType(elemType);
                     var tempList = (IList)Activator.CreateInstance(tempListType)!;
                     for (int i = 0; i < len; i++)

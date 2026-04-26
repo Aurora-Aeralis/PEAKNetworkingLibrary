@@ -288,9 +288,10 @@ namespace NetworkingLibrary.Modules
         {
             ThrowIfDisposed();
             if (v == null) throw new ArgumentNullException(nameof(v));
-            WriteInt(v.Length);
-            EnsureCanAppend(v.Length, nameof(WriteBytes));
-            buffer.AddRange(v);
+            var payloadLength = v.Length;
+            EnsureCanAppend(sizeof(int) + payloadLength, nameof(WriteBytes));
+            WriteInt32LE(payloadLength);
+            if (payloadLength > 0) buffer.AddRange(v);
             readableBufferDirty = true;
             return this;
         }
@@ -303,10 +304,11 @@ namespace NetworkingLibrary.Modules
         public Message WriteString(string v)
         {
             ThrowIfDisposed();
-            var bytes = Encoding.UTF8.GetBytes(v ?? "");
-            WriteInt(bytes.Length);
-            EnsureCanAppend(bytes.Length, nameof(WriteString));
-            buffer.AddRange(bytes);
+            var value = v ?? "";
+            var payloadLength = Encoding.UTF8.GetByteCount(value);
+            EnsureCanAppend(sizeof(int) + payloadLength, nameof(WriteString));
+            WriteInt32LE(payloadLength);
+            if (payloadLength > 0) buffer.AddRange(Encoding.UTF8.GetBytes(value));
             readableBufferDirty = true;
             return this;
         }

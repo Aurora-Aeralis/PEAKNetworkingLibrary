@@ -208,16 +208,28 @@ namespace NetworkingLibrary.Modules
         }
 
         /// <summary>
-        /// Resets the message buffers when <paramref name="zero"/> is <see langword="true"/>.
+        /// Resets message state by clearing the logical payload and rewinding cursors.
         /// </summary>
-        public void Reset(bool zero = true)
+        public void Reset()
         {
             ThrowIfDisposed();
-            if (!zero) return;
-            buffer.Clear();
-            readableBuffer = Array.Empty<byte>();
-            readableBufferDirty = true;
-            readPos = 0;
+            ResetState(zeroBuffer: false);
+        }
+
+        /// <summary>
+        /// Resets message state and overwrites buffered bytes before clearing.
+        /// </summary>
+        public void ClearAndZero()
+        {
+            ThrowIfDisposed();
+            ResetState(zeroBuffer: true);
+        }
+
+        [Obsolete("Use Reset() to clear logical message state, or ClearAndZero() when explicit byte zeroing is required.", false)]
+        public void Reset(bool zero)
+        {
+            ThrowIfDisposed();
+            ResetState(zeroBuffer: zero);
         }
 
         #region Write helpers
@@ -228,6 +240,20 @@ namespace NetworkingLibrary.Modules
             {
                 throw new InvalidDataException($"{opName} exceeds max message size {sizePolicy.MaxLogicalSize}");
             }
+        }
+
+        private void ResetState(bool zeroBuffer)
+        {
+            if (zeroBuffer)
+            {
+                for (var index = 0; index < buffer.Count; index++) buffer[index] = 0;
+                Array.Clear(readableBuffer, 0, readableBuffer.Length);
+            }
+
+            buffer.Clear();
+            readableBuffer = Array.Empty<byte>();
+            readableBufferDirty = true;
+            readPos = 0;
         }
 
         private void AppendSpan(ReadOnlySpan<byte> bytes)

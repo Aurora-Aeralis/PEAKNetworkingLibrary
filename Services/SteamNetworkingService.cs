@@ -190,7 +190,7 @@ namespace NetworkingLibrary.Services
         const byte HMAC_FLAG = 0x4;
         const byte SIGN_FLAG = 0x8;
         const byte ACK_FLAG = 0x10;
-        const int FRAME_HEADER_SIZE = 25; // flags[1] + msgId[8] + seq[8] + total[4] + index[4]
+        const int FRAME_HEADER_SIZE = 25;
 
         RSACryptoServiceProvider? LocalRsa;
         private Func<RSACryptoServiceProvider> localRsaFactory = () => new RSACryptoServiceProvider(2048);
@@ -742,9 +742,6 @@ namespace NetworkingLibrary.Services
                     if (!rpcs.ContainsKey(modId)) rpcs[modId] = new Dictionary<string, List<MessageHandler>>();
                     if (!rpcs[modId].ContainsKey(method.Name)) rpcs[modId][method.Name] = new List<MessageHandler>();
                     var handlers = rpcs[modId][method.Name];
-                    // Preserve historical instance registration fan-out semantics: repeated
-                    // RegisterNetworkObject calls for the same receiver should add another slot.
-                    // Only static/type registrations are deduplicated.
                     var alreadyRegisteredStatic = instance == null
                         && handlers.Any(existing => existing.Mask == mask && existing.Method == method);
                     if (alreadyRegisteredStatic) continue;
@@ -1285,9 +1282,6 @@ namespace NetworkingLibrary.Services
 
         void ProcessIncomingFrame(byte[] frame, CSteamID sender)
         {
-            // Expected frame layout mirrors BuildFramedBytesWithMeta.
-            // MAC verification always runs against canonical scope [flags..payload/signature], before any payload mutation/stripping.
-
             if (frame.Length < FRAME_HEADER_SIZE) return;
             int flags = frame[0];
             bool compressed = (flags & COMPRESSED_FLAG) != 0;
@@ -1626,8 +1620,6 @@ namespace NetworkingLibrary.Services
         {
             var ackMsg = new Message(0u, "NETWORK_INTERNAL_ACK", 0);
             ackMsg.WriteULong(msgId);
-            // Transport ACK frames reliably so a dropped ACK does not stall sender-side retransmit logic.
-            // We explicitly clear ACK_FLAG so ACK packets never request ACKs themselves.
             var framed = BuildFramedBytesWithMeta(ackMsg, 0, ReliableType.Reliable);
             if ((framed[0] & ACK_FLAG) != 0)
             {

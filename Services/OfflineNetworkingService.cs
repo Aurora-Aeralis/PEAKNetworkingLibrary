@@ -32,7 +32,7 @@ namespace NetworkingLibrary.Services
         readonly HashSet<string> lobbyKeys = new();
         readonly HashSet<string> playerKeys = new();
 
-        readonly SlidingWindowRateLimiter rateLimiter = new(100, TimeSpan.FromSeconds(1));
+        SlidingWindowRateLimiter rateLimiter = CreateRateLimiter();
 
         readonly Dictionary<ulong, byte[]> perPeerSymmetricKey = new();
         byte[]? globalSharedSecret;
@@ -109,6 +109,7 @@ namespace NetworkingLibrary.Services
         public void Initialize()
         {
             if (IsInitialized) return;
+            rateLimiter = CreateRateLimiter();
             EnsureLocalPeerKey();
             IsInitialized = true;
         }
@@ -125,9 +126,11 @@ namespace NetworkingLibrary.Services
             perPlayerData.Clear();
             ClearPerPeerSymmetricKeys();
             ClearGlobalSharedSecret();
+            lock (rpcLock) rpcs.Clear();
             modSigners.Clear();
             modPublicKeys.Clear();
             globalHmac?.Dispose(); globalHmac = null;
+            rateLimiter = CreateRateLimiter();
         }
 
         public void CreateLobby(int maxPlayers = 8)
@@ -197,6 +200,7 @@ namespace NetworkingLibrary.Services
             ClearPerPeerSymmetricKeys();
             ClearGlobalSharedSecret();
             globalHmac?.Dispose(); globalHmac = null;
+            rateLimiter = CreateRateLimiter();
             LobbyLeft?.Invoke();
             offlineIsHost = false;
         }
@@ -789,6 +793,8 @@ namespace NetworkingLibrary.Services
             public SlidingWindowRateLimiter(int limit, TimeSpan window) { this.limit = limit; this.window = window; }
             public bool IncomingAllowed() { var now = DateTime.UtcNow; while (q.Count > 0 && now - q.Peek() > window) q.Dequeue(); if (q.Count >= limit) return false; q.Enqueue(now); return true; }
         }
+
+        static SlidingWindowRateLimiter CreateRateLimiter() => new(100, TimeSpan.FromSeconds(1));
 
         class MessageHandler { public object Target = null!; public MethodInfo Method = null!; public ParameterInfo[] Parameters = null!; public bool TakesInfo; public int Mask; }
     }

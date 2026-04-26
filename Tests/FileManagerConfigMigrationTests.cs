@@ -93,7 +93,7 @@ public class FileManagerConfigMigrationTests
     [Fact]
     public void TryParseSchemaVersion_LocalizedDigitsAndGrouping_ReturnsFalse()
     {
-        var arabicDigits = 123.ToString(new CultureInfo("ar-EG"));
+        var arabicDigits = "\u0661\u0662\u0663";
         var groupedValue = 1000.ToString("N0", new CultureInfo("de-DE"));
 
         Assert.False(TryParseSchemaVersion(arabicDigits, out _));

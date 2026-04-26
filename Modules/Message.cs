@@ -31,9 +31,40 @@ namespace NetworkingLibrary.Modules
         public const int DefaultMaxSize = 64 * 1024;
         public const int MinMaxSize = 1024;
         public const int MaxMaxSize = int.MaxValue / 16;
-        public static readonly MessageSizePolicy DefaultSizePolicy = new(DefaultMaxSize);
-        public static int MaxSize => DefaultSizePolicy.MaxSize;
-        public static int MaxLogicalSize => DefaultSizePolicy.MaxLogicalSize;
+        private static readonly object DefaultSizePolicyLock = new();
+        public static int MaxSize = DefaultMaxSize;
+        public static int MaxLogicalSize => checked(MaxSize * 16);
+        public static MessageSizePolicy DefaultSizePolicy { get; private set; } = new(DefaultMaxSize);
+
+        public static void SetMaxSize(int bytes)
+        {
+            ValidateMaxSize(bytes);
+            lock (DefaultSizePolicyLock)
+            {
+                MaxSize = bytes;
+                DefaultSizePolicy = new MessageSizePolicy(bytes);
+            }
+        }
+
+        private static MessageSizePolicy ResolveDefaultSizePolicy()
+        {
+            var current = DefaultSizePolicy;
+            if (current.MaxSize == MaxSize)
+            {
+                return current;
+            }
+
+            lock (DefaultSizePolicyLock)
+            {
+                if (DefaultSizePolicy.MaxSize != MaxSize)
+                {
+                    ValidateMaxSize(MaxSize);
+                    DefaultSizePolicy = new MessageSizePolicy(MaxSize);
+                }
+
+                return DefaultSizePolicy;
+            }
+        }
 
         public static void ValidateMaxSize(int bytes)
         {
@@ -69,7 +100,7 @@ namespace NetworkingLibrary.Modules
 
         public Message(uint modId, string methodName, int mask, string? overloadKey, MessageSizePolicy? sizePolicy)
         {
-            this.sizePolicy = sizePolicy ?? DefaultSizePolicy;
+            this.sizePolicy = sizePolicy ?? ResolveDefaultSizePolicy();
             ProtocolVersion = overloadKey == null ? (byte)2 : PROTOCOL_VERSION;
             ModID = modId;
             MethodName = methodName;
@@ -93,7 +124,7 @@ namespace NetworkingLibrary.Modules
 
         public Message(byte[] data, MessageSizePolicy? sizePolicy)
         {
-            this.sizePolicy = sizePolicy ?? DefaultSizePolicy;
+            this.sizePolicy = sizePolicy ?? ResolveDefaultSizePolicy();
             SetBytes(data);
             ProtocolVersion = ReadByte();
             if (ProtocolVersion < 1 || ProtocolVersion > PROTOCOL_VERSION)

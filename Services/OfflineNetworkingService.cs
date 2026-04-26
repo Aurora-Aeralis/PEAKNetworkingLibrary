@@ -290,15 +290,16 @@ namespace NetworkingLibrary.Services
 
             EnsureLocalPeerKey();
             InLobby = true;
-            if (lobbySteamId64 != LocalSteamId)
-                LogWarning($"Offline single-peer host simulation uses local peer {LocalSteamId} as host identity; lobby id {lobbySteamId64} is compatibility-only.");
-            HostSteamId64 = LocalSteamId;
+            var requestedHostSteamId = lobbySteamId64 == 0UL || lobbySteamId64 == LocalSteamId ? LocalSteamId : lobbySteamId64;
+            if (requestedHostSteamId != LocalSteamId)
+                LogWarning($"Offline mode remains single-peer loopback; simulating remote host identity {requestedHostSteamId} for compatibility and role semantics.");
+            HostSteamId64 = requestedHostSteamId;
             lobbyData.Clear();
             perPlayerData.Clear();
             perPlayerData[LocalSteamId] = new Dictionary<string, string>();
             LobbyEntered?.Invoke();
             PlayerEntered?.Invoke(LocalSteamId);
-            offlineIsHost = true;
+            offlineIsHost = HostSteamId64 == LocalSteamId;
         }
 
         public void LeaveLobby()

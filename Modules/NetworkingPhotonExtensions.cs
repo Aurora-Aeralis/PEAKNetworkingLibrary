@@ -152,25 +152,27 @@ namespace NetworkingLibrary.Modules
 
             switch (raw)
             {
-                case ulong u when u > 0:
+                case ulong u when IsPlausibleSteam64(u):
                     steamId = u;
                     return true;
-                case long l when l > 0:
+                case long l when l > 0 && IsPlausibleSteam64((ulong)l):
                     steamId = (ulong)l;
                     return true;
-                case uint ui when ui > 0:
+                case uint ui when IsPlausibleSteam64(ui):
                     steamId = ui;
                     return true;
-                case int i when i > 0:
+                case int i when i > 0 && IsPlausibleSteam64((ulong)i):
                     steamId = (ulong)i;
                     return true;
-                case string s when !string.IsNullOrWhiteSpace(s) && ulong.TryParse(s, out var parsed) && parsed > 0:
+                case string s when !string.IsNullOrWhiteSpace(s) && ulong.TryParse(s, out var parsed) && IsPlausibleSteam64(parsed):
                     steamId = parsed;
                     return true;
                 default:
                     return false;
             }
         }
+
+        static bool IsPlausibleSteam64(ulong value) => value >= 76561197960265728UL;
 
         static void LogWarning(string message)
         {

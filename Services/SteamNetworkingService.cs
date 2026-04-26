@@ -24,7 +24,10 @@ namespace NetworkingLibrary.Services
         const string LogSource = "SteamNetworkingService";
         const int CHANNEL = 120;
         const int MAX_IN_MESSAGES = 500;
+        const int MAX_NORMAL_QUEUE_DEPTH = 256;
+        const int MAX_LOW_QUEUE_DEPTH = 128;
         const double DebugLogCooldownSeconds = 2d;
+        const double QueueOverflowWarningCooldownSeconds = 2d;
         readonly IntPtr[] inMessages = new IntPtr[MAX_IN_MESSAGES];
         private readonly object rpcLock = new object();
         private readonly object cryptoStateLock = new();
@@ -1027,6 +1030,17 @@ namespace NetworkingLibrary.Services
             lock (queueLock)
             {
                 var q = p == Priority.Normal ? normalQueue : lowQueue;
+                var maxDepth = p == Priority.Normal ? MAX_NORMAL_QUEUE_DEPTH : MAX_LOW_QUEUE_DEPTH;
+                if (q.Count >= maxDepth)
+                {
+                    q.Dequeue();
+                    var queueName = p == Priority.Normal ? nameof(normalQueue) : nameof(lowQueue);
+                    var key = $"EnqueueOrSend.Overflow.{queueName}";
+                    if (NetLog.TryEnterCooldown(key, QueueOverflowWarningCooldownSeconds))
+                    {
+                        NetLog.Warning(LogSource, $"Outbound {queueName} overflow (max={maxDepth}), dropped oldest message.");
+                    }
+                }
                 q.Enqueue(new QueuedSend { Framed = framed, Target = target, Reliable = reliable, Enqueued = DateTime.UtcNow });
             }
         }

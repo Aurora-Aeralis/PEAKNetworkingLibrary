@@ -249,7 +249,6 @@ namespace NetworkingLibrary.Modules
                 catch (Exception)
                 {
                     NotifyDelayedEnqueueRejected(CreateDelayedDispatchUnavailableRejection("dispatcher unavailable during delayed enqueue dispatch"));
-                    throw;
                 }
             }
 

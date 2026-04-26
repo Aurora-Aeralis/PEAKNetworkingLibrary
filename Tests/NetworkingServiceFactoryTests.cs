@@ -48,6 +48,11 @@ public class NetworkingServiceFactoryTests
         public static bool Initialized;
     }
 
+    sealed class ThrowingInitializedSteamManagerProbe
+    {
+        public static bool Initialized => throw new InvalidOperationException("bad probe");
+    }
+
     sealed class FakeService : INetworkingService
     {
         public bool IsInitialized => false;
@@ -298,6 +303,31 @@ public class NetworkingServiceFactoryTests
             SteamManager.Initialized = false;
             NetworkingLibrary.Tests.OtherPlugin.SteamManager.Initialized = false;
             NetworkingServiceFactory.ResetTestHooks();
+        }
+    }
+
+    [Fact]
+    public void TryReadSteamManagerInitialized_WhenCandidateProbeThrows_ContinuesToNextCandidate()
+    {
+        NetworkingServiceFactory.ResolveType = name =>
+        {
+            if (name == "pworld.Scripts.SteamManager, Assembly-CSharp") return typeof(ThrowingInitializedSteamManagerProbe);
+            if (name == "SteamManager, Assembly-CSharp") return typeof(SteamManager);
+            return null;
+        };
+        SteamManager.Initialized = true;
+
+        try
+        {
+            var read = InvokeTryReadSteamManagerInitialized(out var isInitialized);
+            Assert.True(read);
+            Assert.True(isInitialized);
+        }
+        finally
+        {
+            SteamManager.Initialized = false;
+            NetworkingServiceFactory.ResetTestHooks();
+            NetLog.ResetForTests();
         }
     }
 

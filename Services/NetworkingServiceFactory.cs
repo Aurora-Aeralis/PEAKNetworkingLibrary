@@ -21,6 +21,12 @@ namespace NetworkingLibrary.Services
     {
         const string LogSource = "NetworkingServiceFactory";
         const float ProbeDebugLogCooldownSeconds = 2f;
+        static readonly string[] steamManagerTypeCandidates =
+        {
+            "pworld.Scripts.SteamManager, Assembly-CSharp",
+            "SteamManager, Assembly-CSharp",
+            "SteamManager"
+        };
 
 #if !UNITY_EDITOR
         internal static Func<bool> IsSteamClientRunning = () => SteamAPI.IsSteamRunning();
@@ -101,21 +107,15 @@ namespace NetworkingLibrary.Services
 
             try
             {
-                var candidateTypeNames = new[]
-                {
-                    "pworld.Scripts.SteamManager, Assembly-CSharp",
-                    "SteamManager, Assembly-CSharp",
-                    "SteamManager"
-                };
-                foreach (var candidateTypeName in candidateTypeNames)
+                foreach (var candidateTypeName in steamManagerTypeCandidates)
                 {
                     var steamManagerType = ResolveType(candidateTypeName);
                     if (steamManagerType == null) continue;
-                    if (TryReadInitializedFromType(steamManagerType, out isInitialized)) return true;
+                    if (TryReadInitializedSafely(steamManagerType, out isInitialized)) return true;
                 }
 
                 var loadedSteamManagerType = ResolveLoadedSteamManagerType();
-                if (loadedSteamManagerType != null && TryReadInitializedFromType(loadedSteamManagerType, out isInitialized))
+                if (loadedSteamManagerType != null && TryReadInitializedSafely(loadedSteamManagerType, out isInitialized))
                     return true;
 
                 return false;
@@ -123,6 +123,21 @@ namespace NetworkingLibrary.Services
             catch (Exception ex)
             {
                 NetLog.DebugThrottled(LogSource, "NetworkingServiceFactory.TryReadSteamManagerInitialized", ProbeDebugLogCooldownSeconds, $"TryReadSteamManagerInitialized reflection probe failed: {ex.GetType().Name}: {ex.Message}", () => UnscaledTimeProvider(), includeOriginalMessageInFallback: true);
+                return false;
+            }
+        }
+
+        static bool TryReadInitializedSafely(Type steamManagerType, out bool isInitialized)
+        {
+            isInitialized = false;
+
+            try
+            {
+                return TryReadInitializedFromType(steamManagerType, out isInitialized);
+            }
+            catch (Exception ex)
+            {
+                NetLog.DebugThrottled(LogSource, "NetworkingServiceFactory.TryReadInitializedSafely", ProbeDebugLogCooldownSeconds, $"TryReadInitializedFromType failed for '{steamManagerType.FullName ?? steamManagerType.Name}': {ex.GetType().Name}: {ex.Message}", () => UnscaledTimeProvider(), includeOriginalMessageInFallback: true);
                 return false;
             }
         }

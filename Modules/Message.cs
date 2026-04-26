@@ -136,9 +136,19 @@ namespace NetworkingLibrary.Modules
         }
 
         #region Write helpers
+        private void EnsureCanAppend(int bytesToAppend, string opName)
+        {
+            if (bytesToAppend < 0) throw new InvalidDataException($"{opName} size out of range");
+            if ((long)buffer.Count + bytesToAppend > MaxLogicalSize)
+            {
+                throw new InvalidDataException($"{opName} exceeds max message size {MaxLogicalSize}");
+            }
+        }
+
         private void AppendSpan(ReadOnlySpan<byte> bytes)
         {
             if (bytes.Length == 0) return;
+            EnsureCanAppend(bytes.Length, nameof(AppendSpan));
             buffer.EnsureCapacity(buffer.Count + bytes.Length);
             for (var index = 0; index < bytes.Length; index++) buffer.Add(bytes[index]);
             readableBufferDirty = true;
@@ -180,12 +190,13 @@ namespace NetworkingLibrary.Modules
         private static ulong ReadUInt64LE(byte[] bytes, int offset) => BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan(offset, 8));
         private static float ReadSingleLE(byte[] bytes, int offset) => BitConverter.Int32BitsToSingle(ReadInt32LE(bytes, offset));
 
-        public Message WriteByte(byte v) { ThrowIfDisposed(); buffer.Add(v); readableBufferDirty = true; return this; }
+        public Message WriteByte(byte v) { ThrowIfDisposed(); EnsureCanAppend(1, nameof(WriteByte)); buffer.Add(v); readableBufferDirty = true; return this; }
         public Message WriteBytes(byte[] v)
         {
             ThrowIfDisposed();
             if (v == null) throw new ArgumentNullException(nameof(v));
             WriteInt(v.Length);
+            EnsureCanAppend(v.Length, nameof(WriteBytes));
             buffer.AddRange(v);
             readableBufferDirty = true;
             return this;
@@ -195,12 +206,13 @@ namespace NetworkingLibrary.Modules
         public Message WriteLong(long v) { ThrowIfDisposed(); WriteInt64LE(v); return this; }
         public Message WriteULong(ulong v) { ThrowIfDisposed(); WriteUInt64LE(v); return this; }
         public Message WriteFloat(float v) { ThrowIfDisposed(); WriteSingleLE(v); return this; }
-        public Message WriteBool(bool v) { ThrowIfDisposed(); buffer.Add(v ? (byte)1 : (byte)0); readableBufferDirty = true; return this; }
+        public Message WriteBool(bool v) { ThrowIfDisposed(); EnsureCanAppend(1, nameof(WriteBool)); buffer.Add(v ? (byte)1 : (byte)0); readableBufferDirty = true; return this; }
         public Message WriteString(string v)
         {
             ThrowIfDisposed();
             var bytes = Encoding.UTF8.GetBytes(v ?? "");
             WriteInt(bytes.Length);
+            EnsureCanAppend(bytes.Length, nameof(WriteString));
             buffer.AddRange(bytes);
             readableBufferDirty = true;
             return this;

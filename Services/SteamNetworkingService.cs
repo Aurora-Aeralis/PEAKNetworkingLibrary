@@ -220,6 +220,10 @@ namespace NetworkingLibrary.Services
         {
             if (IsInitialized) return;
 
+            GameObject? createdPumpGameObject = null;
+            SteamCallbackPump? createdPumpComponent = null;
+            var pumpingWasEnabledBeforeInitialize = SteamCallbackPump.CallbackPumpingEnabled;
+            var enabledPumpingInThisInitialize = false;
             if (Application.isPlaying)
             {
                 try
@@ -230,8 +234,9 @@ namespace NetworkingLibrary.Services
                     if (go == null)
                     {
                         go = new GameObject("SteamCallbackPump");
+                        createdPumpGameObject = go;
                         GameObject.DontDestroyOnLoad(go);
-                        go.AddComponent<SteamCallbackPump>();
+                        createdPumpComponent = go.AddComponent<SteamCallbackPump>();
                         LogInfo("Created SteamCallbackPump GameObject.");
                     }
                     else
@@ -240,7 +245,7 @@ namespace NetworkingLibrary.Services
                         var pump = go.GetComponent<SteamCallbackPump>();
                         if (pump == null)
                         {
-                            go.AddComponent<SteamCallbackPump>();
+                            createdPumpComponent = go.AddComponent<SteamCallbackPump>();
                         }
                         else if (!pump.enabled)
                         {
@@ -250,6 +255,7 @@ namespace NetworkingLibrary.Services
                     GameObject.DontDestroyOnLoad(go);
 
                     SteamCallbackPump.EnablePumping();
+                    enabledPumpingInThisInitialize = true;
                 }
                 catch (Exception ex)
                 {
@@ -265,6 +271,27 @@ namespace NetworkingLibrary.Services
 
             if (!TryInitializeSteamCallbacksAndCrypto())
             {
+                if (enabledPumpingInThisInitialize && !pumpingWasEnabledBeforeInitialize)
+                {
+                    try { SteamCallbackPump.DisablePumping(); } catch { }
+                }
+                try
+                {
+                    if (createdPumpGameObject != null)
+                    {
+                        if (Application.isPlaying) UnityEngine.Object.Destroy(createdPumpGameObject);
+                        else UnityEngine.Object.DestroyImmediate(createdPumpGameObject);
+                    }
+                    else if (createdPumpComponent != null)
+                    {
+                        if (Application.isPlaying) UnityEngine.Object.Destroy(createdPumpComponent);
+                        else UnityEngine.Object.DestroyImmediate(createdPumpComponent);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogError($"Failed to cleanup created SteamCallbackPump after initialization failure: {ex}");
+                }
                 IsInitialized = false;
                 return;
             }

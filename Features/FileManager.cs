@@ -45,10 +45,11 @@ namespace NetworkingLibrary.Features
             var schemaVersionEntry = BindSchemaVersion(config, string.Empty);
             var legacyVersionEntry = BindLegacyVersion(config);
             var storedVersion = GetStoredVersion(schemaVersionEntry, legacyVersionEntry);
-            if (storedVersion == currentVersion)
+            var needsNormalization = string.IsNullOrWhiteSpace(schemaVersionEntry.Value) && !string.IsNullOrWhiteSpace(legacyVersionEntry.Value);
+            if (storedVersion == currentVersion && !needsNormalization)
                 return;
 
-            MigrateConfig(schemaVersionEntry, legacyVersionEntry, storedVersion, currentVersion);
+            MigrateConfig(config, schemaVersionEntry, legacyVersionEntry, storedVersion, currentVersion);
             schemaVersionEntry.Value = currentVersion;
             config.Save();
         }
@@ -61,15 +62,39 @@ namespace NetworkingLibrary.Features
             return legacyVersionEntry.Value;
         }
 
-        static void MigrateConfig(ConfigEntry<string> schemaVersionEntry, ConfigEntry<string> legacyVersionEntry, string previousVersion, string currentVersion)
+        static void MigrateConfig(ConfigFile config, ConfigEntry<string> schemaVersionEntry, ConfigEntry<string> legacyVersionEntry, string previousVersion, string currentVersion)
         {
-            _ = currentVersion;
-            if (string.IsNullOrWhiteSpace(previousVersion))
-                return;
+            if (!TryParseSchemaVersion(currentVersion, out var targetVersion))
+                throw new InvalidOperationException($"Current config schema version '{currentVersion}' is not a valid schema identifier.");
 
-            var legacyVersion = legacyVersionEntry.Value;
-            if (string.IsNullOrWhiteSpace(schemaVersionEntry.Value) && !string.IsNullOrWhiteSpace(legacyVersion))
-                schemaVersionEntry.Value = legacyVersion;
+            var sourceVersion = string.IsNullOrWhiteSpace(schemaVersionEntry.Value) ? legacyVersionEntry.Value : previousVersion;
+            if (!TryParseSchemaVersion(sourceVersion, out var startVersion))
+                startVersion = 0;
+
+            for (var schemaVersion = startVersion; schemaVersion < targetVersion; schemaVersion++)
+            {
+                switch (schemaVersion)
+                {
+                    case 0:
+                        Migrate_0_to_1(config, schemaVersionEntry, legacyVersionEntry);
+                        break;
+                    default:
+                        throw new InvalidOperationException($"No migration path exists from schema {schemaVersion} to {schemaVersion + 1}.");
+                }
+            }
+        }
+
+        static bool TryParseSchemaVersion(string version, out int schemaVersion)
+        {
+            schemaVersion = 0;
+            return !string.IsNullOrWhiteSpace(version) && int.TryParse(version, out schemaVersion);
+        }
+
+        static void Migrate_0_to_1(ConfigFile config, ConfigEntry<string> schemaVersionEntry, ConfigEntry<string> legacyVersionEntry)
+        {
+            _ = config;
+            if (string.IsNullOrWhiteSpace(schemaVersionEntry.Value) && !string.IsNullOrWhiteSpace(legacyVersionEntry.Value))
+                schemaVersionEntry.Value = legacyVersionEntry.Value;
         }
 
         static ConfigEntry<string> BindSchemaVersion(ConfigFile config, string value)

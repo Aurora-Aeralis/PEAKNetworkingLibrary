@@ -9,34 +9,72 @@ namespace NetworkingLibrary.Tests;
 public class FileManagerConfigMigrationTests
 {
     [Fact]
-    public void MigrateConfigIfNeeded_PreservesUserValuesAcrossVersionBump()
+    public void MigrateConfigIfNeeded_EmptyConfig_SetsCurrentSchemaVersion()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"NetworkingLibrary_ConfigMigration_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempRoot);
-        var configPath = Path.Combine(tempRoot, "config.cfg");
+        using var scope = new TempConfigScope();
+        var config = new ConfigFile(scope.ConfigPath, true);
 
-        try
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        var legacyVersion = config.Bind("Version", "Current Version", string.Empty).Value;
+
+        Assert.Equal("1", schemaVersion);
+        Assert.True(string.IsNullOrWhiteSpace(legacyVersion));
+    }
+
+    [Fact]
+    public void MigrateConfigIfNeeded_LegacyVersionOnly_NormalizesToSchemaVersion()
+    {
+        using var scope = new TempConfigScope();
+        var seedConfig = new ConfigFile(scope.ConfigPath, true);
+        seedConfig.Bind("Version", "Current Version", string.Empty).Value = "1";
+        seedConfig.Save();
+
+        var config = new ConfigFile(scope.ConfigPath, true);
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        var legacyVersion = config.Bind("Version", "Current Version", string.Empty).Value;
+
+        Assert.Equal("1", schemaVersion);
+        Assert.Equal("1", legacyVersion);
+    }
+
+    [Fact]
+    public void MigrateConfigIfNeeded_OlderSchema_AppliesIntermediateMigrations()
+    {
+        using var scope = new TempConfigScope();
+        var seedConfig = new ConfigFile(scope.ConfigPath, true);
+        seedConfig.Bind("Version", "ConfigSchemaVersion", string.Empty).Value = "0";
+        seedConfig.Bind("Gameplay", "UserSetting", 0).Value = 77;
+        seedConfig.Save();
+
+        var config = new ConfigFile(scope.ConfigPath, true);
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        var userSetting = config.Bind("Gameplay", "UserSetting", 0).Value;
+
+        Assert.Equal("1", schemaVersion);
+        Assert.Equal(77, userSetting);
+    }
+
+    sealed class TempConfigScope : IDisposable
+    {
+        readonly string _root = Path.Combine(Path.GetTempPath(), $"NetworkingLibrary_ConfigMigration_{Guid.NewGuid():N}");
+
+        internal string ConfigPath => Path.Combine(_root, "config.cfg");
+
+        internal TempConfigScope()
         {
-            var seedConfig = new ConfigFile(configPath, true);
-            seedConfig.Bind("Version", "Current Version", "1.0.0").Value = "1.0.0";
-            seedConfig.Bind("Gameplay", "UserSetting", 99).Value = 77;
-            seedConfig.Save();
-
-            var migratedConfig = new ConfigFile(configPath, true);
-            FileManager.MigrateConfigIfNeeded(migratedConfig, "2.0.0");
-
-            var userSetting = migratedConfig.Bind("Gameplay", "UserSetting", 0).Value;
-            var schemaVersion = migratedConfig.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
-            var legacyVersion = migratedConfig.Bind("Version", "Current Version", string.Empty).Value;
-
-            Assert.Equal(77, userSetting);
-            Assert.Equal("2.0.0", schemaVersion);
-            Assert.Equal("1.0.0", legacyVersion);
+            Directory.CreateDirectory(_root);
         }
-        finally
+
+        public void Dispose()
         {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, true);
+            if (Directory.Exists(_root))
+                Directory.Delete(_root, true);
         }
     }
 }

@@ -795,6 +795,75 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void OnLobbyDataUpdate_LobbyBranch_OnlyEmitsWhenValuesChange()
+    {
+        var service = new SteamNetworkingService();
+        SetInLobby(service, true);
+        SetLobby(service, 9001UL);
+        service.RegisterLobbyDataKey("map");
+        service.RegisterLobbyDataKey("mode");
+
+        var lobbyValues = new Dictionary<string, string>
+        {
+            ["map"] = "forest",
+            ["mode"] = "survival"
+        };
+        SetField(service, "getLobbyData", (Func<CSteamID, string, string>)((_, key) => lobbyValues[key]));
+
+        var events = new List<string[]>();
+        service.LobbyDataChanged += keys => events.Add(keys);
+
+        InvokeNonPublic(service, "OnLobbyDataUpdate", new LobbyDataUpdate_t { m_ulSteamIDLobby = 9001UL, m_ulSteamIDMember = 9001UL });
+        Assert.Single(events);
+        Assert.Equal(new[] { "map", "mode" }, events[0]);
+
+        events.Clear();
+        InvokeNonPublic(service, "OnLobbyDataUpdate", new LobbyDataUpdate_t { m_ulSteamIDLobby = 9001UL, m_ulSteamIDMember = 9001UL });
+        Assert.Empty(events);
+
+        lobbyValues["mode"] = "ctf";
+        InvokeNonPublic(service, "OnLobbyDataUpdate", new LobbyDataUpdate_t { m_ulSteamIDLobby = 9001UL, m_ulSteamIDMember = 9001UL });
+        Assert.Single(events);
+        Assert.Equal(new[] { "mode" }, events[0]);
+    }
+
+    [Fact]
+    public void OnLobbyDataUpdate_PlayerBranch_OnlyEmitsWhenValuesChange()
+    {
+        var service = new SteamNetworkingService();
+        SetInLobby(service, true);
+        SetLobby(service, 9001UL);
+        service.RegisterPlayerDataKey("team");
+        service.RegisterPlayerDataKey("score");
+
+        var player = new CSteamID(7001UL);
+        var playerValues = new Dictionary<(ulong playerId, string key), string>
+        {
+            [(player.m_SteamID, "team")] = "blue",
+            [(player.m_SteamID, "score")] = "10"
+        };
+        SetField(service, "getLobbyMemberData", (Func<CSteamID, CSteamID, string, string>)((_, member, key) => playerValues[(member.m_SteamID, key)]));
+
+        var events = new List<(ulong playerId, string[] keys)>();
+        service.PlayerDataChanged += (playerId, keys) => events.Add((playerId, keys));
+
+        InvokeNonPublic(service, "OnLobbyDataUpdate", new LobbyDataUpdate_t { m_ulSteamIDLobby = 9001UL, m_ulSteamIDMember = player.m_SteamID });
+        Assert.Single(events);
+        Assert.Equal(player.m_SteamID, events[0].playerId);
+        Assert.Equal(new[] { "team", "score" }, events[0].keys);
+
+        events.Clear();
+        InvokeNonPublic(service, "OnLobbyDataUpdate", new LobbyDataUpdate_t { m_ulSteamIDLobby = 9001UL, m_ulSteamIDMember = player.m_SteamID });
+        Assert.Empty(events);
+
+        playerValues[(player.m_SteamID, "score")] = "11";
+        InvokeNonPublic(service, "OnLobbyDataUpdate", new LobbyDataUpdate_t { m_ulSteamIDLobby = 9001UL, m_ulSteamIDMember = player.m_SteamID });
+        Assert.Single(events);
+        Assert.Equal(player.m_SteamID, events[0].playerId);
+        Assert.Equal(new[] { "score" }, events[0].keys);
+    }
+
+    [Fact]
     public async Task DispatchIncoming_AndBuildMessage_HandleConcurrentRpcRegistrationChanges()
     {
         var service = new SteamNetworkingService();

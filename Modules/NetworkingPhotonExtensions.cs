@@ -11,6 +11,8 @@ namespace NetworkingLibrary.Modules
     public static class NetworkingPhotonExtensions
     {
         static readonly TimeSpan UnresolvedMappingWarningCooldown = TimeSpan.FromSeconds(7);
+        static readonly TimeSpan UnresolvedMappingWarningPruneAge = TimeSpan.FromSeconds(UnresolvedMappingWarningCooldown.TotalSeconds * 4);
+        const int UnresolvedMappingWarningThrottleMaxEntries = 2048;
         static readonly Dictionary<string, DateTime> UnresolvedMappingWarningThrottle = new Dictionary<string, DateTime>(StringComparer.Ordinal);
         static readonly object UnresolvedMappingWarningThrottleLock = new object();
         static readonly string[] StableIdPropertyKeys =
@@ -177,8 +179,10 @@ namespace NetworkingLibrary.Modules
             var key = BuildUnresolvedMappingWarningKey(actorNumber, issueText);
             lock (UnresolvedMappingWarningThrottleLock)
             {
+                PruneUnresolvedMappingWarningThrottle(nowUtc);
                 if (UnresolvedMappingWarningThrottle.TryGetValue(key, out var previous) && nowUtc - previous < UnresolvedMappingWarningCooldown) return false;
                 UnresolvedMappingWarningThrottle[key] = nowUtc;
+                CapUnresolvedMappingWarningThrottle();
                 return true;
             }
         }
@@ -186,6 +190,44 @@ namespace NetworkingLibrary.Modules
         internal static void ResetUnresolvedMappingWarningThrottleForTests()
         {
             lock (UnresolvedMappingWarningThrottleLock) UnresolvedMappingWarningThrottle.Clear();
+        }
+
+        internal static int GetUnresolvedMappingWarningThrottleCountForTests()
+        {
+            lock (UnresolvedMappingWarningThrottleLock) return UnresolvedMappingWarningThrottle.Count;
+        }
+
+        static void PruneUnresolvedMappingWarningThrottle(DateTime nowUtc)
+        {
+            if (UnresolvedMappingWarningThrottle.Count == 0) return;
+
+            var expiredBeforeUtc = nowUtc - UnresolvedMappingWarningPruneAge;
+            List<string> keysToRemove = null;
+            foreach (var entry in UnresolvedMappingWarningThrottle)
+            {
+                if (entry.Value >= expiredBeforeUtc) continue;
+                if (keysToRemove == null) keysToRemove = new List<string>();
+                keysToRemove.Add(entry.Key);
+            }
+
+            if (keysToRemove == null) return;
+            for (int i = 0; i < keysToRemove.Count; i++) UnresolvedMappingWarningThrottle.Remove(keysToRemove[i]);
+        }
+
+        static void CapUnresolvedMappingWarningThrottle()
+        {
+            if (UnresolvedMappingWarningThrottle.Count <= UnresolvedMappingWarningThrottleMaxEntries) return;
+
+            var oldestKey = string.Empty;
+            var oldestTime = DateTime.MaxValue;
+            foreach (var entry in UnresolvedMappingWarningThrottle)
+            {
+                if (entry.Value >= oldestTime) continue;
+                oldestTime = entry.Value;
+                oldestKey = entry.Key;
+            }
+
+            if (!string.IsNullOrEmpty(oldestKey)) UnresolvedMappingWarningThrottle.Remove(oldestKey);
         }
 
         static string BuildUnresolvedMappingWarningKey(int actorNumber, string issueText)

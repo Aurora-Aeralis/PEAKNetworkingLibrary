@@ -3,8 +3,10 @@ using System.Buffers.Binary;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
+using System.Reflection;
 using System.Text;
 using UnityEngine;
 using Steamworks;
@@ -456,6 +458,7 @@ namespace NetworkingLibrary.Modules
         {
             if (target is IList targetList)
             {
+                if (targetList.IsReadOnly || targetList.IsFixedSize) return false;
                 for (int i = 0; i < source.Count; i++) targetList.Add(source[i]);
                 return true;
             }
@@ -463,8 +466,33 @@ namespace NetworkingLibrary.Modules
             var addMethod = target.GetType().GetMethod("Add", new[] { elementType });
             if (addMethod == null) return false;
 
-            for (int i = 0; i < source.Count; i++) addMethod.Invoke(target, new[] { source[i] });
+            for (int i = 0; i < source.Count; i++)
+            {
+                try
+                {
+                    addMethod.Invoke(target, new[] { source[i] });
+                }
+                catch (TargetInvocationException)
+                {
+                    return false;
+                }
+                catch (ArgumentException)
+                {
+                    return false;
+                }
+            }
             return true;
+        }
+
+        private static void TraceListMaterializationFallback(Type targetType, Type elementType, string reason)
+        {
+            var message = $"Falling back to List<{elementType.Name}> while deserializing list-like target {targetType.FullName}: {reason}";
+            if (Debug.unityLogger != null)
+            {
+                Debug.unityLogger.LogWarning(nameof(Message), message);
+                return;
+            }
+            Trace.TraceWarning(message);
         }
 
         public byte ReadByte()
@@ -618,10 +646,27 @@ namespace NetworkingLibrary.Modules
                         tempList.Add(ReadObject(elemType));
                     }
 
-                    if (!IsConcreteConstructible(type)) return tempList;
-                    var target = Activator.CreateInstance(type)!;
-                    if (!TryCopyItemsToListTarget(target, elemType, tempList)) return tempList;
-                    return target;
+                    if (!IsConcreteConstructible(type))
+                    {
+                        TraceListMaterializationFallback(type, elemType, "target type is not concrete/constructible");
+                        return tempList;
+                    }
+
+                    try
+                    {
+                        var target = Activator.CreateInstance(type)!;
+                        if (!TryCopyItemsToListTarget(target, elemType, tempList))
+                        {
+                            TraceListMaterializationFallback(type, elemType, "target rejected copied items");
+                            return tempList;
+                        }
+                        return target;
+                    }
+                    catch (Exception ex) when (ex is MissingMethodException || ex is MemberAccessException || ex is TargetInvocationException || ex is ArgumentException || ex is InvalidOperationException)
+                    {
+                        TraceListMaterializationFallback(type, elemType, ex.GetType().Name);
+                        return tempList;
+                    }
                 }
             }
 

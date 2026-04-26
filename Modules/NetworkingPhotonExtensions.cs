@@ -10,6 +10,29 @@ namespace NetworkingLibrary.Modules
 {
     public static class NetworkingPhotonExtensions
     {
+        internal enum StableIdentityResolutionStatus
+        {
+            Resolved,
+            NoStableDataPresent,
+            StableDataNoLobbyMatch,
+            AmbiguousStableMatch
+        }
+
+        internal readonly struct StableIdentityResolution
+        {
+            public StableIdentityResolutionStatus Status { get; }
+            public ulong MatchedSteamId { get; }
+            public string Issue { get; }
+            public bool IsResolved => Status == StableIdentityResolutionStatus.Resolved;
+
+            public StableIdentityResolution(StableIdentityResolutionStatus status, ulong matchedSteamId, string issue)
+            {
+                Status = status;
+                MatchedSteamId = matchedSteamId;
+                Issue = issue;
+            }
+        }
+
         static readonly string[] StableIdPropertyKeys =
         {
             "steam64", "steamid64", "steam_id64", "steamid", "steam_id", "steam", "authid", "auth_id", "userid", "user_id"
@@ -45,9 +68,17 @@ namespace NetworkingLibrary.Modules
                 int actor = kv.Key;
                 var player = kv.Value;
 
-                if (TryResolveStableIdentity(player, lobbyIdSet, out var stableMatch, out var stableIssue))
+                var stableResolution = TryResolveStableIdentity(player, lobbyIdSet);
+                if (stableResolution.IsResolved)
                 {
-                    map[actor] = stableMatch;
+                    map[actor] = stableResolution.MatchedSteamId;
+                    continue;
+                }
+
+                if (!ShouldAllowNicknameFallback(stableResolution.Status))
+                {
+                    var issue = stableResolution.Issue ?? "ambiguous stable identity";
+                    LogWarning($"Photon actor {actor} has no Steam mapping ({issue}); actor left unmapped.");
                     continue;
                 }
 
@@ -64,7 +95,7 @@ namespace NetworkingLibrary.Modules
                 }
                 else
                 {
-                    var issue = stableIssue ?? "no stable identity present and no nickname match found";
+                    var issue = stableResolution.Issue ?? "no stable identity present and no nickname match found";
                     LogWarning($"Photon actor {actor} has no Steam mapping ({issue}); actor left unmapped.");
                 }
             }
@@ -72,36 +103,47 @@ namespace NetworkingLibrary.Modules
             return map;
         }
 
-        static bool TryResolveStableIdentity(Player player, HashSet<ulong> lobbyIdSet, out ulong matchedSteamId, out string issue)
+        static StableIdentityResolution TryResolveStableIdentity(Player player, HashSet<ulong> lobbyIdSet)
         {
-            matchedSteamId = 0;
-            issue = null;
+            return ResolveStableIdentityCandidates(GetStableIdCandidates(player), lobbyIdSet, player?.ActorNumber ?? -1);
+        }
 
-            var candidates = new HashSet<ulong>();
-            foreach (var candidate in GetStableIdCandidates(player))
+        internal static StableIdentityResolution ResolveStableIdentityCandidates(IEnumerable<ulong> stableIdCandidates, HashSet<ulong> lobbyIdSet, int actorNumber = -1)
+        {
+            if (stableIdCandidates == null || lobbyIdSet == null || lobbyIdSet.Count == 0)
+                return new StableIdentityResolution(StableIdentityResolutionStatus.NoStableDataPresent, 0, "no stable ID data present");
+
+            var allStableCandidates = new HashSet<ulong>();
+            var lobbyMatchedCandidates = new HashSet<ulong>();
+            foreach (var candidate in stableIdCandidates)
             {
-                if (!lobbyIdSet.Contains(candidate)) continue;
-                candidates.Add(candidate);
+                if (candidate == 0) continue;
+                allStableCandidates.Add(candidate);
+                if (lobbyIdSet.Contains(candidate)) lobbyMatchedCandidates.Add(candidate);
             }
 
-            if (candidates.Count == 1)
+            if (lobbyMatchedCandidates.Count == 1)
             {
-                foreach (var candidate in candidates)
-                {
-                    matchedSteamId = candidate;
-                    return true;
-                }
+                foreach (var candidate in lobbyMatchedCandidates)
+                    return new StableIdentityResolution(StableIdentityResolutionStatus.Resolved, candidate, null);
             }
 
-            if (candidates.Count > 1)
+            if (lobbyMatchedCandidates.Count > 1)
             {
-                issue = $"multiple stable IDs matched lobby members ({string.Join(",", candidates)})";
-                LogWarning($"Photon actor {player.ActorNumber} has ambiguous stable identity: {issue}.");
-                return false;
+                var issue = $"multiple stable IDs matched lobby members ({string.Join(",", lobbyMatchedCandidates)})";
+                if (actorNumber >= 0) LogWarning($"Photon actor {actorNumber} has ambiguous stable identity: {issue}.");
+                return new StableIdentityResolution(StableIdentityResolutionStatus.AmbiguousStableMatch, 0, issue);
             }
 
-            issue = "no stable ID candidate matched lobby members";
-            return false;
+            if (allStableCandidates.Count > 0)
+                return new StableIdentityResolution(StableIdentityResolutionStatus.StableDataNoLobbyMatch, 0, "stable ID present but no candidate matched lobby members");
+
+            return new StableIdentityResolution(StableIdentityResolutionStatus.NoStableDataPresent, 0, "no stable ID data present");
+        }
+
+        internal static bool ShouldAllowNicknameFallback(StableIdentityResolutionStatus status)
+        {
+            return status != StableIdentityResolutionStatus.AmbiguousStableMatch;
         }
 
         static IEnumerable<ulong> GetStableIdCandidates(Player player)

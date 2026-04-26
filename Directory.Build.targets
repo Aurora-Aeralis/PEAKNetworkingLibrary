@@ -29,7 +29,7 @@
     <Reference Include="$(ManagedDir)Assembly-CSharp.dll" Private="false" Publicize="true" />
   </ItemGroup>
 
-  <Target Name="PackTS" AfterTargets="Build" Condition="'$(Configuration)' == 'Release' And '$(ThunderstorePackable)' != 'false'">
+  <Target Name="PackTS" AfterTargets="Build" Condition="'$(Configuration)' == 'Release' And '$(IsPackable)' == 'true' And '$(ThunderstorePackable)' != 'false'">
     <PropertyGroup>
       <BuildArgument Condition="'$(PublishTS)' != 'true'">build</BuildArgument>
       <BuildArgument Condition="'$(PublishTS)' == 'true'">publish</BuildArgument>

@@ -29,26 +29,11 @@ namespace NetworkingLibrary.Services
 
         public Func<Message, ulong, bool>? IncomingValidator { get; set; }
 
-        /// <summary>
-        /// Persistent RPC registration map, not tied to lobby lifetime.
-        /// </summary>
         private readonly object rpcLock = new object();
         readonly Dictionary<uint, Dictionary<string, List<MessageHandler>>> rpcs = new();
-        /// <summary>
-        /// Per-lobby shared key/value data; cleared whenever lobby identity changes.
-        /// </summary>
         readonly Dictionary<string, string> lobbyData = new();
-        /// <summary>
-        /// Per-lobby player-scoped key/value data for current lobby membership.
-        /// </summary>
         readonly Dictionary<ulong, Dictionary<string, string>> perPlayerData = new();
-        /// <summary>
-        /// Persistent lobby data key registration.
-        /// </summary>
         readonly HashSet<string> lobbyKeys = new();
-        /// <summary>
-        /// Persistent per-player data key registration.
-        /// </summary>
         readonly HashSet<string> playerKeys = new();
 
         readonly SlidingWindowRateLimiter rateLimiter = new(100, TimeSpan.FromSeconds(1));
@@ -133,9 +118,6 @@ namespace NetworkingLibrary.Services
         }
 
         bool offlineIsHost = false;
-        /// <summary>
-        /// True while in an offline lobby because offline mode simulates a single-peer host.
-        /// </summary>
         public bool IsHost => offlineIsHost;
 
         public void Initialize()
@@ -495,7 +477,6 @@ namespace NetworkingLibrary.Services
 
         public void PollReceive()
         {
-            // Nothing queued in offline mode.
         }
 
         static void ValidateDataKey(string key, string paramName)

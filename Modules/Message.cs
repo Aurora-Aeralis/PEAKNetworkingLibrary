@@ -12,22 +12,32 @@ using Steamworks;
 
 namespace NetworkingLibrary.Modules
 {
+    public sealed class MessageSizePolicy
+    {
+        public int MaxSize { get; }
+        public int MaxLogicalSize { get; }
+
+        public MessageSizePolicy(int maxSize)
+        {
+            Message.ValidateMaxSize(maxSize);
+            MaxSize = maxSize;
+            MaxLogicalSize = checked(maxSize * 16);
+        }
+    }
+
     public class Message : IDisposable
     {
         public const byte PROTOCOL_VERSION = 3;
-        private const int DefaultMaxSize = 64 * 1024;
-        private const int MinMaxSize = 1024;
-        private const int MaxMaxSize = int.MaxValue / 16;
-        public static int MaxSize = DefaultMaxSize;
-        public static int MaxLogicalSize => MaxSize * 16;
+        public const int DefaultMaxSize = 64 * 1024;
+        public const int MinMaxSize = 1024;
+        public const int MaxMaxSize = int.MaxValue / 16;
+        public static readonly MessageSizePolicy DefaultSizePolicy = new(DefaultMaxSize);
+        public static int MaxSize => DefaultSizePolicy.MaxSize;
+        public static int MaxLogicalSize => DefaultSizePolicy.MaxLogicalSize;
 
-        public static void SetMaxSize(int bytes)
+        public static void ValidateMaxSize(int bytes)
         {
-            if (bytes < MinMaxSize || bytes > MaxMaxSize)
-            {
-                throw new ArgumentOutOfRangeException(nameof(bytes), bytes, $"Message max size must be between {MinMaxSize} and {MaxMaxSize} bytes.");
-            }
-            MaxSize = bytes;
+            if (bytes < MinMaxSize || bytes > MaxMaxSize) throw new ArgumentOutOfRangeException(nameof(bytes), bytes, $"Message max size must be between {MinMaxSize} and {MaxMaxSize} bytes.");
         }
 
         public byte ProtocolVersion;
@@ -35,20 +45,31 @@ namespace NetworkingLibrary.Modules
         public string MethodName = string.Empty;
         public int Mask;
         public string? OverloadKey;
+        public MessageSizePolicy SizePolicy => sizePolicy;
 
         private List<byte> buffer = new();
         internal byte[] readableBuffer = Array.Empty<byte>();
         internal int readPos = 0;
         private bool readableBufferDirty = true;
         private bool _disposed;
+        private readonly MessageSizePolicy sizePolicy;
         private bool UsesReferencePresenceFlags => ProtocolVersion >= 2;
 
-        public Message(uint modId, string methodName, int mask) : this(modId, methodName, mask, null)
+        public Message(uint modId, string methodName, int mask) : this(modId, methodName, mask, null, null)
         {
         }
 
-        public Message(uint modId, string methodName, int mask, string? overloadKey)
+        public Message(uint modId, string methodName, int mask, MessageSizePolicy sizePolicy) : this(modId, methodName, mask, null, sizePolicy)
         {
+        }
+
+        public Message(uint modId, string methodName, int mask, string? overloadKey) : this(modId, methodName, mask, overloadKey, null)
+        {
+        }
+
+        public Message(uint modId, string methodName, int mask, string? overloadKey, MessageSizePolicy? sizePolicy)
+        {
+            this.sizePolicy = sizePolicy ?? DefaultSizePolicy;
             ProtocolVersion = overloadKey == null ? (byte)2 : PROTOCOL_VERSION;
             ModID = modId;
             MethodName = methodName;
@@ -66,8 +87,13 @@ namespace NetworkingLibrary.Modules
             }
         }
 
-        public Message(byte[] data)
+        public Message(byte[] data) : this(data, null)
         {
+        }
+
+        public Message(byte[] data, MessageSizePolicy? sizePolicy)
+        {
+            this.sizePolicy = sizePolicy ?? DefaultSizePolicy;
             SetBytes(data);
             ProtocolVersion = ReadByte();
             if (ProtocolVersion < 1 || ProtocolVersion > PROTOCOL_VERSION)
@@ -92,9 +118,9 @@ namespace NetworkingLibrary.Modules
         {
             ThrowIfDisposed();
             if (data == null) throw new ArgumentNullException(nameof(data));
-            if (data.Length > MaxLogicalSize)
+            if (data.Length > sizePolicy.MaxLogicalSize)
             {
-                throw new InvalidDataException($"Message payload exceeds max allowed size {MaxLogicalSize}");
+                throw new InvalidDataException($"Message payload exceeds max allowed size {sizePolicy.MaxLogicalSize}");
             }
             buffer.Clear();
             buffer.AddRange(data);
@@ -140,9 +166,9 @@ namespace NetworkingLibrary.Modules
         private void EnsureCanAppend(int bytesToAppend, string opName)
         {
             if (bytesToAppend < 0) throw new InvalidDataException($"{opName} size out of range");
-            if ((long)buffer.Count + bytesToAppend > MaxLogicalSize)
+            if ((long)buffer.Count + bytesToAppend > sizePolicy.MaxLogicalSize)
             {
-                throw new InvalidDataException($"{opName} exceeds max message size {MaxLogicalSize}");
+                throw new InvalidDataException($"{opName} exceeds max message size {sizePolicy.MaxLogicalSize}");
             }
         }
 
@@ -411,9 +437,9 @@ namespace NetworkingLibrary.Modules
             {
                 throw new InvalidDataException($"{opName} length out of range");
             }
-            if (len > MaxLogicalSize)
+            if (len > sizePolicy.MaxLogicalSize)
             {
-                throw new InvalidDataException($"{opName} length exceeds max {MaxLogicalSize}");
+                throw new InvalidDataException($"{opName} length exceeds max {sizePolicy.MaxLogicalSize}");
             }
             return len;
         }
@@ -566,9 +592,9 @@ namespace NetworkingLibrary.Modules
             {
                 throw new InvalidDataException("ReadString out of range");
             }
-            if (len > MaxLogicalSize)
+            if (len > sizePolicy.MaxLogicalSize)
             {
-                throw new InvalidDataException($"ReadString length exceeds max {MaxLogicalSize}");
+                throw new InvalidDataException($"ReadString length exceeds max {sizePolicy.MaxLogicalSize}");
             }
             if (len == 0) return string.Empty;
             EnsureReadable(len, nameof(ReadString));

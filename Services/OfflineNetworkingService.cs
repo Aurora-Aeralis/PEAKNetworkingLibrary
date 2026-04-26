@@ -33,6 +33,7 @@ namespace NetworkingLibrary.Services
         readonly HashSet<string> playerKeys = new();
 
         readonly SlidingWindowRateLimiter rateLimiter = new(100, TimeSpan.FromSeconds(1));
+        private readonly MessageSizePolicy messageSizePolicy;
 
         readonly Dictionary<ulong, byte[]> perPeerSymmetricKey = new();
         byte[]? globalSharedSecret;
@@ -105,6 +106,11 @@ namespace NetworkingLibrary.Services
 
         bool offlineIsHost = false;
         public bool IsHost => offlineIsHost;
+
+        public OfflineNetworkingService(MessageSizePolicy? messageSizePolicy = null)
+        {
+            this.messageSizePolicy = messageSizePolicy ?? Message.DefaultSizePolicy;
+        }
 
         public void Initialize()
         {
@@ -532,7 +538,7 @@ namespace NetworkingLibrary.Services
                         return null;
                     }
 
-                    var msg = new Message(modId, methodName, mask, BuildOverloadKey(chosen));
+                    var msg = new Message(modId, methodName, mask, BuildOverloadKey(chosen), messageSizePolicy);
                     var expectedParams = chosen.Parameters;
                     int expectedCountFinal = chosen.TakesInfo ? expectedParams.Length - 1 : expectedParams.Length;
                     if (expectedCountFinal != parameters.Length)
@@ -553,7 +559,7 @@ namespace NetworkingLibrary.Services
                         msg.WriteObject(t, p);
                     }
 
-                    if (msg.Length() > Message.MaxLogicalSize)
+                    if (msg.Length() > messageSizePolicy.MaxLogicalSize)
                     {
                         LogError("Message exceeds maximum allowed overall size.");
                         return null;
@@ -563,7 +569,7 @@ namespace NetworkingLibrary.Services
                 }
                 else
                 {
-                    var msg = new Message(modId, methodName, mask);
+                    var msg = new Message(modId, methodName, mask, messageSizePolicy);
                     if (parameterTypes != null)
                     {
                         if (parameterTypes.Length != parameters.Length)
@@ -595,7 +601,7 @@ namespace NetworkingLibrary.Services
                         }
                     }
 
-                    if (msg.Length() > Message.MaxLogicalSize)
+                    if (msg.Length() > messageSizePolicy.MaxLogicalSize)
                     {
                         LogError("Message exceeds maximum allowed overall size.");
                         return null;
@@ -671,7 +677,7 @@ namespace NetworkingLibrary.Services
             unread = int.MaxValue;
             try
             {
-                var msgCopy = new Message(source.ToArray());
+                var msgCopy = new Message(source.ToArray(), messageSizePolicy);
                 var pi = handler.Parameters;
                 int paramCount = handler.TakesInfo ? pi.Length - 1 : pi.Length;
                 callParams = new object[pi.Length];

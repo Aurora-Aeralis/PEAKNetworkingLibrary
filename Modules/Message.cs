@@ -73,7 +73,7 @@ namespace NetworkingLibrary.Modules
             ProtocolVersion = ReadByte();
             if (ProtocolVersion < 1 || ProtocolVersion > PROTOCOL_VERSION)
             {
-                throw new Exception($"Unsupported message protocol version {ProtocolVersion}. Supported range is 1-{PROTOCOL_VERSION}.");
+                throw new FormatException($"Unsupported message protocol version {ProtocolVersion}. Supported range is 1-{PROTOCOL_VERSION}.");
             }
             ModID = ReadUInt();
             MethodName = ReadString();
@@ -95,7 +95,7 @@ namespace NetworkingLibrary.Modules
             if (data == null) throw new ArgumentNullException(nameof(data));
             if (data.Length > MaxLogicalSize)
             {
-                throw new Exception($"Message payload exceeds max allowed size {MaxLogicalSize}");
+                throw new InvalidDataException($"Message payload exceeds max allowed size {MaxLogicalSize}");
             }
             buffer.Clear();
             buffer.AddRange(data);
@@ -282,10 +282,10 @@ namespace NetworkingLibrary.Modules
                     return;
                 }
 
-                throw new Exception("Cannot serialize non-generic IList (heterogeneous lists) without explicit serializer registration.");
+                throw new NotSupportedException("Cannot serialize non-generic IList (heterogeneous lists) without explicit serializer registration.");
             }
 
-            throw new Exception($"Unsupported type for WriteObject: {type.FullName}. Register a serializer using Message.RegisterSerializer. Null handling: reference-like types (including arrays/lists/string/byte[]) are encoded with a leading presence flag and may be null; non-null values for unsupported reference types still require registration.");
+            throw new NotSupportedException($"Unsupported type for WriteObject: {type.FullName}. Register a serializer using Message.RegisterSerializer. Null handling: reference-like types (including arrays/lists/string/byte[]) are encoded with a leading presence flag and may be null; non-null values for unsupported reference types still require registration.");
         }
 
         public static void RegisterSerializer<T>(Action<Message, T> writer, Func<Message, T> reader)
@@ -374,7 +374,7 @@ namespace NetworkingLibrary.Modules
             EnsureReadableBuffer();
             if (count < 0 || readPos < 0 || readPos + count > readableBuffer.Length)
             {
-                throw new Exception($"{opName} out of range");
+                throw new InvalidDataException($"{opName} out of range");
             }
         }
 
@@ -390,11 +390,11 @@ namespace NetworkingLibrary.Modules
             int len = ReadInt();
             if (len < 0)
             {
-                throw new Exception($"{opName} length out of range");
+                throw new InvalidDataException($"{opName} length out of range");
             }
             if (len > MaxLogicalSize)
             {
-                throw new Exception($"{opName} length exceeds max {MaxLogicalSize}");
+                throw new InvalidDataException($"{opName} length exceeds max {MaxLogicalSize}");
             }
             return len;
         }
@@ -519,11 +519,11 @@ namespace NetworkingLibrary.Modules
             int len = ReadInt();
             if (len < 0)
             {
-                throw new Exception("ReadString out of range");
+                throw new InvalidDataException("ReadString out of range");
             }
             if (len > MaxLogicalSize)
             {
-                throw new Exception($"ReadString length exceeds max {MaxLogicalSize}");
+                throw new InvalidDataException($"ReadString length exceeds max {MaxLogicalSize}");
             }
             if (len == 0) return string.Empty;
             EnsureReadable(len, nameof(ReadString));
@@ -615,7 +615,7 @@ namespace NetworkingLibrary.Modules
                 }
             }
 
-            throw new Exception($"Unsupported read type {type.FullName}. Register a deserializer using Message.RegisterSerializer. Null handling: reference-like types (including arrays/lists/string/byte[]) are decoded from a leading presence flag and may be null; non-null payloads for unsupported reference types still require registration.");
+            throw new NotSupportedException($"Unsupported read type {type.FullName}. Register a deserializer using Message.RegisterSerializer. Null handling: reference-like types (including arrays/lists/string/byte[]) are decoded from a leading presence flag and may be null; non-null payloads for unsupported reference types still require registration.");
         }
         #endregion
 

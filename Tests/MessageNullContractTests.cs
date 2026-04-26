@@ -1,6 +1,7 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using NetworkingLibrary.Modules;
 using Xunit;
@@ -109,7 +110,7 @@ public class MessageNullContractTests
         var read = Roundtrip(write);
         Assert.Null(read.ReadObject(typeof(UnsupportedRef)));
 
-        var ex = Assert.Throws<Exception>(() => NewMessage().WriteObject(typeof(UnsupportedRef), new UnsupportedRef { Value = 1 }));
+        var ex = Assert.Throws<NotSupportedException>(() => NewMessage().WriteObject(typeof(UnsupportedRef), new UnsupportedRef { Value = 1 }));
         Assert.Contains("Null handling", ex.Message);
         Assert.Contains("RegisterSerializer", ex.Message);
     }
@@ -175,7 +176,7 @@ public class MessageNullContractTests
         var bytes = message.ToArray();
         bytes[0] = Message.PROTOCOL_VERSION + 1;
 
-        var ex = Assert.Throws<Exception>(() => new Message(bytes));
+        var ex = Assert.Throws<FormatException>(() => new Message(bytes));
         Assert.Contains("Unsupported message protocol version", ex.Message);
     }
 
@@ -187,7 +188,7 @@ public class MessageNullContractTests
         malformed.WriteInt(Message.MaxLogicalSize + 1);
 
         var read = Roundtrip(malformed);
-        var ex = Assert.Throws<Exception>(() => read.ReadString());
+        var ex = Assert.Throws<InvalidDataException>(() => read.ReadString());
         Assert.Contains("length exceeds max", ex.Message);
     }
 
@@ -199,7 +200,7 @@ public class MessageNullContractTests
         malformed.WriteInt(-1);
 
         var read = Roundtrip(malformed);
-        var ex = Assert.Throws<Exception>(() => read.ReadObject(typeof(byte[])));
+        var ex = Assert.Throws<InvalidDataException>(() => read.ReadObject(typeof(byte[])));
         Assert.Contains("length out of range", ex.Message);
     }
 
@@ -211,7 +212,7 @@ public class MessageNullContractTests
         malformed.WriteInt(Message.MaxLogicalSize + 1);
 
         var read = Roundtrip(malformed);
-        var ex = Assert.Throws<Exception>(() => read.ReadObject(typeof(List<int>)));
+        var ex = Assert.Throws<InvalidDataException>(() => read.ReadObject(typeof(List<int>)));
         Assert.Contains("length exceeds max", ex.Message);
     }
 
@@ -225,7 +226,7 @@ public class MessageNullContractTests
         malformed.WriteObject(typeof(int), 2);
 
         var read = Roundtrip(malformed);
-        var ex = Assert.Throws<Exception>(() => read.ReadObject(typeof(FakeList<int>)));
+        var ex = Assert.Throws<NotSupportedException>(() => read.ReadObject(typeof(FakeList<int>)));
         Assert.Contains("Unsupported read type", ex.Message);
     }
 

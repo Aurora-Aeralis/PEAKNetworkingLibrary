@@ -25,6 +25,7 @@ namespace NetworkingLibrary.Services
         public Func<Message, ulong, bool>? IncomingValidator { get; set; }
 
         private readonly object rpcLock = new object();
+        private readonly object cryptoStateLock = new();
         readonly Dictionary<uint, Dictionary<string, List<MessageHandler>>> rpcs = new();
         readonly Dictionary<string, string> lobbyData = new();
         readonly Dictionary<ulong, Dictionary<string, string>> perPlayerData = new();
@@ -64,7 +65,10 @@ namespace NetworkingLibrary.Services
         public void RegisterModSigner(uint modId, Func<byte[], byte[]> signerDelegate)
         {
             if (signerDelegate == null) throw new ArgumentNullException(nameof(signerDelegate));
-            modSigners[modId] = signerDelegate;
+            lock (cryptoStateLock)
+            {
+                modSigners[modId] = signerDelegate;
+            }
         }
         public void RegisterModPublicKey(uint modId, RSAParameters pub)
         {
@@ -72,7 +76,10 @@ namespace NetworkingLibrary.Services
                 throw new ArgumentException("RSA public key modulus must not be empty.", nameof(pub));
             if (pub.Exponent == null || pub.Exponent.Length == 0)
                 throw new ArgumentException("RSA public key exponent must not be empty.", nameof(pub));
-            modPublicKeys[modId] = pub;
+            lock (cryptoStateLock)
+            {
+                modPublicKeys[modId] = pub;
+            }
         }
 
         long _nextMessageId = 0;
@@ -132,11 +139,15 @@ namespace NetworkingLibrary.Services
             playerKeys.Clear();
             lobbyData.Clear();
             perPlayerData.Clear();
-            ClearPerPeerSymmetricKeys();
-            ClearGlobalSharedSecret();
-            modSigners.Clear();
-            modPublicKeys.Clear();
-            globalHmac?.Dispose(); globalHmac = null;
+            lock (cryptoStateLock)
+            {
+                modSigners.Clear();
+                modPublicKeys.Clear();
+                ClearPerPeerSymmetricKeysUnderLock();
+                ClearGlobalSharedSecretUnderLock();
+                globalHmac?.Dispose();
+                globalHmac = null;
+            }
         }
 
         public void CreateLobby(int maxPlayers = 8)
@@ -213,14 +224,26 @@ namespace NetworkingLibrary.Services
             perPlayerData.Clear();
             lobbyKeys.Clear();
             playerKeys.Clear();
-            ClearPerPeerSymmetricKeys();
-            ClearGlobalSharedSecret();
-            globalHmac?.Dispose(); globalHmac = null;
+            lock (cryptoStateLock)
+            {
+                ClearPerPeerSymmetricKeysUnderLock();
+                ClearGlobalSharedSecretUnderLock();
+                globalHmac?.Dispose();
+                globalHmac = null;
+            }
             LobbyLeft?.Invoke();
             offlineIsHost = false;
         }
 
         void ClearPerPeerSymmetricKeys()
+        {
+            lock (cryptoStateLock)
+            {
+                ClearPerPeerSymmetricKeysUnderLock();
+            }
+        }
+
+        void ClearPerPeerSymmetricKeysUnderLock()
         {
             foreach (var key in perPeerSymmetricKey.Values)
             {
@@ -231,6 +254,14 @@ namespace NetworkingLibrary.Services
         }
 
         void ClearGlobalSharedSecret()
+        {
+            lock (cryptoStateLock)
+            {
+                ClearGlobalSharedSecretUnderLock();
+            }
+        }
+
+        void ClearGlobalSharedSecretUnderLock()
         {
             if (globalSharedSecret == null) return;
             CryptographicOperations.ZeroMemory(globalSharedSecret);
@@ -268,11 +299,14 @@ namespace NetworkingLibrary.Services
 
         void EnsureLocalPeerKey()
         {
-            if (perPeerSymmetricKey.ContainsKey(LocalSteamId)) return;
-            using var rng = RandomNumberGenerator.Create();
-            var key = new byte[32];
-            rng.GetBytes(key);
-            perPeerSymmetricKey[LocalSteamId] = key;
+            lock (cryptoStateLock)
+            {
+                if (perPeerSymmetricKey.ContainsKey(LocalSteamId)) return;
+                using var rng = RandomNumberGenerator.Create();
+                var key = new byte[32];
+                rng.GetBytes(key);
+                perPeerSymmetricKey[LocalSteamId] = key;
+            }
         }
 
         public IDisposable RegisterNetworkObject(object instance, uint modId, int mask = 0)

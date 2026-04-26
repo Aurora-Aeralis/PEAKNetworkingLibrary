@@ -806,6 +806,77 @@ public class OfflineNetworkingServiceTests
             Assert.Fail($"Encountered exception during concurrent RPC churn: {ex}");
     }
 
+    [Fact]
+    public void Concurrent_ModSecurityRegister_Send_AndShutdownChurn_DoesNotThrow()
+    {
+        var service = new OfflineNetworkingService();
+        var receiver = new RpcReceiver();
+        var exceptions = new ConcurrentQueue<Exception>();
+        using var rsa = RSA.Create(2048);
+        var pub = rsa.ExportParameters(false);
+
+        service.Initialize();
+        service.CreateLobby();
+        service.RegisterNetworkObject(receiver, TestModId);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        var token = cts.Token;
+
+        var registerTask = Task.Run(() =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    service.RegisterModSigner(TestModId, bytes => bytes);
+                    service.RegisterModPublicKey(TestModId, pub);
+                }
+                catch (Exception ex)
+                {
+                    exceptions.Enqueue(ex);
+                }
+            }
+        }, token);
+
+        var sendTask = Task.Run(() =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    service.RPC(TestModId, "OnPing", ReliableType.Reliable, 7);
+                }
+                catch (Exception ex)
+                {
+                    exceptions.Enqueue(ex);
+                }
+            }
+        }, token);
+
+        var shutdownTask = Task.Run(() =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    service.Shutdown();
+                    service.Initialize();
+                    service.CreateLobby();
+                    service.RegisterNetworkObject(receiver, TestModId);
+                }
+                catch (Exception ex)
+                {
+                    exceptions.Enqueue(ex);
+                }
+            }
+        }, token);
+
+        Task.WaitAll(registerTask, sendTask, shutdownTask);
+
+        if (exceptions.TryPeek(out var ex))
+            Assert.Fail($"Encountered exception during concurrent crypto/register/shutdown churn: {ex}");
+    }
+
     static int GetRegisteredHandlerCount(OfflineNetworkingService service, uint modId)
     {
         var rpcs = (Dictionary<uint, Dictionary<string, List<MessageHandler>>>)typeof(OfflineNetworkingService)

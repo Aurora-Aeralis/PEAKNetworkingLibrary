@@ -303,12 +303,11 @@ namespace NetworkingLibrary.Services
         public void LeaveLobby()
         {
             if (!InLobby) return;
-            var hadLocalPeer = perPlayerData.ContainsKey(LocalSteamId);
+            var shouldEmitLocalPlayerLeft = perPlayerData.ContainsKey(LocalSteamId);
 
             InLobby = false;
             HostSteamId64 = LocalSteamId;
             lobbyData.Clear();
-            if (hadLocalPeer) PlayerLeft?.Invoke(LocalSteamId);
             perPlayerData.Clear();
             lobbyKeys.Clear();
             playerKeys.Clear();
@@ -321,6 +320,8 @@ namespace NetworkingLibrary.Services
             }
             LobbyLeft?.Invoke();
             offlineIsHost = false;
+
+            if (shouldEmitLocalPlayerLeft) PlayerLeft?.Invoke(LocalSteamId);
         }
 
         void ClearPerPeerSymmetricKeysUnderLock()

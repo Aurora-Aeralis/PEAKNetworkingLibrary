@@ -1341,16 +1341,20 @@ namespace NetworkingLibrary.Services
                         CSteamID sender = steamMsg.m_identityPeer.GetSteamID();
                         if (sender == CSteamID.Nil) continue;
 
-                        byte[] bytes = new byte[size];
-                        Marshal.Copy(steamMsg.m_pData, bytes, 0, size);
-
+                        byte[]? bytes = null;
                         try
                         {
-                            ProcessIncomingFrame(bytes, sender);
+                            bytes = ArrayPool<byte>.Shared.Rent(size);
+                            Marshal.Copy(steamMsg.m_pData, bytes, 0, size);
+                            ProcessIncomingFrame(bytes.AsSpan(0, size), sender);
                         }
                         catch (Exception ex)
                         {
                             NetLog.Error(LogSource, $"ProcessIncomingFrame exception: {ex}");
+                        }
+                        finally
+                        {
+                            if (bytes != null) ArrayPool<byte>.Shared.Return(bytes);
                         }
                     }
                     finally
@@ -1365,7 +1369,7 @@ namespace NetworkingLibrary.Services
             }
         }
 
-        void ProcessIncomingFrame(byte[] frame, CSteamID sender)
+        void ProcessIncomingFrame(ReadOnlySpan<byte> frame, CSteamID sender)
         {
             if (frame.Length < FRAME_HEADER_SIZE) return;
             int flags = frame[0];
@@ -1374,24 +1378,33 @@ namespace NetworkingLibrary.Services
             bool hasSign = (flags & SIGN_FLAG) != 0;
             bool requiresAck = (flags & ACK_FLAG) != 0;
 
-            if (hasHmac && !TryVerifyAndStripFrameMacs(frame, sender.m_SteamID, out frame))
-            {
-                return;
-            }
-
-            using var msHeader = new MemoryStream(frame);
-            flags = msHeader.ReadByte();
-            if (flags < 0)
-            {
-                return;
-            }
-
             try
             {
-                ulong msgId = ReadU64(msHeader);
-                ulong seq = ReadU64(msHeader);
-                int total = ReadI32(msHeader);
-                int index = ReadI32(msHeader);
+                if (hasHmac)
+                {
+                    var frameWithMacs = frame.ToArray();
+                    if (!TryVerifyAndStripFrameMacs(frameWithMacs, sender.m_SteamID, out var verifiedFrame))
+                    {
+                        return;
+                    }
+
+                    frame = verifiedFrame;
+                }
+
+                int headerOffset = 1;
+                if (frame.Length < headerOffset + 8 + 8 + 4 + 4)
+                {
+                    throw new EndOfStreamException("Frame header is truncated.");
+                }
+
+                ulong msgId = BinaryPrimitives.ReadUInt64LittleEndian(frame.Slice(headerOffset, 8));
+                headerOffset += 8;
+                ulong seq = BinaryPrimitives.ReadUInt64LittleEndian(frame.Slice(headerOffset, 8));
+                headerOffset += 8;
+                int total = BinaryPrimitives.ReadInt32LittleEndian(frame.Slice(headerOffset, 4));
+                headerOffset += 4;
+                int index = BinaryPrimitives.ReadInt32LittleEndian(frame.Slice(headerOffset, 4));
+                headerOffset += 4;
 
                 if (total < 1 || index < 0 || index >= total)
                 {
@@ -1400,14 +1413,13 @@ namespace NetworkingLibrary.Services
                 }
 
 
-                int remainingHeader = (int)(msHeader.Length - msHeader.Position);
+                int remainingHeader = frame.Length - headerOffset;
                 if (remainingHeader <= 0)
                 {
                     return;
                 }
 
-                var payloadFragment = new byte[remainingHeader];
-                msHeader.Read(payloadFragment, 0, remainingHeader);
+                var payloadFragment = frame.Slice(headerOffset, remainingHeader).ToArray();
 
                 byte[] assembledPayload;
                 if (total > 1)

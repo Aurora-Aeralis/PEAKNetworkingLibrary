@@ -6,9 +6,27 @@ namespace NetworkingLibrary.Modules
 {
     internal static class NetLog
     {
+        readonly struct ThrottleState
+        {
+            internal readonly double LastAt;
+            internal readonly double LastSeenAt;
+
+            internal ThrottleState(double lastAt, double lastSeenAt)
+            {
+                LastAt = lastAt;
+                LastSeenAt = lastSeenAt;
+            }
+        }
+
+        const double ThrottleRetentionSeconds = 20d * 60d;
+        const int CleanupCheckInterval = 64;
+        const double CleanupMinIntervalSeconds = 30d;
+
         static readonly object throttleLock = new();
-        static readonly Dictionary<string, double> throttleByKey = new();
+        static readonly Dictionary<string, ThrottleState> throttleByKey = new();
         static readonly Dictionary<string, int> suppressedByKey = new();
+        static int cleanupCallCount;
+        static double lastCleanupAt = double.NegativeInfinity;
 
         internal static Func<double> TimeProvider = () => DateTime.UtcNow.Subtract(DateTime.UnixEpoch).TotalSeconds;
 
@@ -22,8 +40,18 @@ namespace NetworkingLibrary.Modules
             lock (throttleLock)
             {
                 var currentTime = now ?? TimeProvider();
-                if (throttleByKey.TryGetValue(key, out var lastAt) && currentTime - lastAt < cooldownSeconds) return false;
-                throttleByKey[key] = currentTime;
+                MaybeCleanupStaleEntries(currentTime);
+
+                if (throttleByKey.TryGetValue(key, out var state))
+                {
+                    var inCooldown = currentTime - state.LastAt < cooldownSeconds;
+                    throttleByKey[key] = inCooldown
+                        ? new ThrottleState(state.LastAt, currentTime)
+                        : new ThrottleState(currentTime, currentTime);
+                    return !inCooldown;
+                }
+
+                throttleByKey[key] = new ThrottleState(currentTime, currentTime);
                 return true;
             }
         }
@@ -41,13 +69,16 @@ namespace NetworkingLibrary.Modules
             var suppressed = 0;
             lock (throttleLock)
             {
-                if (throttleByKey.TryGetValue(key, out var lastAt) && now - lastAt < cooldownSeconds)
+                MaybeCleanupStaleEntries(now);
+
+                if (throttleByKey.TryGetValue(key, out var state) && now - state.LastAt < cooldownSeconds)
                 {
+                    throttleByKey[key] = new ThrottleState(state.LastAt, now);
                     suppressedByKey[key] = suppressedByKey.TryGetValue(key, out var currentSuppressed) ? currentSuppressed + 1 : 1;
                     return;
                 }
 
-                throttleByKey[key] = now;
+                throttleByKey[key] = new ThrottleState(now, now);
                 if (suppressedByKey.TryGetValue(key, out suppressed))
                 {
                     suppressedByKey.Remove(key);
@@ -76,8 +107,33 @@ namespace NetworkingLibrary.Modules
             {
                 throttleByKey.Clear();
                 suppressedByKey.Clear();
+                cleanupCallCount = 0;
+                lastCleanupAt = double.NegativeInfinity;
             }
             TimeProvider = () => DateTime.UtcNow.Subtract(DateTime.UnixEpoch).TotalSeconds;
+        }
+
+        static void MaybeCleanupStaleEntries(double now)
+        {
+            cleanupCallCount++;
+            if (now - lastCleanupAt < CleanupMinIntervalSeconds && cleanupCallCount % CleanupCheckInterval != 0) return;
+            if (now - lastCleanupAt < CleanupMinIntervalSeconds) return;
+
+            lastCleanupAt = now;
+            List<string>? staleKeys = null;
+            foreach (var pair in throttleByKey)
+            {
+                if (now - pair.Value.LastSeenAt <= ThrottleRetentionSeconds) continue;
+                staleKeys ??= new List<string>();
+                staleKeys.Add(pair.Key);
+            }
+
+            if (staleKeys == null) return;
+            foreach (var staleKey in staleKeys)
+            {
+                throttleByKey.Remove(staleKey);
+                suppressedByKey.Remove(staleKey);
+            }
         }
     }
 }

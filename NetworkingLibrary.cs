@@ -128,8 +128,6 @@ namespace NetworkingLibrary
                     && components.Any(component => component is NetworkingPoller);
                 var destroyingObjectWouldDeleteCanonical = hasOnlyTransformAndPoller
                     && duplicatePollerObject.transform != null
-                    && canonicalPoller != null
-                    && canonicalPoller.transform != null
                     && canonicalPoller.transform.IsChildOf(duplicatePollerObject.transform);
                 destroyAction(hasOnlyTransformAndPoller && !destroyingObjectWouldDeleteCanonical
                     ? duplicatePollerObject

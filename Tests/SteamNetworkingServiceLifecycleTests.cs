@@ -723,6 +723,30 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void GetLobbyData_AndGetPlayerData_ReturnDefault_WhenConversionFails()
+    {
+        var service = new SteamNetworkingService();
+        SetInLobby(service, true);
+        SetLobby(service, 9001UL);
+        SetField(service, "getLobbyData", (Func<CSteamID, string, string>)((_, _) => "not-an-int"));
+        SetField(service, "getLobbyMemberData", (Func<CSteamID, CSteamID, string, string>)((_, _, _) => "not-an-int"));
+
+        var lobbyEx = Record.Exception(() =>
+        {
+            var value = service.GetLobbyData<int>("round");
+            Assert.Equal(default, value);
+        });
+        var playerEx = Record.Exception(() =>
+        {
+            var value = service.GetPlayerData<int>(1234UL, "score");
+            Assert.Equal(default, value);
+        });
+
+        Assert.Null(lobbyEx);
+        Assert.Null(playerEx);
+    }
+
+    [Fact]
     public async Task DispatchIncoming_AndBuildMessage_HandleConcurrentRpcRegistrationChanges()
     {
         var service = new SteamNetworkingService();

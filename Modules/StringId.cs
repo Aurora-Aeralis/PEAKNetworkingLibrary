@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Text;
 
 namespace NetworkingLibrary.Modules
@@ -11,12 +12,17 @@ namespace NetworkingLibrary.Modules
             const uint FNV_OFFSET = 2166136261u;
             const uint FNV_PRIME = 16777619u;
             uint hash = FNV_OFFSET;
-            var data = Encoding.UTF8.GetBytes(s);
-            foreach (var b in data)
+            var encoding = Encoding.UTF8;
+            var byteCount = encoding.GetByteCount(s);
+            byte[]? rented = null;
+            Span<byte> data = byteCount <= 512 ? stackalloc byte[byteCount] : (rented = ArrayPool<byte>.Shared.Rent(byteCount));
+            var encodedCount = encoding.GetBytes(s.AsSpan(), data);
+            for (var i = 0; i < encodedCount; i++)
             {
-                hash ^= b;
+                hash ^= data[i];
                 hash *= FNV_PRIME;
             }
+            if (rented != null) ArrayPool<byte>.Shared.Return(rented);
             return hash;
         }
     }

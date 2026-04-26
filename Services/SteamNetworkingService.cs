@@ -795,7 +795,6 @@ namespace NetworkingLibrary.Services
                     if (!rpcs.ContainsKey(modId)) rpcs[modId] = new Dictionary<string, List<MessageHandler>>();
                     if (!rpcs[modId].ContainsKey(method.Name)) rpcs[modId][method.Name] = new List<MessageHandler>();
                     var handlers = rpcs[modId][method.Name];
-                    // Preserve historical registration behavior: instance registrations fan out, static registrations deduplicate.
                     var alreadyRegisteredStatic = instance == null
                         && handlers.Any(existing => existing.Mask == mask && existing.Method == method);
                     if (alreadyRegisteredStatic) continue;
@@ -1358,8 +1357,6 @@ namespace NetworkingLibrary.Services
 
         void ProcessIncomingFrame(byte[] frame, CSteamID sender)
         {
-            // Security invariant: verify MAC on canonical [flags..payload/signature] bytes before any payload mutation.
-
             if (frame.Length < FRAME_HEADER_SIZE) return;
             int flags = frame[0];
             bool compressed = (flags & COMPRESSED_FLAG) != 0;

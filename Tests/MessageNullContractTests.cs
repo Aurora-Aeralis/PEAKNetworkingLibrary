@@ -264,7 +264,7 @@ public class MessageNullContractTests
         var legacy = NewMessage();
         writePayload(legacy);
         var bytes = legacy.ToArray();
-        bytes[0] = 1; // simulate older sender protocol that did not include reference presence flags.
+        bytes[0] = 1;
         return bytes;
     }
 }

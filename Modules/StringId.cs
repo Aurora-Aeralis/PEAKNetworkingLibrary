@@ -16,14 +16,20 @@ namespace NetworkingLibrary.Modules
             var byteCount = encoding.GetByteCount(s);
             byte[]? rented = null;
             Span<byte> data = byteCount <= 512 ? stackalloc byte[byteCount] : (rented = ArrayPool<byte>.Shared.Rent(byteCount));
-            var encodedCount = encoding.GetBytes(s.AsSpan(), data);
-            for (var i = 0; i < encodedCount; i++)
+            try
             {
-                hash ^= data[i];
-                hash *= FNV_PRIME;
+                var encodedCount = encoding.GetBytes(s.AsSpan(), data);
+                for (var i = 0; i < encodedCount; i++)
+                {
+                    hash ^= data[i];
+                    hash *= FNV_PRIME;
+                }
+                return hash;
             }
-            if (rented != null) ArrayPool<byte>.Shared.Return(rented);
-            return hash;
+            finally
+            {
+                if (rented != null) ArrayPool<byte>.Shared.Return(rented);
+            }
         }
     }
 }

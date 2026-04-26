@@ -235,6 +235,24 @@ public class UnityMainThreadDispatcherTests : IDisposable
     }
 
     [Fact]
+    public void DelayedEnqueueWork_Invoke_WhenDispatcherUnavailable_NotifiesRejectionObserver()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.DelayedEnqueueObservation? observation = null;
+        UnityMainThreadDispatcher.DelayedEnqueueRejectedObserver = o => observation = o;
+
+        var delayedAction = (Action)typeof(UnityMainThreadDispatcher)
+            .GetMethod("CreateDelayedEnqueueAction", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(dispatcher, new object[] { (Action)(() => { }), 0.2f })!;
+
+        delayedAction();
+
+        Assert.True(observation.HasValue);
+        Assert.Contains("dispatcher unavailable during delayed enqueue dispatch", observation.Value.Reason);
+        Assert.Contains("enqueue rejected delayed work", observation.Value.Message);
+    }
+
+    [Fact]
     public void TryEnqueueDelayed_WhenQueueLimitReached_CoalescesDuplicates()
     {
         var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));

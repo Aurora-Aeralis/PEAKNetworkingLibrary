@@ -228,7 +228,30 @@ namespace NetworkingLibrary.Modules
                 this.delaySeconds = delaySeconds;
             }
 
-            internal void Invoke() => dispatcher.StartCoroutine(dispatcher.EnqueueDelayed(action, delaySeconds));
+            internal void Invoke()
+            {
+                if (dispatcher == null || !dispatcher)
+                {
+                    NotifyDelayedEnqueueRejected(CreateDelayedDispatchUnavailableRejection("dispatcher unavailable during delayed enqueue dispatch: dispatcher was destroyed"));
+                    return;
+                }
+
+                if (!dispatcher.isActiveAndEnabled)
+                {
+                    NotifyDelayedEnqueueRejected(CreateDelayedDispatchUnavailableRejection("dispatcher unavailable during delayed enqueue dispatch: dispatcher inactive or disabled"));
+                    return;
+                }
+
+                try
+                {
+                    dispatcher.StartCoroutine(dispatcher.EnqueueDelayed(action, delaySeconds));
+                }
+                catch (Exception)
+                {
+                    NotifyDelayedEnqueueRejected(CreateDelayedDispatchUnavailableRejection("dispatcher unavailable during delayed enqueue dispatch"));
+                    throw;
+                }
+            }
 
             public override bool Equals(object? obj)
             {
@@ -240,6 +263,14 @@ namespace NetworkingLibrary.Modules
             }
 
             public override int GetHashCode() => HashCode.Combine(dispatcher, action.Method, action.Target, delaySeconds);
+        }
+
+        static EnqueueRejectionInfo CreateDelayedDispatchUnavailableRejection(string reason)
+        {
+            var behavior = QueueOverflowBehaviorProvider?.Invoke() ?? QueueOverflowBehavior.DropOldest;
+            var maxDepth = ResolveMaxQueueDepth();
+            lock (queue)
+                return EnqueueRejectionInfo.Create(delayed: true, behavior, queue.Count, maxDepth, reason);
         }
 
         static bool TryEnqueueBounded(Action action, bool delayed, out EnqueueRejectionInfo? rejection)

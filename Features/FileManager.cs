@@ -148,7 +148,7 @@ namespace NetworkingLibrary.Features
         static void DropLegacyVersionFromConfig(ConfigFile config)
         {
             var legacyDefinition = new ConfigDefinition(VersionSection, LegacyVersionKey);
-            Exception removeException = null;
+            Exception? removeException = null;
 
             try
             {
@@ -176,12 +176,12 @@ namespace NetworkingLibrary.Features
             }
         }
 
-        internal static MethodInfo GetRemoveMethod(ConfigFile config)
+        internal static MethodInfo? GetRemoveMethod(ConfigFile config)
         {
             return config.GetType().GetMethod("Remove", new[] { typeof(ConfigDefinition) });
         }
 
-        internal static IDictionary GetOrphanedEntries(ConfigFile config)
+        internal static IDictionary? GetOrphanedEntries(ConfigFile config)
         {
             var orphanedEntriesProperty = config.GetType().GetProperty("OrphanedEntries", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             return orphanedEntriesProperty?.GetValue(config) as IDictionary;

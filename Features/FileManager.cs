@@ -15,6 +15,8 @@ namespace NetworkingLibrary.Features
         const string LegacyVersionKey = "Current Version";
         const string PluginVersionKey = "PluginVersion";
         const string CurrentConfigSchemaVersion = "1";
+        const string SchemaVersionInfo = "Tracks config schema version for non-destructive migrations.";
+        const string PluginVersionInfo = "Tracks plugin release version.";
 
         internal static ConfigEntry<T> BindConfig<T>(string Header, string Features, T Value, string? Info = "")
         {
@@ -34,38 +36,55 @@ namespace NetworkingLibrary.Features
 
         internal static void DefineConfig()
         {
-            BindConfig(VersionSection, VersionKey, CurrentConfigSchemaVersion, "Tracks config schema version for non-destructive migrations.");
-            BindConfig(VersionSection, PluginVersionKey, MyPluginInfo.PLUGIN_VERSION, "Tracks plugin release version.");
+            BindSchemaVersion(Net.Instance.config, CurrentConfigSchemaVersion);
+            BindPluginVersion(Net.Instance.config, MyPluginInfo.PLUGIN_VERSION);
         }
 
         internal static void MigrateConfigIfNeeded(ConfigFile config, string currentVersion)
         {
-            var storedVersion = GetStoredVersion(config);
+            var schemaVersionEntry = BindSchemaVersion(config, string.Empty);
+            var legacyVersionEntry = BindLegacyVersion(config);
+            var storedVersion = GetStoredVersion(schemaVersionEntry, legacyVersionEntry);
             if (storedVersion == currentVersion)
                 return;
 
-            MigrateConfig(config, storedVersion, currentVersion);
-            config.Bind(VersionSection, VersionKey, currentVersion, "Tracks config schema version for non-destructive migrations.").Value = currentVersion;
+            MigrateConfig(schemaVersionEntry, legacyVersionEntry, storedVersion, currentVersion);
+            schemaVersionEntry.Value = currentVersion;
             config.Save();
         }
 
-        static string GetStoredVersion(ConfigFile config)
+        static string GetStoredVersion(ConfigEntry<string> schemaVersionEntry, ConfigEntry<string> legacyVersionEntry)
         {
-            var version = config.Bind(VersionSection, VersionKey, string.Empty, "Tracks config schema version for non-destructive migrations.").Value;
+            var version = schemaVersionEntry.Value;
             if (!string.IsNullOrWhiteSpace(version))
                 return version;
-            return config.Bind(VersionSection, LegacyVersionKey, string.Empty, string.Empty).Value;
+            return legacyVersionEntry.Value;
         }
 
-        static void MigrateConfig(ConfigFile config, string previousVersion, string currentVersion)
+        static void MigrateConfig(ConfigEntry<string> schemaVersionEntry, ConfigEntry<string> legacyVersionEntry, string previousVersion, string currentVersion)
         {
             _ = currentVersion;
             if (string.IsNullOrWhiteSpace(previousVersion))
                 return;
 
-            var legacyVersion = config.Bind(VersionSection, LegacyVersionKey, string.Empty, string.Empty).Value;
-            if (string.IsNullOrWhiteSpace(config.Bind(VersionSection, VersionKey, string.Empty, string.Empty).Value) && !string.IsNullOrWhiteSpace(legacyVersion))
-                config.Bind(VersionSection, VersionKey, legacyVersion, "Tracks config schema version for non-destructive migrations.").Value = legacyVersion;
+            var legacyVersion = legacyVersionEntry.Value;
+            if (string.IsNullOrWhiteSpace(schemaVersionEntry.Value) && !string.IsNullOrWhiteSpace(legacyVersion))
+                schemaVersionEntry.Value = legacyVersion;
+        }
+
+        static ConfigEntry<string> BindSchemaVersion(ConfigFile config, string value)
+        {
+            return config.Bind(VersionSection, VersionKey, value, SchemaVersionInfo);
+        }
+
+        static ConfigEntry<string> BindLegacyVersion(ConfigFile config)
+        {
+            return config.Bind(VersionSection, LegacyVersionKey, string.Empty, string.Empty);
+        }
+
+        static ConfigEntry<string> BindPluginVersion(ConfigFile config, string value)
+        {
+            return config.Bind(VersionSection, PluginVersionKey, value, PluginVersionInfo);
         }
     }
 }

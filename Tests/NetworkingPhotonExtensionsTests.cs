@@ -42,4 +42,17 @@ public class NetworkingPhotonExtensionsTests
 
         Assert.True(NetworkingPhotonExtensions.GetUnresolvedMappingWarningThrottleCountForTests() <= 2048);
     }
+
+    [Fact]
+    public void ResetUnresolvedMappingWarningThrottleForTests_Resets_Prune_Scheduling_State()
+    {
+        NetworkingPhotonExtensions.ResetUnresolvedMappingWarningThrottleForTests();
+
+        var t0 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        Assert.True(NetworkingPhotonExtensions.ShouldEmitUnresolvedMappingWarning(1, "old issue", t0));
+
+        NetworkingPhotonExtensions.ResetUnresolvedMappingWarningThrottleForTests();
+        Assert.True(NetworkingPhotonExtensions.ShouldEmitUnresolvedMappingWarning(2, "new issue", t0.AddSeconds(29)));
+        Assert.Equal(1, NetworkingPhotonExtensions.GetUnresolvedMappingWarningThrottleCountForTests());
+    }
 }

@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Collections;
+using System.Collections.Generic;
 using System.Reflection;
 using System.Collections.Concurrent;
 using BepInEx.Configuration;
@@ -215,38 +216,45 @@ namespace NetworkingLibrary.Features
                     return false;
 
                 var lines = File.ReadAllLines(configPath);
+                var filteredLines = new List<string>(lines.Length);
                 var changed = false;
                 var inVersionSection = false;
-                for (var i = 0; i < lines.Length; i++)
+                foreach (var line in lines)
                 {
-                    var trimmed = lines[i].Trim();
+                    var trimmed = line.Trim();
                     if (trimmed.StartsWith("[", StringComparison.Ordinal) && trimmed.EndsWith("]", StringComparison.Ordinal))
                     {
                         var section = trimmed[1..^1].Trim();
                         inVersionSection = section.Equals(VersionSection, StringComparison.Ordinal);
+                        filteredLines.Add(line);
                         continue;
                     }
 
-                    if (!inVersionSection)
+                    if (!inVersionSection || string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#", StringComparison.Ordinal) || trimmed.StartsWith(";", StringComparison.Ordinal))
+                    {
+                        filteredLines.Add(line);
                         continue;
+                    }
 
-                    if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#", StringComparison.Ordinal) || trimmed.StartsWith(";", StringComparison.Ordinal))
-                        continue;
-
-                    var separatorIndex = lines[i].IndexOf('=');
+                    var separatorIndex = line.IndexOf('=');
                     if (separatorIndex <= 0)
+                    {
+                        filteredLines.Add(line);
                         continue;
+                    }
 
-                    var key = lines[i][..separatorIndex].Trim();
+                    var key = line[..separatorIndex].Trim();
                     if (!key.Equals(LegacyVersionKey, StringComparison.Ordinal))
+                    {
+                        filteredLines.Add(line);
                         continue;
+                    }
 
-                    lines[i] = lines[i][..(separatorIndex + 1)];
                     changed = true;
                 }
 
                 if (changed)
-                    File.WriteAllLines(configPath, lines);
+                    File.WriteAllLines(configPath, filteredLines);
                 return true;
             }
             catch (Exception ex)

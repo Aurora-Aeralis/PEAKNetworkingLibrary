@@ -133,7 +133,7 @@ public class FileManagerConfigMigrationTests
     }
 
     [Fact]
-    public void MigrateConfigIfNeeded_ReflectionCleanupFailure_StillNormalizesSchemaVersion()
+    public void MigrateConfigIfNeeded_ReflectionCleanupFailure_FallbackRemovesLegacyLineAndNormalizesSchemaVersion()
     {
         using var scope = new TempConfigScope();
         var seedConfig = new ConfigFile(scope.ConfigPath, true);
@@ -149,7 +149,7 @@ public class FileManagerConfigMigrationTests
 
         Assert.Equal("1", schemaVersion);
         Assert.Contains("ConfigSchemaVersion = 1", configText, StringComparison.Ordinal);
-        Assert.DoesNotContain("Current Version = 1", configText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Current Version =", configText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -195,7 +195,7 @@ public class FileManagerConfigMigrationTests
     [InlineData("Current Version=1")]
     [InlineData("Current Version    =    1")]
     [InlineData("    Current Version = 1")]
-    public void MigrateConfigIfNeeded_LegacyVersionSpacingVariants_ParsesAndClearsOrRemovesKey(string legacyLine)
+    public void MigrateConfigIfNeeded_LegacyVersionSpacingVariants_ParsesAndRemovesKey(string legacyLine)
     {
         using var scope = new TempConfigScope();
         File.WriteAllText(scope.ConfigPath,
@@ -209,7 +209,7 @@ public class FileManagerConfigMigrationTests
         var configText = File.ReadAllText(scope.ConfigPath);
 
         Assert.Equal("1", schemaVersion);
-        Assert.True(IsLegacyVersionClearedOrRemoved(configText));
+        Assert.DoesNotContain("Current Version =", configText, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -233,37 +233,7 @@ public class FileManagerConfigMigrationTests
 
         Assert.Equal("1", schemaVersion);
         Assert.Contains("ConfigSchemaVersion = 1", configText, StringComparison.Ordinal);
-        Assert.True(IsLegacyVersionClearedOrRemoved(configText));
-    }
-
-    static bool IsLegacyVersionClearedOrRemoved(string configText)
-    {
-        var inVersionSection = false;
-        foreach (var line in configText.Split('\n', StringSplitOptions.None))
-        {
-            var trimmed = line.Trim();
-            if (trimmed.StartsWith("[", StringComparison.Ordinal) && trimmed.EndsWith("]", StringComparison.Ordinal))
-            {
-                inVersionSection = string.Equals(trimmed[1..^1].Trim(), "Version", StringComparison.Ordinal);
-                continue;
-            }
-
-            if (!inVersionSection || string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#", StringComparison.Ordinal) || trimmed.StartsWith(";", StringComparison.Ordinal))
-                continue;
-
-            var separatorIndex = line.IndexOf('=');
-            if (separatorIndex <= 0)
-                continue;
-
-            var key = line[..separatorIndex].Trim();
-            if (!string.Equals(key, "Current Version", StringComparison.Ordinal))
-                continue;
-
-            if (!string.IsNullOrWhiteSpace(line[(separatorIndex + 1)..]))
-                return false;
-        }
-
-        return true;
+        Assert.DoesNotContain("Current Version =", configText, StringComparison.Ordinal);
     }
 
     sealed class TrackingRemoveConfigFile : ConfigFile

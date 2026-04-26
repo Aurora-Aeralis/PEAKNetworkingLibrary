@@ -77,8 +77,12 @@ namespace NetworkingLibrary.Features
                 throw new InvalidOperationException($"Current config schema version '{currentVersion}' is not a valid schema identifier.");
 
             var sourceVersion = string.IsNullOrWhiteSpace(schemaVersionEntry.Value) ? legacyVersion : previousVersion;
-            if (!TryParseSchemaVersion(sourceVersion, out var startVersion))
+            var sourceVersionValid = TryParseSchemaVersion(sourceVersion, out var startVersion);
+            if (!sourceVersionValid || startVersion < 0)
+            {
                 startVersion = 0;
+                Net.Logger?.LogWarning($"Invalid source config schema version '{sourceVersion}'. Defaulting migration start version to 0.");
+            }
 
             for (var schemaVersion = startVersion; schemaVersion < targetVersion; schemaVersion++)
             {
@@ -96,7 +100,9 @@ namespace NetworkingLibrary.Features
         static bool TryParseSchemaVersion(string version, out int schemaVersion)
         {
             schemaVersion = 0;
-            return !string.IsNullOrWhiteSpace(version) && int.TryParse(version, out schemaVersion);
+            if (string.IsNullOrWhiteSpace(version) || !int.TryParse(version, out schemaVersion))
+                return false;
+            return schemaVersion >= 0;
         }
 
         static void Migrate_0_to_1(ConfigEntry<string> schemaVersionEntry, string legacyVersion)

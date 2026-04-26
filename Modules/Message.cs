@@ -7,6 +7,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Reflection;
 using System.Text;
+using System.Threading;
 using UnityEngine;
 using Steamworks;
 
@@ -60,7 +61,12 @@ namespace NetworkingLibrary.Modules
         /// <para>Reads synchronize legacy <see cref="MaxSize"/> writes into <see cref="DefaultSizePolicy"/> deterministically.</para>
         /// </summary>
         public static int MaxLogicalSize => ResolveDefaultSizePolicy().MaxLogicalSize;
-        public static MessageSizePolicy DefaultSizePolicy { get; private set; } = new(DefaultMaxSize);
+        private static MessageSizePolicy defaultSizePolicy = new(DefaultMaxSize);
+        public static MessageSizePolicy DefaultSizePolicy
+        {
+            get => Volatile.Read(ref defaultSizePolicy);
+            private set => Volatile.Write(ref defaultSizePolicy, value);
+        }
 
         /// <summary>
         /// Gets the effective max size from the synchronized default policy.
@@ -72,15 +78,16 @@ namespace NetworkingLibrary.Modules
             ValidateMaxSize(bytes);
             lock (DefaultSizePolicyLock)
             {
-                MaxSize = bytes;
-                DefaultSizePolicy = new MessageSizePolicy(bytes);
+                var policy = new MessageSizePolicy(bytes);
+                DefaultSizePolicy = policy;
+                Volatile.Write(ref MaxSize, bytes);
             }
         }
 
         private static MessageSizePolicy ResolveDefaultSizePolicy()
         {
             var current = DefaultSizePolicy;
-            var legacyMaxSize = MaxSize;
+            var legacyMaxSize = Volatile.Read(ref MaxSize);
             if (current.MaxSize == legacyMaxSize)
             {
                 return current;
@@ -88,14 +95,16 @@ namespace NetworkingLibrary.Modules
 
             lock (DefaultSizePolicyLock)
             {
-                legacyMaxSize = MaxSize;
-                if (DefaultSizePolicy.MaxSize != legacyMaxSize)
+                legacyMaxSize = Volatile.Read(ref MaxSize);
+                current = DefaultSizePolicy;
+                if (current.MaxSize != legacyMaxSize)
                 {
                     ValidateMaxSize(legacyMaxSize);
-                    DefaultSizePolicy = new MessageSizePolicy(legacyMaxSize);
+                    current = new MessageSizePolicy(legacyMaxSize);
+                    DefaultSizePolicy = current;
                 }
 
-                return DefaultSizePolicy;
+                return current;
             }
         }
 

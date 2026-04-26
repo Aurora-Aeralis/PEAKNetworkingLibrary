@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Collections;
 using System.Reflection;
+using System.Collections.Concurrent;
 using BepInEx.Configuration;
 using BepInEx;
 
@@ -18,8 +19,8 @@ namespace NetworkingLibrary.Features
         const string PluginVersionInfo = "Tracks plugin release version.";
         const string DaModsFolderName = "DAa Mods";
         const string ConfigFileName = "config.cfg";
-        static readonly Lazy<MethodInfo?> RemoveMethod = new(() => typeof(ConfigFile).GetMethod("Remove", new[] { typeof(ConfigDefinition) }));
-        static readonly Lazy<PropertyInfo?> OrphanedEntriesProperty = new(() => typeof(ConfigFile).GetProperty("OrphanedEntries", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic));
+        static readonly ConcurrentDictionary<Type, Lazy<MethodInfo?>> RemoveMethodCache = new();
+        static readonly ConcurrentDictionary<Type, Lazy<PropertyInfo?>> OrphanedEntriesPropertyCache = new();
 
         internal static ConfigEntry<T> BindConfig<T>(string Header, string Features, T Value, string? Info = "")
         {
@@ -128,8 +129,8 @@ namespace NetworkingLibrary.Features
         {
             var legacyDefinition = new ConfigDefinition(VersionSection, LegacyVersionKey);
             Exception? removeException = null;
-            var removeMethod = GetRemoveMethod();
-            var orphanedEntriesProperty = GetOrphanedEntriesProperty();
+            var removeMethod = GetRemoveMethod(config);
+            var orphanedEntriesProperty = GetOrphanedEntriesProperty(config);
             if (removeMethod == null && orphanedEntriesProperty == null)
             {
                 ClearLegacyVersion(config);
@@ -182,19 +183,27 @@ namespace NetworkingLibrary.Features
                 File.WriteAllLines(configPath, lines);
         }
 
-        internal static MethodInfo? GetRemoveMethod()
+        internal static MethodInfo? GetRemoveMethod(ConfigFile config)
         {
-            return RemoveMethod.Value;
+            var configType = config.GetType();
+            var removeMethod = RemoveMethodCache.GetOrAdd(
+                configType,
+                type => new Lazy<MethodInfo?>(() => type.GetMethod("Remove", new[] { typeof(ConfigDefinition) })));
+            return removeMethod.Value;
         }
 
-        internal static PropertyInfo? GetOrphanedEntriesProperty()
+        internal static PropertyInfo? GetOrphanedEntriesProperty(ConfigFile config)
         {
-            return OrphanedEntriesProperty.Value;
+            var configType = config.GetType();
+            var orphanedEntriesProperty = OrphanedEntriesPropertyCache.GetOrAdd(
+                configType,
+                type => new Lazy<PropertyInfo?>(() => type.GetProperty("OrphanedEntries", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)));
+            return orphanedEntriesProperty.Value;
         }
 
         internal static IDictionary? GetOrphanedEntries(ConfigFile config, PropertyInfo? orphanedEntriesProperty = null)
         {
-            orphanedEntriesProperty ??= GetOrphanedEntriesProperty();
+            orphanedEntriesProperty ??= GetOrphanedEntriesProperty(config);
             return orphanedEntriesProperty?.GetValue(config) as IDictionary;
         }
 

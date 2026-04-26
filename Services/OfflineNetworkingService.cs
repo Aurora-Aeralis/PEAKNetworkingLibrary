@@ -163,7 +163,6 @@ namespace NetworkingLibrary.Services
             lobbyData.Clear();
             perPlayerData.Clear();
             perPlayerData[LocalSteamId] = new Dictionary<string, string>();
-            // Event contract (deterministic): LobbyCreated (host-only) -> LobbyEntered -> PlayerEntered(local member).
             LobbyCreated?.Invoke();
             LobbyEntered?.Invoke();
             PlayerEntered?.Invoke(LocalSteamId);
@@ -201,7 +200,6 @@ namespace NetworkingLibrary.Services
             lobbyData.Clear();
             perPlayerData.Clear();
             perPlayerData[LocalSteamId] = new Dictionary<string, string>();
-            // Event contract (deterministic): LobbyEntered -> PlayerEntered(local member).
             LobbyEntered?.Invoke();
             PlayerEntered?.Invoke(LocalSteamId);
             offlineIsHost = true;
@@ -282,16 +280,24 @@ namespace NetworkingLibrary.Services
                 foreach (var method in t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
                 {
                     if (!method.IsDefined(typeof(CustomRPCAttribute), inherit: false)) continue;
-                    if (!rpcs.ContainsKey(modId)) rpcs[modId] = new Dictionary<string, List<MessageHandler>>();
-                    if (!rpcs[modId].ContainsKey(method.Name)) rpcs[modId][method.Name] = new List<MessageHandler>();
-                    var handlers = rpcs[modId][method.Name];
+                    if (!rpcs.TryGetValue(modId, out var methods))
+                    {
+                        methods = new Dictionary<string, List<MessageHandler>>();
+                        rpcs[modId] = methods;
+                    }
+                    if (!methods.TryGetValue(method.Name, out var handlers))
+                    {
+                        handlers = new List<MessageHandler>();
+                        methods[method.Name] = handlers;
+                    }
+                    var methodParameters = method.GetParameters();
                     if (handlers.Any(existing => existing.Mask == mask && existing.Method == method && ReferenceEquals(existing.Target, instance))) continue;
                     var handler = new MessageHandler
                     {
                         Target = instance,
                         Method = method,
-                        Parameters = method.GetParameters(),
-                        TakesInfo = method.GetParameters().Length > 0 && IsRpcInfoParameterType(method.GetParameters().Last().ParameterType),
+                        Parameters = methodParameters,
+                        TakesInfo = methodParameters.Length > 0 && IsRpcInfoParameterType(methodParameters.Last().ParameterType),
                         Mask = mask
                     };
                     handlers.Add(handler);
@@ -311,16 +317,24 @@ namespace NetworkingLibrary.Services
                     if (!method.IsDefined(typeof(CustomRPCAttribute), inherit: false)) continue;
                     if (!method.IsStatic) throw new InvalidOperationException($"Cannot register instance RPC method {type.FullName}.{method.Name} without an instance.");
 
-                    if (!rpcs.ContainsKey(modId)) rpcs[modId] = new Dictionary<string, List<MessageHandler>>();
-                    if (!rpcs[modId].ContainsKey(method.Name)) rpcs[modId][method.Name] = new List<MessageHandler>();
-                    var handlers = rpcs[modId][method.Name];
+                    if (!rpcs.TryGetValue(modId, out var methods))
+                    {
+                        methods = new Dictionary<string, List<MessageHandler>>();
+                        rpcs[modId] = methods;
+                    }
+                    if (!methods.TryGetValue(method.Name, out var handlers))
+                    {
+                        handlers = new List<MessageHandler>();
+                        methods[method.Name] = handlers;
+                    }
+                    var methodParameters = method.GetParameters();
                     if (handlers.Any(existing => existing.Mask == mask && existing.Method == method)) continue;
                     var handler = new MessageHandler
                     {
                         Target = null!,
                         Method = method,
-                        Parameters = method.GetParameters(),
-                        TakesInfo = method.GetParameters().Length > 0 && IsRpcInfoParameterType(method.GetParameters().Last().ParameterType),
+                        Parameters = methodParameters,
+                        TakesInfo = methodParameters.Length > 0 && IsRpcInfoParameterType(methodParameters.Last().ParameterType),
                         Mask = mask
                     };
                     handlers.Add(handler);

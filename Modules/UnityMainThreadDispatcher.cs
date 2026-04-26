@@ -185,6 +185,12 @@ namespace NetworkingLibrary.Modules
             TryEnqueue(a, delaySeconds);
         }
 
+        public void EnqueueOrThrow(Action a, float delaySeconds = 0f)
+        {
+            if (TryEnqueue(a, delaySeconds)) return;
+            ThrowEnqueueFailure(delaySeconds > 0f);
+        }
+
         Action CreateDelayedEnqueueAction(Action action, float delaySeconds)
         {
             var delayedWork = new DelayedEnqueueWork(this, action, delaySeconds);
@@ -195,7 +201,8 @@ namespace NetworkingLibrary.Modules
         {
             if (a == null) throw new ArgumentNullException(nameof(a));
             yield return new WaitForSeconds(d);
-            TryEnqueueBounded(a, delayed: true);
+            if (TryEnqueueBounded(a, delayed: true)) yield break;
+            ThrowEnqueueFailure(delayed: true);
         }
 
         sealed class DelayedEnqueueWork
@@ -265,6 +272,12 @@ namespace NetworkingLibrary.Modules
                         return false;
                 }
             }
+        }
+
+        static void ThrowEnqueueFailure(bool delayed)
+        {
+            var overflowBehavior = QueueOverflowBehaviorProvider?.Invoke() ?? QueueOverflowBehavior.DropOldest;
+            throw new InvalidOperationException($"UnityMainThreadDispatcher failed to enqueue {(delayed ? "delayed" : "immediate")} work because overflow mode {overflowBehavior} rejected or coalesced it.");
         }
 
         static bool HasEquivalentPendingAction(Action action)

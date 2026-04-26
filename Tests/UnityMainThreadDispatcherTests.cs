@@ -177,10 +177,61 @@ public class UnityMainThreadDispatcherTests : IDisposable
             .Invoke(dispatcher, new object[] { (Action)(() => { }), 0f })!;
 
         Assert.True(delayed.MoveNext());
-        Assert.False(delayed.MoveNext());
+        var error = Record.Exception(() => delayed.MoveNext());
+        Assert.IsType<InvalidOperationException>(error);
+        Assert.Contains("RejectNewWork", error!.Message);
+        Assert.Contains("delayed", error.Message);
 
         Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
         Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.RejectedEnqueueCountForTests);
+    }
+
+    [Fact]
+    public void EnqueueOrThrow_WhenOverflowModeRejectNewWork_ThrowsWithModeAndWorkType()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 1;
+        UnityMainThreadDispatcher.QueueOverflowBehaviorProvider = () => UnityMainThreadDispatcher.QueueOverflowBehavior.RejectNewWork;
+
+        dispatcher.EnqueueOrThrow(() => { });
+        var error = Assert.Throws<InvalidOperationException>(() => dispatcher.EnqueueOrThrow(() => { }));
+        Assert.Contains("RejectNewWork", error.Message);
+        Assert.Contains("immediate", error.Message);
+    }
+
+    [Fact]
+    public void EnqueueOrThrow_WhenOverflowModeCoalesce_ThrowsForDuplicateDelayedWork()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 1;
+        UnityMainThreadDispatcher.QueueOverflowBehaviorProvider = () => UnityMainThreadDispatcher.QueueOverflowBehavior.Coalesce;
+
+        Action action = () => { };
+        dispatcher.EnqueueOrThrow(action, 1f);
+        var error = Assert.Throws<InvalidOperationException>(() => dispatcher.EnqueueOrThrow(action, 1f));
+        Assert.Contains("Coalesce", error.Message);
+        Assert.Contains("delayed", error.Message);
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.CoalescedEnqueueCountForTests);
+    }
+
+    [Fact]
+    public void EnqueueOrThrow_WhenOverflowModeDropOldest_DoesNotThrowAndReplacesOldest()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 2;
+        UnityMainThreadDispatcher.QueueOverflowBehaviorProvider = () => UnityMainThreadDispatcher.QueueOverflowBehavior.DropOldest;
+
+        var executed = new List<int>();
+        dispatcher.EnqueueOrThrow(() => executed.Add(1));
+        dispatcher.EnqueueOrThrow(() => executed.Add(2));
+        dispatcher.EnqueueOrThrow(() => executed.Add(3));
+
+        typeof(UnityMainThreadDispatcher)
+            .GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(dispatcher, null);
+
+        Assert.Equal(new[] { 2, 3 }, executed);
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.DroppedEnqueueCountForTests);
     }
 
     [Fact]

@@ -48,6 +48,12 @@ namespace NetworkingLibrary
 
         private void OnDestroy()
         {
+            if (startupRetryCoroutine != null)
+            {
+                StopCoroutine(startupRetryCoroutine);
+                startupRetryCoroutine = null;
+            }
+
             try
             {
                 Service?.Shutdown();
@@ -264,81 +270,88 @@ namespace NetworkingLibrary
 
         IEnumerator RetrySteamInitializationForStartupWindow(float retryWindowSeconds)
         {
-            var delaySeconds = StartupRetryInitialDelaySeconds;
-            var deadline = RealtimeSinceStartupProvider() + Mathf.Max(0.1f, retryWindowSeconds);
-
-            while (RealtimeSinceStartupProvider() < deadline)
+            try
             {
-                yield return WaitForSecondsRealtimeFactory(delaySeconds);
+                var delaySeconds = StartupRetryInitialDelaySeconds;
+                var deadline = RealtimeSinceStartupProvider() + Mathf.Max(0.1f, retryWindowSeconds);
 
-                var previousService = Service;
-                if (previousService == null) yield break;
+                while (RealtimeSinceStartupProvider() < deadline)
+                {
+                    yield return WaitForSecondsRealtimeFactory(delaySeconds);
 
-                INetworkingService? candidateService = null;
-                DefaultServiceSelectionReason selectionReason;
-                try
-                {
-                    var defaultCreation = CreateDefaultNetworkingServiceWithReason();
-                    candidateService = defaultCreation.service;
-                    selectionReason = defaultCreation.reason;
-                }
-                catch (Exception ex)
-                {
-                    LogStartupRetryTransitionThrottled($"Aborting startup retries: default service creation threw {ex.GetType().Name}: {ex.Message}");
-                    yield break;
-                }
+                    var previousService = Service;
+                    if (previousService == null) yield break;
 
-                if (selectionReason == DefaultServiceSelectionReason.SteamReady)
-                {
+                    INetworkingService? candidateService = null;
+                    DefaultServiceSelectionReason selectionReason;
                     try
                     {
-                        candidateService.Initialize();
-                        if (!candidateService.IsInitialized)
-                        {
-                            LogStartupRetryTransitionThrottled("Steam readiness probe passed but Steam service did not initialize yet; continuing startup retries.");
-                            SafeShutdown(candidateService, "startup retry steam candidate");
-                            delaySeconds = Mathf.Min(StartupRetryMaxDelaySeconds, delaySeconds * StartupRetryBackoffMultiplier);
-                            continue;
-                        }
+                        var defaultCreation = CreateDefaultNetworkingServiceWithReason();
+                        candidateService = defaultCreation.service;
+                        selectionReason = defaultCreation.reason;
+                    }
+                    catch (Exception ex)
+                    {
+                        LogStartupRetryTransitionThrottled($"Aborting startup retries: default service creation threw {ex.GetType().Name}: {ex.Message}");
+                        yield break;
+                    }
 
-                        if (ReferenceEquals(Service, previousService))
+                    if (selectionReason == DefaultServiceSelectionReason.SteamReady)
+                    {
+                        try
                         {
-                            if (previousService.InLobby)
+                            candidateService.Initialize();
+                            if (!candidateService.IsInitialized)
                             {
-                                LogStartupRetryTransitionThrottled("Skipping Steam promotion during startup retry because the active service is currently in a lobby.");
-                                SafeShutdown(candidateService, "startup retry steam candidate while active lobby");
+                                LogStartupRetryTransitionThrottled("Steam readiness probe passed but Steam service did not initialize yet; continuing startup retries.");
+                                SafeShutdown(candidateService, "startup retry steam candidate");
                                 delaySeconds = Mathf.Min(StartupRetryMaxDelaySeconds, delaySeconds * StartupRetryBackoffMultiplier);
                                 continue;
                             }
 
-                            ReplaceService(previousService, candidateService, "Steam became ready during startup retry window.");
+                            if (ReferenceEquals(Service, previousService))
+                            {
+                                if (previousService.InLobby)
+                                {
+                                    LogStartupRetryTransitionThrottled("Skipping Steam promotion during startup retry because the active service is currently in a lobby.");
+                                    SafeShutdown(candidateService, "startup retry steam candidate while active lobby");
+                                    delaySeconds = Mathf.Min(StartupRetryMaxDelaySeconds, delaySeconds * StartupRetryBackoffMultiplier);
+                                    continue;
+                                }
+
+                                ReplaceService(previousService, candidateService, "Steam became ready during startup retry window.");
+                            }
+                            else
+                            {
+                                SafeShutdown(candidateService, "startup retry stale steam candidate");
+                            }
+                            yield break;
                         }
-                        else
+                        catch (Exception ex)
                         {
-                            SafeShutdown(candidateService, "startup retry stale steam candidate");
+                            SafeShutdown(candidateService, "startup retry steam candidate after initialize exception");
+                            LogStartupRetryTransitionThrottled($"Aborting startup retries: Steam service initialization threw {ex.GetType().Name}: {ex.Message}");
+                            yield break;
                         }
-                        yield break;
                     }
-                    catch (Exception ex)
+
+                    SafeShutdown(candidateService, "startup retry discarded candidate");
+                    if (selectionReason == DefaultServiceSelectionReason.SteamApiNotReady)
                     {
-                        SafeShutdown(candidateService, "startup retry steam candidate after initialize exception");
-                        LogStartupRetryTransitionThrottled($"Aborting startup retries: Steam service initialization threw {ex.GetType().Name}: {ex.Message}");
-                        yield break;
+                        delaySeconds = Mathf.Min(StartupRetryMaxDelaySeconds, delaySeconds * StartupRetryBackoffMultiplier);
+                        continue;
                     }
+
+                    LogStartupRetryTransitionThrottled($"Aborting startup retries: default selection reason is {selectionReason}.");
+                    yield break;
                 }
 
-                SafeShutdown(candidateService, "startup retry discarded candidate");
-                if (selectionReason == DefaultServiceSelectionReason.SteamApiNotReady)
-                {
-                    delaySeconds = Mathf.Min(StartupRetryMaxDelaySeconds, delaySeconds * StartupRetryBackoffMultiplier);
-                    continue;
-                }
-
-                LogStartupRetryTransitionThrottled($"Aborting startup retries: default selection reason is {selectionReason}.");
-                yield break;
+                LogStartupRetryTransitionThrottled("Startup retry window elapsed before Steam became ready.");
             }
-
-            LogStartupRetryTransitionThrottled("Startup retry window elapsed before Steam became ready.");
+            finally
+            {
+                startupRetryCoroutine = null;
+            }
         }
 
         static void ReplaceService(INetworkingService previousService, INetworkingService nextService, string reason)

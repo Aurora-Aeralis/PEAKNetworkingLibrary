@@ -21,6 +21,10 @@ namespace NetworkingLibrary.Services
     {
         const string LogSource = "NetworkingServiceFactory";
         const float ProbeDebugLogCooldownSeconds = 2f;
+        static readonly object loadedSteamManagerCacheLock = new();
+        static int loadedSteamManagerCacheAssemblyCount = -1;
+        static Type? loadedSteamManagerCacheType;
+        static bool loadedSteamManagerCacheInitialized;
 
 #if !UNITY_EDITOR
         internal static Func<bool> IsSteamClientRunning = () => SteamAPI.IsSteamRunning();
@@ -114,7 +118,7 @@ namespace NetworkingLibrary.Services
                     if (TryReadInitializedFromType(steamManagerType, out isInitialized)) return true;
                 }
 
-                var loadedSteamManagerType = ResolveLoadedSteamManagerType();
+                var loadedSteamManagerType = ResolveLoadedSteamManagerTypeCached();
                 if (loadedSteamManagerType != null && TryReadInitializedFromType(loadedSteamManagerType, out isInitialized))
                     return true;
 
@@ -127,7 +131,22 @@ namespace NetworkingLibrary.Services
             }
         }
 
-        static Type? ResolveLoadedSteamManagerType()
+        static Type? ResolveLoadedSteamManagerTypeCached()
+        {
+            var assemblyCount = AppDomain.CurrentDomain.GetAssemblies().Length;
+            lock (loadedSteamManagerCacheLock)
+            {
+                if (loadedSteamManagerCacheInitialized && loadedSteamManagerCacheAssemblyCount == assemblyCount)
+                    return loadedSteamManagerCacheType;
+
+                loadedSteamManagerCacheType = ResolveLoadedSteamManagerTypeUncached();
+                loadedSteamManagerCacheAssemblyCount = assemblyCount;
+                loadedSteamManagerCacheInitialized = true;
+                return loadedSteamManagerCacheType;
+            }
+        }
+
+        static Type? ResolveLoadedSteamManagerTypeUncached()
         {
             const BindingFlags AnyStaticVisibility = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
             var assemblies = AppDomain.CurrentDomain.GetAssemblies();
@@ -241,6 +260,12 @@ namespace NetworkingLibrary.Services
             CreateOfflineService = () => new OfflineNetworkingService();
             ResolveType = Type.GetType;
             UnscaledTimeProvider = () => Time.unscaledTime;
+            lock (loadedSteamManagerCacheLock)
+            {
+                loadedSteamManagerCacheAssemblyCount = -1;
+                loadedSteamManagerCacheType = null;
+                loadedSteamManagerCacheInitialized = false;
+            }
         }
 #endif
     }

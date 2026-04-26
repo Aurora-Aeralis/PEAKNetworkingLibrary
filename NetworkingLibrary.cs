@@ -17,7 +17,7 @@ namespace NetworkingLibrary
     {
         public static Net Instance { get; private set; } = null!;
         internal new static ManualLogSource Logger { get; private set; } = null!;
-        internal static Harmony Harmony = new Harmony(MyPluginInfo.PLUGIN_GUID);
+        internal static Harmony? Harmony = new Harmony(MyPluginInfo.PLUGIN_GUID);
 
         public ConfigFile config = null!;
         public static INetworkingService? Service { get; private set; } 
@@ -46,8 +46,12 @@ namespace NetworkingLibrary
 
             try
             {
-                Harmony.UnpatchSelf();
-                Logger?.LogDebug("Removed Harmony patches during plugin teardown.");
+                var harmony = Harmony;
+                if (harmony != null)
+                {
+                    harmony.UnpatchSelf();
+                    Logger?.LogDebug("Removed Harmony patches during plugin teardown.");
+                }
             }
             catch (Exception ex)
             {
@@ -55,6 +59,7 @@ namespace NetworkingLibrary
             }
             finally
             {
+                Harmony = null;
                 Instance = null!;
             }
         }

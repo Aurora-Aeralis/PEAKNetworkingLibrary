@@ -144,6 +144,31 @@ public class NetLifecycleTeardownTests
     }
 
     [Fact]
+    public void OnDestroy_DoesNotThrow_WhenInitializationWasPartial_AndStaticsAreUnset()
+    {
+        SetService(null);
+
+        var harmonyField = typeof(Net).GetField("Harmony", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var originalHarmony = harmonyField.GetValue(null);
+
+        try
+        {
+            harmonyField.SetValue(null, null);
+
+            var net = (Net)FormatterServices.GetUninitializedObject(typeof(Net));
+            var ex = Record.Exception(() => InvokeOnDestroy(net));
+
+            Assert.Null(ex);
+            Assert.Null(GetService());
+            Assert.Null(harmonyField.GetValue(null));
+        }
+        finally
+        {
+            harmonyField.SetValue(null, originalHarmony);
+        }
+    }
+
+    [Fact]
     public void OnDestroy_DoesNotThrow_WhenServiceShutdownThrows_AndStillClearsStaticService()
     {
         var service = new FakeNetworkingService { ThrowOnShutdown = true };

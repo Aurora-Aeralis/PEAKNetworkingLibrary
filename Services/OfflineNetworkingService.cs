@@ -39,10 +39,6 @@ namespace NetworkingLibrary.Services
         HMACSHA256? globalHmac;
         readonly Dictionary<uint, Func<byte[], byte[]>> modSigners = new();
         readonly Dictionary<uint, RSAParameters> modPublicKeys = new();
-        static readonly HashSet<string> CompatibleRpcInfoTypeNames = new(StringComparer.Ordinal)
-        {
-            "NetworkingLibrary.Modules.RPCInfo"
-        };
 
         static void LogError(string message)
         {
@@ -293,7 +289,7 @@ namespace NetworkingLibrary.Services
                         Target = instance,
                         Method = method,
                         Parameters = methodParameters,
-                        TakesInfo = methodParameters.Length > 0 && IsRpcInfoParameterType(methodParameters.Last().ParameterType),
+                        TakesInfo = methodParameters.Length > 0 && RpcInfoParameterTypeHelper.IsRpcInfoParameterType(methodParameters.Last().ParameterType),
                         Mask = mask
                     };
                     handlers.Add(handler);
@@ -330,7 +326,7 @@ namespace NetworkingLibrary.Services
                         Target = null!,
                         Method = method,
                         Parameters = methodParameters,
-                        TakesInfo = methodParameters.Length > 0 && IsRpcInfoParameterType(methodParameters.Last().ParameterType),
+                        TakesInfo = methodParameters.Length > 0 && RpcInfoParameterTypeHelper.IsRpcInfoParameterType(methodParameters.Last().ParameterType),
                         Mask = mask
                     };
                     handlers.Add(handler);
@@ -741,13 +737,6 @@ namespace NetworkingLibrary.Services
             var property = infoType.GetProperty(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             if (property == null || !property.CanWrite) return;
             TryAssignMemberValue(property.PropertyType, value => property.SetValue(instance, value), steamId64, steamIdString);
-        }
-
-        static bool IsRpcInfoParameterType(Type parameterType)
-        {
-            if (parameterType == typeof(RPCInfo)) return true;
-            var fullName = parameterType.FullName;
-            return fullName != null && CompatibleRpcInfoTypeNames.Contains(fullName);
         }
 
         static void TryAssignMemberValue(Type memberType, Action<object> assign, ulong steamId64, string steamIdString)

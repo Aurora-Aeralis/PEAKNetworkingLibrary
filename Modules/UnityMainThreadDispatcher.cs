@@ -264,19 +264,16 @@ namespace NetworkingLibrary.Modules
                         {
                             coalescedEnqueueCount++;
                             rejection = EnqueueRejectionInfo.Create(delayed, behavior, queue.Count, maxDepth, "coalesced duplicate action");
-                            EmitOverflowWarning($"UnityMainThreadDispatcher queue depth limit ({maxDepth}) reached; coalescing duplicate {(delayed ? "delayed" : "immediate")} action.");
                             return false;
                         }
 
                         rejectedEnqueueCount++;
                         rejection = EnqueueRejectionInfo.Create(delayed, behavior, queue.Count, maxDepth, "coalesce fallback rejected non-duplicate action");
-                        EmitOverflowWarning($"UnityMainThreadDispatcher queue depth limit ({maxDepth}) reached; coalesce fallback rejected non-duplicate {(delayed ? "delayed" : "immediate")} action.");
                         return false;
                     case QueueOverflowBehavior.RejectNewWork:
                     default:
                         rejectedEnqueueCount++;
                         rejection = EnqueueRejectionInfo.Create(delayed, behavior, queue.Count, maxDepth, "rejected new action");
-                        EmitOverflowWarning($"UnityMainThreadDispatcher queue depth limit ({maxDepth}) reached; rejecting new {(delayed ? "delayed" : "immediate")} action.");
                         return false;
                 }
             }

@@ -1,12 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-    <!-- BepInEx Properties -->
 	    <PropertyGroup>
 	        <AssemblyName>off_grid.NetworkingLibrary</AssemblyName>
 	        <Product>NetworkingLibrary</Product>
 	        <Version>1.0.7</Version>
 	    </PropertyGroup>
 
-    <!-- Project Properties -->
     <PropertyGroup>
         <TargetFramework>netstandard2.1</TargetFramework>
         <RootNamespace>NetworkingLibrary</RootNamespace>

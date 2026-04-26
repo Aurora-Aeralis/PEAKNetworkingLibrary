@@ -150,8 +150,15 @@ namespace NetworkingLibrary.Modules
         {
             if (bytes.Length == 0) return;
             EnsureCanAppend(bytes.Length, nameof(AppendSpan));
-            buffer.EnsureCapacity(buffer.Count + bytes.Length);
-            for (var index = 0; index < bytes.Length; index++) buffer.Add(bytes[index]);
+            if (bytes.Length <= 32)
+            {
+                for (var index = 0; index < bytes.Length; index++) buffer.Add(bytes[index]);
+            }
+            else
+            {
+                var array = bytes.ToArray();
+                buffer.AddRange(array);
+            }
             readableBufferDirty = true;
         }
 
@@ -301,7 +308,8 @@ namespace NetworkingLibrary.Modules
 
         public static void RegisterSerializer<T>(Action<Message, T> writer, Func<Message, T> reader)
         {
-            if (writer == null || reader == null) throw new ArgumentNullException();
+            if (writer == null) throw new ArgumentNullException(nameof(writer));
+            if (reader == null) throw new ArgumentNullException(nameof(reader));
             writeCasters[typeof(T)] = (m, o) => writer(m, (T)o!);
             readCasters[typeof(T)] = (m) => reader(m)!;
         }

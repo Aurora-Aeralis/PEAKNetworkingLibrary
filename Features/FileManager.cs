@@ -148,41 +148,43 @@ namespace NetworkingLibrary.Features
         static void DropLegacyVersionFromConfig(ConfigFile config)
         {
             var legacyDefinition = new ConfigDefinition(VersionSection, LegacyVersionKey);
-            var removeMethod = config.GetType().GetMethod("Remove", new[] { typeof(ConfigDefinition) });
-            if (removeMethod != null)
+            Exception removeException = null;
+
+            try
             {
-                try
+                var removeMethod = GetRemoveMethod(config);
+                if (removeMethod != null)
                 {
                     removeMethod.Invoke(config, new object[] { legacyDefinition });
                     return;
                 }
-                catch (Exception removeException)
-                {
-                    try
-                    {
-                        var orphanedEntriesProperty = config.GetType().GetProperty("OrphanedEntries", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        if (orphanedEntriesProperty?.GetValue(config) is IDictionary orphanedEntries)
-                            orphanedEntries.Remove(legacyDefinition);
-                    }
-                    catch (Exception orphanedEntriesException)
-                    {
-                        Net.Logger?.LogWarning($"Failed to remove legacy config key '{LegacyVersionKey}' during migration. Remove invocation error: {removeException}. OrphanedEntries fallback error: {orphanedEntriesException}");
-                    }
-
-                    return;
-                }
+            }
+            catch (Exception exception)
+            {
+                removeException = exception;
             }
 
             try
             {
-                var orphanedEntriesProperty = config.GetType().GetProperty("OrphanedEntries", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (orphanedEntriesProperty?.GetValue(config) is IDictionary orphanedEntries)
-                    orphanedEntries.Remove(legacyDefinition);
+                var orphanedEntries = GetOrphanedEntries(config);
+                orphanedEntries?.Remove(legacyDefinition);
             }
             catch (Exception orphanedEntriesException)
             {
-                Net.Logger?.LogWarning($"Failed to remove legacy config key '{LegacyVersionKey}' during migration via OrphanedEntries fallback: {orphanedEntriesException}");
+                var removeContext = removeException == null ? string.Empty : $" Remove invocation error: {removeException}.";
+                Net.Logger?.LogWarning($"Failed to remove legacy config key '{LegacyVersionKey}' during migration.{removeContext} OrphanedEntries fallback error: {orphanedEntriesException}");
             }
+        }
+
+        internal static MethodInfo GetRemoveMethod(ConfigFile config)
+        {
+            return config.GetType().GetMethod("Remove", new[] { typeof(ConfigDefinition) });
+        }
+
+        internal static IDictionary GetOrphanedEntries(ConfigFile config)
+        {
+            var orphanedEntriesProperty = config.GetType().GetProperty("OrphanedEntries", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            return orphanedEntriesProperty?.GetValue(config) as IDictionary;
         }
 
         static ConfigEntry<string> BindPluginVersion(ConfigFile config, string value)

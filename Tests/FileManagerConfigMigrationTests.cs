@@ -94,6 +94,41 @@ public class FileManagerConfigMigrationTests
         Assert.DoesNotContain("Current Version =", configText, StringComparison.Ordinal);
     }
 
+
+    [Fact]
+    public void MigrateConfigIfNeeded_UsesDirectRemoveReflectionPathWhenAvailable()
+    {
+        using var scope = new TempConfigScope();
+        var seedConfig = new ConfigFile(scope.ConfigPath, true);
+        seedConfig.Bind("Version", "Current Version", string.Empty).Value = "1";
+        seedConfig.Save();
+
+        var config = new TrackingRemoveConfigFile(scope.ConfigPath, true);
+
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        Assert.Equal(1, config.RemoveCalls);
+        Assert.Equal(0, config.OrphanedEntriesAccesses);
+    }
+
+    [Fact]
+    public void MigrateConfigIfNeeded_RemoveReflectionFailure_UsesOrphanedEntriesFallback()
+    {
+        using var scope = new TempConfigScope();
+        var seedConfig = new ConfigFile(scope.ConfigPath, true);
+        seedConfig.Bind("Version", "Current Version", string.Empty).Value = "1";
+        seedConfig.Save();
+
+        var config = new ThrowingRemoveFallbackConfigFile(scope.ConfigPath, true);
+        Assert.True(config.HasLegacyEntry);
+
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        Assert.Equal(1, config.RemoveCalls);
+        Assert.True(config.OrphanedEntriesAccesses > 0);
+        Assert.False(config.HasLegacyEntry);
+    }
+
     [Fact]
     public void MigrateConfigIfNeeded_ReflectionCleanupFailure_StillNormalizesSchemaVersion()
     {
@@ -112,6 +147,58 @@ public class FileManagerConfigMigrationTests
         Assert.Equal("1", schemaVersion);
         Assert.Contains("ConfigSchemaVersion = 1", configText, StringComparison.Ordinal);
         Assert.DoesNotContain("Current Version = 1", configText, StringComparison.Ordinal);
+    }
+
+    sealed class TrackingRemoveConfigFile : ConfigFile
+    {
+        internal int RemoveCalls { get; private set; }
+        internal int OrphanedEntriesAccesses { get; private set; }
+
+        internal TrackingRemoveConfigFile(string configPath, bool saveOnInit) : base(configPath, saveOnInit) { }
+
+        public new bool Remove(ConfigDefinition definition)
+        {
+            RemoveCalls++;
+            return true;
+        }
+
+        public new IDictionary OrphanedEntries
+        {
+            get
+            {
+                OrphanedEntriesAccesses++;
+                return base.OrphanedEntries;
+            }
+        }
+    }
+
+    sealed class ThrowingRemoveFallbackConfigFile : ConfigFile
+    {
+        readonly IDictionary _orphanedEntries = new Hashtable();
+
+        internal int RemoveCalls { get; private set; }
+        internal int OrphanedEntriesAccesses { get; private set; }
+        internal bool HasLegacyEntry => _orphanedEntries.Contains(new ConfigDefinition("Version", "Current Version"));
+
+        internal ThrowingRemoveFallbackConfigFile(string configPath, bool saveOnInit) : base(configPath, saveOnInit)
+        {
+            _orphanedEntries[new ConfigDefinition("Version", "Current Version")] = "1";
+        }
+
+        public new bool Remove(ConfigDefinition definition)
+        {
+            RemoveCalls++;
+            throw new InvalidOperationException("Simulated Remove reflection failure.");
+        }
+
+        public new IDictionary OrphanedEntries
+        {
+            get
+            {
+                OrphanedEntriesAccesses++;
+                return _orphanedEntries;
+            }
+        }
     }
 
     sealed class ThrowingLegacyCleanupConfigFile : ConfigFile

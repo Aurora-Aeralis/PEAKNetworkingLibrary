@@ -597,7 +597,7 @@ namespace NetworkingLibrary.Services
                     var expectedParams = chosen.Parameters;
                     int expectedCountFinal = chosen.ParameterCountWithoutRpcInfo;
                     if (expectedCountFinal != parameters.Length)
-                        throw new Exception($"Parameter count mismatch for {methodName}: expected {expectedCountFinal}, got {parameters.Length}");
+                        throw new ArgumentException($"Parameter count mismatch for {methodName}: expected {expectedCountFinal}, got {parameters.Length}", nameof(parameters));
                     for (int i = 0; i < expectedCountFinal; i++)
                     {
                         var t = expectedParams[i].ParameterType;
@@ -605,12 +605,12 @@ namespace NetworkingLibrary.Services
                         if (p == null)
                         {
                             if (t.IsValueType && Nullable.GetUnderlyingType(t) == null)
-                                throw new Exception($"Parameter {i} for {methodName} cannot be null; expected non-nullable {t}.");
+                                throw new ArgumentNullException(nameof(parameters), $"Parameter {i} for {methodName} cannot be null; expected non-nullable {t}.");
                             msg.WriteObject(t, null!);
                             continue;
                         }
                         if (!t.IsAssignableFrom(p.GetType()))
-                            throw new Exception($"Parameter {i} type mismatch: expected {t}, got {p.GetType()}");
+                            throw new ArgumentException($"Parameter {i} type mismatch: expected {t}, got {p.GetType()}", nameof(parameters));
                         msg.WriteObject(t, p);
                     }
 
@@ -629,7 +629,7 @@ namespace NetworkingLibrary.Services
                     {
                         if (parameterTypes.Length != parameters.Length)
                         {
-                            throw new Exception($"Parameter type count mismatch: expected {parameterTypes.Length}, got {parameters.Length}");
+                            throw new ArgumentException($"Parameter type count mismatch: expected {parameterTypes.Length}, got {parameters.Length}", nameof(parameters));
                         }
                         for (int i = 0; i < parameters.Length; i++)
                         {
@@ -638,12 +638,12 @@ namespace NetworkingLibrary.Services
                             if (p == null)
                             {
                                 if (t.IsValueType && Nullable.GetUnderlyingType(t) == null)
-                                    throw new Exception($"Parameter {i} for {methodName} cannot be null; expected non-nullable {t}.");
+                                    throw new ArgumentNullException(nameof(parameters), $"Parameter {i} for {methodName} cannot be null; expected non-nullable {t}.");
                                 msg.WriteObject(t, null!);
                                 continue;
                             }
                             if (!t.IsAssignableFrom(p.GetType()))
-                                throw new Exception($"Parameter {i} type mismatch: expected {t}, got {p.GetType()}");
+                                throw new ArgumentException($"Parameter {i} type mismatch: expected {t}, got {p.GetType()}", nameof(parameters));
                             msg.WriteObject(t, p);
                         }
                     }
@@ -651,7 +651,7 @@ namespace NetworkingLibrary.Services
                     {
                         for (int i = 0; i < parameters.Length; i++)
                         {
-                            var p = parameters[i] ?? throw new Exception($"Parameter {i} is null for unregistered RPC {methodName}; use typed RPC overload.");
+                            var p = parameters[i] ?? throw new ArgumentNullException(nameof(parameters), $"Parameter {i} is null for unregistered RPC {methodName}; use typed RPC overload.");
                             msg.WriteObject(p.GetType(), p);
                         }
                     }

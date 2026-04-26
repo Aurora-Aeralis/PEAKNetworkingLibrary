@@ -13,10 +13,6 @@ namespace NetworkingLibrary.Services
     {
         public bool IsInitialized { get; private set; }
         public bool InLobby { get; private set; }
-        /// <summary>
-        /// Current host identity for the active lobby.
-        /// In offline mode, host routing is always resolved to the local peer.
-        /// </summary>
         public ulong HostSteamId64 { get; private set; } = 1000UL;
         public string HostIdString => HostSteamId64.ToString();
         public event Action? LobbyCreated;
@@ -69,21 +65,11 @@ namespace NetworkingLibrary.Services
             return perPlayerData.Keys.OrderBy(steamId => steamId).ToArray();
         }
 
-        /// <summary>
-        /// Registers a per-mod signer delegate for API parity with Steam networking.
-        /// Offline mode does not emit signed wire frames, but keeping registrations
-        /// allows shared setup code to run without feature checks.
-        /// </summary>
         public void RegisterModSigner(uint modId, Func<byte[], byte[]> signerDelegate)
         {
             if (signerDelegate == null) throw new ArgumentNullException(nameof(signerDelegate));
             modSigners[modId] = signerDelegate;
         }
-        /// <summary>
-        /// Registers a per-mod public key for API parity with Steam networking.
-        /// Offline mode does not verify signatures, but stores keys so mod bootstrap
-        /// code behaves consistently across service implementations.
-        /// </summary>
         public void RegisterModPublicKey(uint modId, RSAParameters pub)
         {
             if (pub.Modulus == null || pub.Modulus.Length == 0)
@@ -169,11 +155,6 @@ namespace NetworkingLibrary.Services
             offlineIsHost = true;
         }
 
-        /// <summary>
-        /// Joins an offline lobby simulation.
-        /// Offline mode is single-peer host simulation, so host identity and host routing stay local.
-        /// The provided <paramref name="lobbySteamId64"/> is accepted for API compatibility only.
-        /// </summary>
         public void JoinLobby(ulong lobbySteamId64)
         {
             if (!IsInitialized)

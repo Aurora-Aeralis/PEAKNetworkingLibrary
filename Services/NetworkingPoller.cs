@@ -11,76 +11,58 @@ namespace NetworkingLibrary.Services
         float mainThreadDispatcherLastErrorLogTime = float.NegativeInfinity;
         bool mainThreadDispatcherHadFault;
         bool mainThreadDispatcherSuppressedFault;
-
         float pollReceiveLastErrorLogTime = float.NegativeInfinity;
         bool pollReceiveHadFault;
         bool pollReceiveSuppressedFault;
 
         void Update()
         {
-            var dispatcherSucceeded = true;
+            PollGuarded(
+                UnityMainThreadDispatcher.ProcessPendingMainThreadWork,
+                "Main-thread dispatcher",
+                ref mainThreadDispatcherLastErrorLogTime,
+                ref mainThreadDispatcherHadFault,
+                ref mainThreadDispatcherSuppressedFault);
+
+            PollGuarded(
+                () => Net.Service?.PollReceive(),
+                "PollReceive",
+                ref pollReceiveLastErrorLogTime,
+                ref pollReceiveHadFault,
+                ref pollReceiveSuppressedFault);
+        }
+
+        static void PollGuarded(Action action, string name, ref float lastErrorLogTime, ref bool hadFault, ref bool suppressedFault)
+        {
+            var succeeded = true;
             try
             {
-                UnityMainThreadDispatcher.ProcessPendingMainThreadWork();
+                action();
             }
             catch (Exception ex)
             {
-                dispatcherSucceeded = false;
-                mainThreadDispatcherHadFault = true;
+                succeeded = false;
+                hadFault = true;
 
                 var currentTime = Time.unscaledTime;
-                if (currentTime - mainThreadDispatcherLastErrorLogTime >= ErrorLogCooldownSeconds)
+                if (currentTime - lastErrorLogTime >= ErrorLogCooldownSeconds)
                 {
-                    mainThreadDispatcherLastErrorLogTime = currentTime;
-                    Net.Logger?.LogError($"NetworkingPollerDebug Main-thread dispatcher error: {ex}");
-                    mainThreadDispatcherSuppressedFault = false;
+                    lastErrorLogTime = currentTime;
+                    Net.Logger?.LogError($"{name} error: {ex}");
+                    suppressedFault = false;
                 }
                 else
                 {
-                    mainThreadDispatcherSuppressedFault = true;
+                    suppressedFault = true;
                 }
             }
 
-            if (dispatcherSucceeded && mainThreadDispatcherHadFault)
-            {
-                Net.Logger?.LogInfo(mainThreadDispatcherSuppressedFault
-                    ? "NetworkingPollerDebug Main-thread dispatcher recovered after repeated failures."
-                    : "NetworkingPollerDebug Main-thread dispatcher recovered.");
-                mainThreadDispatcherHadFault = false;
-                mainThreadDispatcherSuppressedFault = false;
-            }
-
-            var pollReceiveSucceeded = true;
-            try
-            {
-                Net.Service?.PollReceive();
-            }
-            catch (Exception ex)
-            {
-                pollReceiveSucceeded = false;
-                pollReceiveHadFault = true;
-
-                var currentTime = Time.unscaledTime;
-                if (currentTime - pollReceiveLastErrorLogTime >= ErrorLogCooldownSeconds)
-                {
-                    pollReceiveLastErrorLogTime = currentTime;
-                    Net.Logger?.LogError($"NetworkingPollerDebug PollReceive error: {ex}");
-                    pollReceiveSuppressedFault = false;
-                }
-                else
-                {
-                    pollReceiveSuppressedFault = true;
-                }
-            }
-
-            if (pollReceiveSucceeded && pollReceiveHadFault)
-            {
-                Net.Logger?.LogInfo(pollReceiveSuppressedFault
-                    ? "NetworkingPollerDebug PollReceive recovered after repeated failures."
-                    : "NetworkingPollerDebug PollReceive recovered.");
-                pollReceiveHadFault = false;
-                pollReceiveSuppressedFault = false;
-            }
+            if (!succeeded || !hadFault) return;
+            Net.Logger?.LogInfo(suppressedFault
+                ? $"{name} recovered after repeated failures."
+                : $"{name} recovered.");
+            hadFault = false;
+            suppressedFault = false;
         }
 
         void Awake()

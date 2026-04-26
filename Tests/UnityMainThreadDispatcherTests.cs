@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
@@ -121,5 +123,81 @@ public class UnityMainThreadDispatcherTests : IDisposable
         var instance = await workerTask;
         Assert.NotNull(instance);
         Assert.Equal(1, createCalls);
+    }
+
+    [Fact]
+    public void Enqueue_WhenQueueLimitReached_RejectsNewWork()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 3;
+        UnityMainThreadDispatcher.QueueOverflowBehaviorProvider = () => UnityMainThreadDispatcher.QueueOverflowBehavior.RejectNewWork;
+
+        for (var i = 0; i < 6; i++) dispatcher.Enqueue(() => { });
+
+        Assert.Equal(3, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
+        Assert.Equal(3, UnityMainThreadDispatcher.TestHooks.QueueHighWaterMarkForTests);
+        Assert.Equal(3, UnityMainThreadDispatcher.TestHooks.RejectedEnqueueCountForTests);
+        Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.DroppedEnqueueCountForTests);
+    }
+
+    [Fact]
+    public void Enqueue_WhenQueueLimitReached_DropsOldest()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 2;
+        UnityMainThreadDispatcher.QueueOverflowBehaviorProvider = () => UnityMainThreadDispatcher.QueueOverflowBehavior.DropOldest;
+
+        var executed = new List<int>();
+        dispatcher.Enqueue(() => executed.Add(1));
+        dispatcher.Enqueue(() => executed.Add(2));
+        dispatcher.Enqueue(() => executed.Add(3));
+
+        typeof(UnityMainThreadDispatcher)
+            .GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(dispatcher, null);
+
+        Assert.Equal(new[] { 2, 3 }, executed);
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.DroppedEnqueueCountForTests);
+        Assert.Equal(2, UnityMainThreadDispatcher.TestHooks.QueueHighWaterMarkForTests);
+    }
+
+    [Fact]
+    public void EnqueueDelayed_WhenQueueLimitReached_UsesSameBoundControls()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 1;
+        UnityMainThreadDispatcher.QueueOverflowBehaviorProvider = () => UnityMainThreadDispatcher.QueueOverflowBehavior.RejectNewWork;
+
+        dispatcher.Enqueue(() => { });
+        var delayed = (System.Collections.IEnumerator)typeof(UnityMainThreadDispatcher)
+            .GetMethod("EnqueueDelayed", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(dispatcher, new object[] { (Action)(() => { }), 0f })!;
+
+        Assert.True(delayed.MoveNext());
+        Assert.False(delayed.MoveNext());
+
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.RejectedEnqueueCountForTests);
+    }
+
+    [Fact]
+    public async Task Enqueue_ConcurrentProducers_RemainsBoundedAndThreadSafe()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 64;
+        UnityMainThreadDispatcher.QueueOverflowBehaviorProvider = () => UnityMainThreadDispatcher.QueueOverflowBehavior.DropOldest;
+
+        var tasks = Enumerable.Range(0, 12)
+            .Select(_ => Task.Run(() =>
+            {
+                for (var i = 0; i < 200; i++) dispatcher.Enqueue(() => { });
+            }))
+            .ToArray();
+
+        await Task.WhenAll(tasks);
+
+        Assert.True(UnityMainThreadDispatcher.TestHooks.QueueDepthForTests <= 64);
+        Assert.True(UnityMainThreadDispatcher.TestHooks.QueueHighWaterMarkForTests <= 64);
+        Assert.True(UnityMainThreadDispatcher.TestHooks.DroppedEnqueueCountForTests > 0);
     }
 }

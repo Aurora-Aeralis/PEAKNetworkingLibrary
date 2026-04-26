@@ -52,7 +52,11 @@ public class FileManagerConfigMigrationTests
         var reloaded = new ConfigFile(scope.ConfigPath, true);
         FileManager.MigrateConfigIfNeeded(reloaded, "1");
         var reloadedSchemaVersion = reloaded.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        reloaded.Save();
+        var reloadedConfigText = File.ReadAllText(scope.ConfigPath);
+
         Assert.Equal("1", reloadedSchemaVersion);
+        Assert.DoesNotContain("Current Version = 999", reloadedConfigText, StringComparison.Ordinal);
     }
 
     [Fact]

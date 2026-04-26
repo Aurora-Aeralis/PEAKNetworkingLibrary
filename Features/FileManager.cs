@@ -1,5 +1,7 @@
 ﻿using System;
 using System.IO;
+using System.Collections;
+using System.Reflection;
 using BepInEx.Configuration;
 using BepInEx;
 
@@ -49,6 +51,7 @@ namespace NetworkingLibrary.Features
             MigrateConfig(schemaVersionEntry, storedVersion, currentVersion, legacyVersion);
             schemaVersionEntry.Value = currentVersion;
             ClearLegacyVersion(config);
+            DropLegacyVersionFromConfig(config);
             config.Save();
         }
 
@@ -132,6 +135,22 @@ namespace NetworkingLibrary.Features
 
             if (changed)
                 File.WriteAllLines(configPath, lines);
+        }
+
+
+        static void DropLegacyVersionFromConfig(ConfigFile config)
+        {
+            var legacyDefinition = new ConfigDefinition(VersionSection, LegacyVersionKey);
+            var removeMethod = config.GetType().GetMethod("Remove", new[] { typeof(ConfigDefinition) });
+            if (removeMethod != null)
+            {
+                removeMethod.Invoke(config, new object[] { legacyDefinition });
+                return;
+            }
+
+            var orphanedEntriesProperty = config.GetType().GetProperty("OrphanedEntries", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (orphanedEntriesProperty?.GetValue(config) is IDictionary orphanedEntries)
+                orphanedEntries.Remove(legacyDefinition);
         }
 
         static ConfigEntry<string> BindPluginVersion(ConfigFile config, string value)

@@ -84,6 +84,28 @@ public class FileManagerConfigMigrationTests
     }
 
     [Fact]
+    public void MigrateConfigIfNeeded_StoredSchemaNewerThanCurrent_SkipsDestructiveDowngrade()
+    {
+        using var scope = new TempConfigScope();
+        File.WriteAllText(scope.ConfigPath,
+            "[Version]\n" +
+            "ConfigSchemaVersion = 3\n" +
+            "Current Version = 3\n");
+
+        var config = new ConfigFile(scope.ConfigPath, true);
+        using var loggerScope = new NetLoggerScope();
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        var configText = File.ReadAllText(scope.ConfigPath);
+
+        Assert.Equal("3", schemaVersion);
+        Assert.Contains("ConfigSchemaVersion = 3", configText, StringComparison.Ordinal);
+        Assert.Contains("Current Version = 3", configText, StringComparison.Ordinal);
+        Assert.Contains(loggerScope.Warnings, warning => warning.Contains("newer than supported schema", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void DefineConfig_WritesCanonicalVersionKeysOnly()
     {
         using var scope = new TempConfigScope();

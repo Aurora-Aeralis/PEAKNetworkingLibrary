@@ -58,6 +58,14 @@ namespace NetworkingLibrary.Features
                 var schemaVersionEntry = BindSchemaVersion(config, string.Empty);
                 var legacyVersion = ReadLegacyVersion(config);
                 var storedVersion = GetStoredVersion(schemaVersionEntry.Value, legacyVersion);
+                if (TryParseSchemaVersion(storedVersion, out var storedSchemaVersion)
+                    && TryParseSchemaVersion(currentVersion, out var currentSchemaVersion)
+                    && storedSchemaVersion > currentSchemaVersion)
+                {
+                    Net.Logger?.LogWarning($"Stored config schema version '{storedVersion}' is newer than supported schema '{currentVersion}'. Migration skipped to avoid destructive downgrade.");
+                    return;
+                }
+
                 var needsNormalization = string.IsNullOrWhiteSpace(schemaVersionEntry.Value) && !string.IsNullOrWhiteSpace(legacyVersion);
                 if (storedVersion == currentVersion && !needsNormalization)
                     return;

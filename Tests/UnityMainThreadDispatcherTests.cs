@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Linq;
 using System.Runtime.Serialization;
@@ -18,6 +19,56 @@ public class UnityMainThreadDispatcherTests : IDisposable
     }
 
     public void Dispose() => UnityMainThreadDispatcher.TestHooks.ResetForTests();
+
+    [Fact]
+    public void Enqueue_UnderLimit_IsAccepted()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.TestHooks.MaxQueuedActionsForTests = 2;
+
+        dispatcher.Enqueue(() => { });
+
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
+        Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.DroppedActionCountForTests);
+    }
+
+    [Fact]
+    public void Enqueue_AtLimit_DropsAdditionalActions()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        var warnings = new List<string>();
+        UnityMainThreadDispatcher.TestHooks.MaxQueuedActionsForTests = 2;
+        UnityMainThreadDispatcher.TestHooks.SetWarningLoggerForTests(message => warnings.Add(message));
+
+        dispatcher.Enqueue(() => { });
+        dispatcher.Enqueue(() => { });
+        dispatcher.Enqueue(() => { });
+
+        Assert.Equal(2, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
+        Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.DroppedActionCountForTests);
+        Assert.Single(warnings);
+        Assert.Contains("dropped 1 queued action", warnings[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Enqueue_OverflowWarnings_AreThrottled()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        var warnings = new List<string>();
+        UnityMainThreadDispatcher.TestHooks.MaxQueuedActionsForTests = 1;
+        UnityMainThreadDispatcher.TestHooks.DropWarningThrottleForTests = TimeSpan.FromSeconds(30);
+        UnityMainThreadDispatcher.TestHooks.SetWarningLoggerForTests(message => warnings.Add(message));
+
+        dispatcher.Enqueue(() => { });
+        dispatcher.Enqueue(() => { });
+        dispatcher.Enqueue(() => { });
+        dispatcher.Enqueue(() => { });
+
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
+        Assert.Single(warnings);
+        Assert.Contains("dropped 1 queued action", warnings[0], StringComparison.Ordinal);
+        Assert.Equal(2, UnityMainThreadDispatcher.TestHooks.DroppedActionCountForTests);
+    }
 
     [Fact]
     public void Instance_FromWorkerThread_QueuesCreationRequestWithoutCreatingOnWorker()

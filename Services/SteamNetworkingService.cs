@@ -2331,14 +2331,18 @@ namespace NetworkingLibrary.Services
             readonly int limit;
             readonly TimeSpan window;
             readonly Queue<DateTime> q = new();
+            readonly object qLock = new();
             public SlidingWindowRateLimiter(int limit, TimeSpan window) { this.limit = limit; this.window = window; }
             public bool Allowed()
             {
-                var now = DateTime.UtcNow;
-                while (q.Count > 0 && now - q.Peek() > window) q.Dequeue();
-                if (q.Count >= limit) return false;
-                q.Enqueue(now);
-                return true;
+                lock (qLock)
+                {
+                    var now = DateTime.UtcNow;
+                    while (q.Count > 0 && now - q.Peek() > window) q.Dequeue();
+                    if (q.Count >= limit) return false;
+                    q.Enqueue(now);
+                    return true;
+                }
             }
             public bool IncomingAllowed() => Allowed();
         }

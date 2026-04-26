@@ -171,6 +171,27 @@ public class FileManagerConfigMigrationTests
         Assert.DoesNotContain("Current Version = 1", configText, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void MigrateConfigIfNeeded_IndentedLegacyVersionInVersionSection_MigratesAndClearsLegacyKey()
+    {
+        using var scope = new TempConfigScope();
+        File.WriteAllText(scope.ConfigPath,
+            "[Version]\n" +
+            "    Current Version = 1\n");
+
+        var config = new ThrowingLegacyCleanupConfigFile(scope.ConfigPath, true);
+        FileManager.MigrateConfigIfNeeded(config, "1");
+
+        var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        var configText = File.ReadAllText(scope.ConfigPath);
+
+        Assert.Equal("1", schemaVersion);
+        Assert.Contains("ConfigSchemaVersion = 1", configText, StringComparison.Ordinal);
+        Assert.Contains("Current Version =", configText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Current Version = 1", configText, StringComparison.Ordinal);
+        Assert.DoesNotContain("    Current Version =", configText, StringComparison.Ordinal);
+    }
+
     sealed class TrackingRemoveConfigFile : ConfigFile
     {
         internal int RemoveCalls { get; private set; }

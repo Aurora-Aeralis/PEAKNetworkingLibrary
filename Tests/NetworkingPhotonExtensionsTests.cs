@@ -7,6 +7,37 @@ namespace NetworkingLibrary.Tests;
 public class NetworkingPhotonExtensionsTests
 {
     [Fact]
+    public void TryParseSteamId_Rejects_Small_Numeric_Ids()
+    {
+        Assert.False(NetworkingPhotonExtensions.TryParseSteamId(12345UL, out _));
+        Assert.False(NetworkingPhotonExtensions.TryParseSteamId(12345L, out _));
+        Assert.False(NetworkingPhotonExtensions.TryParseSteamId(12345U, out _));
+        Assert.False(NetworkingPhotonExtensions.TryParseSteamId(12345, out _));
+        Assert.False(NetworkingPhotonExtensions.TryParseSteamId("12345", out _));
+    }
+
+    [Fact]
+    public void TryParseSteamId_Accepts_Valid_SteamId64_String()
+    {
+        const ulong expected = 76561198000000000UL;
+
+        Assert.True(NetworkingPhotonExtensions.TryParseSteamId(expected.ToString(), out var parsed));
+        Assert.Equal(expected, parsed);
+    }
+
+    [Fact]
+    public void Invalid_Stable_Id_Still_Uses_Unresolved_Warning_Path()
+    {
+        NetworkingPhotonExtensions.ResetUnresolvedMappingWarningThrottleForTests();
+
+        Assert.False(NetworkingPhotonExtensions.TryParseSteamId("12345", out _));
+
+        var t0 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        Assert.True(NetworkingPhotonExtensions.ShouldEmitUnresolvedMappingWarning(7, "no stable ID candidate matched lobby members", t0));
+        Assert.False(NetworkingPhotonExtensions.ShouldEmitUnresolvedMappingWarning(7, "no stable ID candidate matched lobby members", t0.AddSeconds(3)));
+    }
+
+    [Fact]
     public void ShouldEmitUnresolvedMappingWarning_Throttles_Repeated_Issue_Within_Cooldown()
     {
         NetworkingPhotonExtensions.ResetUnresolvedMappingWarningThrottleForTests();

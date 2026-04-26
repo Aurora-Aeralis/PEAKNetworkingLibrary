@@ -16,6 +16,8 @@ namespace NetworkingLibrary.Modules
         static readonly Dictionary<string, DateTime> UnresolvedMappingWarningThrottle = new Dictionary<string, DateTime>(StringComparer.Ordinal);
         static readonly object UnresolvedMappingWarningThrottleLock = new object();
         static DateTime UnresolvedMappingWarningNextPruneUtc = DateTime.MinValue;
+        const ulong SteamId64Min = 76561197960265728UL;
+        const ulong SteamId64Max = 76561202255233023UL;
         static readonly string[] StableIdPropertyKeys =
         {
             "steam64", "steamid64", "steam_id64", "steamid", "steam_id", "steam", "authid", "auth_id", "userid", "user_id"
@@ -137,26 +139,31 @@ namespace NetworkingLibrary.Modules
             return false;
         }
 
-        static bool TryParseSteamId(object raw, out ulong steamId)
+        internal static bool IsLikelySteamId64(ulong value)
+        {
+            return value >= SteamId64Min && value <= SteamId64Max;
+        }
+
+        internal static bool TryParseSteamId(object raw, out ulong steamId)
         {
             steamId = 0;
             if (raw == null) return false;
 
             switch (raw)
             {
-                case ulong u when u > 0:
+                case ulong u when IsLikelySteamId64(u):
                     steamId = u;
                     return true;
-                case long l when l > 0:
+                case long l when l > 0 && IsLikelySteamId64((ulong)l):
                     steamId = (ulong)l;
                     return true;
-                case uint ui when ui > 0:
+                case uint ui when IsLikelySteamId64(ui):
                     steamId = ui;
                     return true;
-                case int i when i > 0:
+                case int i when i > 0 && IsLikelySteamId64((ulong)i):
                     steamId = (ulong)i;
                     return true;
-                case string s when !string.IsNullOrWhiteSpace(s) && ulong.TryParse(s, out var parsed) && parsed > 0:
+                case string s when !string.IsNullOrWhiteSpace(s) && ulong.TryParse(s, out var parsed) && IsLikelySteamId64(parsed):
                     steamId = parsed;
                     return true;
                 default:

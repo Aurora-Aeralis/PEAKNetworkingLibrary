@@ -9,8 +9,12 @@ using Xunit;
 
 namespace NetworkingLibrary.Tests;
 
+[Collection("UnityMainThreadDispatcher")]
 public class NetworkingPollerTests : IDisposable
 {
+    readonly Func<float> originalTimeProvider = NetworkingPoller.TimeProvider;
+    readonly Func<double> originalFallbackTimeProvider = NetworkingPoller.FallbackTimeProvider;
+
     sealed class ScopeAction : IDisposable
     {
         Action? onDispose;
@@ -99,6 +103,8 @@ public class NetworkingPollerTests : IDisposable
 
     public void Dispose()
     {
+        NetworkingPoller.TimeProvider = originalTimeProvider;
+        NetworkingPoller.FallbackTimeProvider = originalFallbackTimeProvider;
         UnityMainThreadDispatcher.TestHooks.ResetForTests();
         SetService(null);
     }
@@ -136,7 +142,7 @@ public class NetworkingPollerTests : IDisposable
         var listener = new TestLogListener();
         using var _ = WithNetLogger(listener);
 
-        var lastErrorLogTime = float.NegativeInfinity;
+        var lastErrorLogTime = double.NegativeInfinity;
         var hadFault = false;
         var suppressedFault = false;
         var suppressedExceptionCount = 0;
@@ -161,6 +167,92 @@ public class NetworkingPollerTests : IDisposable
         Assert.Contains("Suppressed 1 errors since last emitted error.", listener.Infos[0]);
     }
 
+    [Theory]
+    [InlineData(float.NaN)]
+    [InlineData(float.PositiveInfinity)]
+    [InlineData(float.NegativeInfinity)]
+    public void PollGuarded_UsesFallbackClock_WhenTimeProviderIsNotFinite(float invalidTime)
+    {
+        var listener = new TestLogListener();
+        using var _ = WithNetLogger(listener);
+        NetworkingPoller.TimeProvider = () => invalidTime;
+
+        var args = new object[] {
+            new Action(() => throw new InvalidOperationException("bad clock")),
+            "PollReceive",
+            double.NegativeInfinity,
+            false,
+            false,
+            0
+        };
+
+        typeof(NetworkingPoller).GetMethod("PollGuarded", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, args);
+        var lastErrorLogTime = (double)args[2];
+
+        Assert.Single(listener.Errors);
+        Assert.Contains("PollReceive error:", listener.Errors[0]);
+        Assert.False(double.IsNaN(lastErrorLogTime) || double.IsInfinity(lastErrorLogTime));
+    }
+
+    [Fact]
+    public void PollGuarded_FallbackClockPreservesCooldownPrecision_AtUnixTimestampScale()
+    {
+        var listener = new TestLogListener();
+        using var _ = WithNetLogger(listener);
+        var fallbackTime = 1770000000d;
+        NetworkingPoller.TimeProvider = () => throw new InvalidOperationException("unity clock unavailable");
+        NetworkingPoller.FallbackTimeProvider = () => fallbackTime;
+
+        var args = new object[] {
+            new Action(() => throw new InvalidOperationException("first")),
+            "PollReceive",
+            double.NegativeInfinity,
+            false,
+            false,
+            0
+        };
+
+        var pollGuarded = typeof(NetworkingPoller).GetMethod("PollGuarded", BindingFlags.Static | BindingFlags.NonPublic)!;
+        pollGuarded.Invoke(null, args);
+        fallbackTime += 1d;
+        args[0] = new Action(() => throw new InvalidOperationException("second"));
+        pollGuarded.Invoke(null, args);
+        fallbackTime += 2.1d;
+        args[0] = new Action(() => throw new InvalidOperationException("third"));
+        pollGuarded.Invoke(null, args);
+
+        Assert.Equal(2, listener.Errors.Count);
+        Assert.Contains("first", listener.Errors[0]);
+        Assert.Contains("third", listener.Errors[1]);
+    }
+
+    [Fact]
+    public void PollGuarded_LogsAgain_WhenClockMovesBackAfterFallbackClock()
+    {
+        var listener = new TestLogListener();
+        using var _ = WithNetLogger(listener);
+        NetworkingPoller.TimeProvider = () => float.NaN;
+
+        var args = new object[] {
+            new Action(() => throw new InvalidOperationException("fallback clock")),
+            "PollReceive",
+            double.NegativeInfinity,
+            false,
+            false,
+            0
+        };
+
+        var pollGuarded = typeof(NetworkingPoller).GetMethod("PollGuarded", BindingFlags.Static | BindingFlags.NonPublic)!;
+        pollGuarded.Invoke(null, args);
+        NetworkingPoller.TimeProvider = () => 1f;
+        args[0] = new Action(() => throw new InvalidOperationException("unity clock"));
+        pollGuarded.Invoke(null, args);
+
+        Assert.Equal(2, listener.Errors.Count);
+        Assert.Contains("fallback clock", listener.Errors[0]);
+        Assert.Contains("unity clock", listener.Errors[1]);
+    }
+
     static IDisposable WithNetLogger(TestLogListener listener)
     {
         var loggerField = typeof(Net).GetField("<Logger>k__BackingField", BindingFlags.Static | BindingFlags.NonPublic);
@@ -168,10 +260,12 @@ public class NetworkingPollerTests : IDisposable
         var original = loggerField.GetValue(null);
         var logger = new ManualLogSource("NetworkingPollerTests");
         Logger.Listeners.Add(listener);
+        Logger.Sources.Add(logger);
         loggerField.SetValue(null, logger);
         return new ScopeAction(() =>
         {
             loggerField.SetValue(null, original);
+            Logger.Sources.Remove(logger);
             Logger.Listeners.Remove(listener);
             logger.Dispose();
         });

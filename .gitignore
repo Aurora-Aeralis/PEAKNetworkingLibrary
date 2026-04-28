@@ -1,2 +1,13 @@
 .vs/
+.dotnet_home/
 Config.Build.user.props
+artifacts/
+bin/
+obj/
+TestResults/
+*.binlog
+*.metaproj
+*.metaproj.tmp
+*.nupkg
+*.snupkg
+*.user

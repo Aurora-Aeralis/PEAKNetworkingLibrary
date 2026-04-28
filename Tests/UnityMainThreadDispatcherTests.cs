@@ -7,12 +7,16 @@ using System.Runtime.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using NetworkingLibrary.Modules;
+using UnityEngine;
 using Xunit;
 
 namespace NetworkingLibrary.Tests;
 
+[Collection("UnityMainThreadDispatcher")]
 public class UnityMainThreadDispatcherTests : IDisposable
 {
+    sealed class DummyComponent : MonoBehaviour { }
+
     public UnityMainThreadDispatcherTests()
     {
         UnityMainThreadDispatcher.TestHooks.ResetForTests();
@@ -55,8 +59,12 @@ public class UnityMainThreadDispatcherTests : IDisposable
     [Fact]
     public async Task Instance_ConcurrentCalls_CreateOnlyOnceOnMainThread()
     {
+        const int WorkerCount = 12;
         var createCalls = 0;
         var factoryThreadIds = new ConcurrentBag<int>();
+        UnityMainThreadDispatcher.BackgroundThreadInstanceWaitTimeout = TimeSpan.FromSeconds(5);
+        using var ready = new CountdownEvent(WorkerCount);
+        using var start = new ManualResetEventSlim(false);
 
         UnityMainThreadDispatcher.CreateInstanceOnMainThreadFactory = () =>
         {
@@ -64,28 +72,37 @@ public class UnityMainThreadDispatcherTests : IDisposable
             Interlocked.Increment(ref createCalls);
             return (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
         };
+        UnityMainThreadDispatcher.TestHooks.SetMainThreadIdForTests(int.MinValue);
 
-        var tasks = Enumerable.Range(0, 12)
-            .Select(_ => Task.Run(() => UnityMainThreadDispatcher.Instance()))
+        var tasks = Enumerable.Range(0, WorkerCount)
+            .Select(_ => Task.Factory.StartNew(() =>
+            {
+                ready.Signal();
+                start.Wait();
+                return UnityMainThreadDispatcher.Instance();
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default))
             .ToArray();
 
-        var stopAt = DateTime.UtcNow.AddSeconds(2);
-        while (UnityMainThreadDispatcher.TestHooks.CreateRequestQueuedForTests == 0 && DateTime.UtcNow < stopAt)
-            await Task.Delay(5);
+        Assert.True(ready.Wait(TimeSpan.FromSeconds(5)));
+        start.Set();
+        Assert.True(SpinWait.SpinUntil(() => UnityMainThreadDispatcher.TestHooks.CreateRequestQueuedForTests != 0, TimeSpan.FromSeconds(5)));
 
+        var processingThreadId = Thread.CurrentThread.ManagedThreadId;
+        UnityMainThreadDispatcher.TestHooks.SetMainThreadIdForTests(processingThreadId);
         UnityMainThreadDispatcher.ProcessPendingMainThreadWork();
         var instances = await Task.WhenAll(tasks);
 
         Assert.Equal(1, createCalls);
-        Assert.All(factoryThreadIds, id => Assert.Equal(Thread.CurrentThread.ManagedThreadId, id));
+        Assert.All(factoryThreadIds, id => Assert.Equal(processingThreadId, id));
         Assert.All(instances, item => Assert.Same(instances[0], item));
     }
-
 
     [Fact]
     public async Task Instance_RepeatedWorkerCalls_DoNotGrowQueuedActionDepth()
     {
         UnityMainThreadDispatcher.BackgroundThreadInstanceWaitTimeout = TimeSpan.FromMilliseconds(100);
+        UnityMainThreadDispatcher.CreateInstanceOnMainThreadFactory = () => (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.TestHooks.SetMainThreadIdForTests(int.MinValue);
 
         var attempts = Enumerable.Range(0, 8)
             .Select(_ => Task.Run(() => Record.Exception(() => UnityMainThreadDispatcher.Instance())))
@@ -97,6 +114,7 @@ public class UnityMainThreadDispatcherTests : IDisposable
         Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.CreateRequestQueuedForTests);
         Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
 
+        UnityMainThreadDispatcher.TestHooks.SetMainThreadIdForTests(Thread.CurrentThread.ManagedThreadId);
         UnityMainThreadDispatcher.ProcessPendingMainThreadWork();
 
         Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.CreateRequestQueuedForTests);
@@ -114,15 +132,89 @@ public class UnityMainThreadDispatcherTests : IDisposable
             Interlocked.Increment(ref createCalls);
             return (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
         };
+        UnityMainThreadDispatcher.TestHooks.SetMainThreadIdForTests(int.MinValue);
 
         var workerTask = Task.Run(() => UnityMainThreadDispatcher.Instance());
 
         await Task.Delay(450);
+        UnityMainThreadDispatcher.TestHooks.SetMainThreadIdForTests(Thread.CurrentThread.ManagedThreadId);
         UnityMainThreadDispatcher.ProcessPendingMainThreadWork();
 
         var instance = await workerTask;
         Assert.NotNull(instance);
         Assert.Equal(1, createCalls);
+    }
+
+    [Fact]
+    public async Task ProcessPendingMainThreadWork_RetainsCreateRequest_WhenFactoryThrows()
+    {
+        UnityMainThreadDispatcher.BackgroundThreadInstanceWaitTimeout = TimeSpan.FromMilliseconds(50);
+        UnityMainThreadDispatcher.TestHooks.SetMainThreadIdForTests(int.MinValue);
+
+        var worker = Task.Run(() => Record.Exception(() => UnityMainThreadDispatcher.Instance()));
+        var workerError = await worker;
+        Assert.IsType<InvalidOperationException>(workerError);
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.CreateRequestQueuedForTests);
+
+        var createCalls = 0;
+        UnityMainThreadDispatcher.CreateInstanceOnMainThreadFactory = () =>
+        {
+            createCalls++;
+            if (createCalls == 1) throw new InvalidOperationException("factory failed");
+            return (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        };
+        UnityMainThreadDispatcher.TestHooks.SetMainThreadIdForTests(Thread.CurrentThread.ManagedThreadId);
+
+        var mainThreadError = Assert.Throws<InvalidOperationException>(UnityMainThreadDispatcher.ProcessPendingMainThreadWork);
+        Assert.Equal("factory failed", mainThreadError.Message);
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.CreateRequestQueuedForTests);
+
+        UnityMainThreadDispatcher.ProcessPendingMainThreadWork();
+
+        Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.CreateRequestQueuedForTests);
+        Assert.Equal(2, createCalls);
+    }
+
+    [Fact]
+    public void OnDestroy_WhenActiveInstance_ClearsCachedDispatcher()
+    {
+        var destroyed = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        var replacement = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.CreateInstanceOnMainThreadFactory = () => destroyed;
+
+        Assert.Same(destroyed, UnityMainThreadDispatcher.Instance());
+        typeof(UnityMainThreadDispatcher)
+            .GetMethod("OnDestroy", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(destroyed, null);
+
+        UnityMainThreadDispatcher.CreateInstanceOnMainThreadFactory = () => replacement;
+        Assert.Same(replacement, UnityMainThreadDispatcher.Instance());
+    }
+
+    [UnityRuntimeFact]
+    public void Awake_WhenDuplicateDispatcherSharesObjectWithOtherComponents_DestroysOnlyDuplicateComponent()
+    {
+        GameObject? canonicalObject = null;
+        GameObject? duplicateObject = null;
+        try
+        {
+            canonicalObject = new GameObject("canonical-dispatcher");
+            var canonical = canonicalObject.AddComponent<UnityMainThreadDispatcher>();
+            duplicateObject = new GameObject("duplicate-dispatcher-with-component");
+            var dummy = duplicateObject.AddComponent<DummyComponent>();
+            var duplicate = duplicateObject.AddComponent<UnityMainThreadDispatcher>();
+
+            Assert.True(canonicalObject);
+            Assert.True(duplicateObject);
+            Assert.True(dummy);
+            Assert.False(duplicate);
+            Assert.Same(canonical, UnityMainThreadDispatcher.Instance());
+        }
+        finally
+        {
+            if (duplicateObject) UnityEngine.Object.DestroyImmediate(duplicateObject);
+            if (canonicalObject) UnityEngine.Object.DestroyImmediate(canonicalObject);
+        }
     }
 
     [Fact]
@@ -226,7 +318,7 @@ public class UnityMainThreadDispatcherTests : IDisposable
         Assert.False(delayed.MoveNext());
 
         Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.QueueDepthForTests);
-        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.RejectedEnqueueCountForTests);
+        Assert.Equal(2, UnityMainThreadDispatcher.TestHooks.RejectedEnqueueCountForTests);
         Assert.True(observation.HasValue);
         Assert.Equal(UnityMainThreadDispatcher.QueueOverflowBehavior.RejectNewWork, observation.Value.Behavior);
         Assert.Equal(1, observation.Value.QueueDepth);
@@ -342,6 +434,22 @@ public class UnityMainThreadDispatcherTests : IDisposable
     }
 
     [Fact]
+    public void Enqueue_OverflowWarningCooldown_RecoversWhenClockMovesBackward()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 1;
+        UnityMainThreadDispatcher.QueueOverflowBehaviorProvider = () => UnityMainThreadDispatcher.QueueOverflowBehavior.RejectNewWork;
+        dispatcher.Enqueue(() => { });
+        dispatcher.Enqueue(() => { });
+
+        UnityMainThreadDispatcher.TestHooks.LastOverflowWarningTicksForTests = DateTime.UtcNow.AddSeconds(30).Ticks;
+        dispatcher.Enqueue(() => { });
+
+        Assert.Equal(2, UnityMainThreadDispatcher.TestHooks.EmittedOverflowWarningCountForTests);
+        Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.SuppressedOverflowWarningsForTests);
+    }
+
+    [Fact]
     public void Update_WhenPerFrameActionBudgetReached_PartiallyDrainsQueue()
     {
         var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
@@ -398,6 +506,26 @@ public class UnityMainThreadDispatcherTests : IDisposable
     }
 
     [Fact]
+    public void Update_BacklogWarningCooldown_RecoversWhenClockMovesBackward()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 32;
+        UnityMainThreadDispatcher.MaxActionsPerFrameProvider = () => 1;
+        UnityMainThreadDispatcher.MaxFrameWorkMillisecondsProvider = () => 1000d;
+        UnityMainThreadDispatcher.BacklogWarningFrameThresholdProvider = () => 1;
+
+        for (var i = 0; i < 4; i++) dispatcher.Enqueue(() => { });
+        var update = typeof(UnityMainThreadDispatcher).GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        update.Invoke(dispatcher, null);
+
+        UnityMainThreadDispatcher.TestHooks.LastBacklogWarningTicksForTests = DateTime.UtcNow.AddSeconds(30).Ticks;
+        update.Invoke(dispatcher, null);
+
+        Assert.Equal(2, UnityMainThreadDispatcher.TestHooks.EmittedBacklogWarningCountForTests);
+        Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.SuppressedBacklogWarningsForTests);
+    }
+
+    [Fact]
     public void Update_WhenActionsThrowAcrossFrames_ThrottlesAndSummarizesSuppressedExceptions()
     {
         var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
@@ -413,7 +541,7 @@ public class UnityMainThreadDispatcherTests : IDisposable
         Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.EmittedActionErrorLogCountForTests);
         Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.SuppressedActionErrorLogsForTests);
         Assert.Contains("Dispatcher action error:", UnityMainThreadDispatcher.TestHooks.LastActionErrorMessageForTests);
-        Assert.DoesNotContain("Suppressed", UnityMainThreadDispatcher.TestHooks.LastActionErrorMessageForTests);
+        Assert.DoesNotContain("Suppressed 1 similar action exceptions.", UnityMainThreadDispatcher.TestHooks.LastActionErrorMessageForTests);
 
         update.Invoke(dispatcher, null);
         update.Invoke(dispatcher, null);
@@ -426,6 +554,61 @@ public class UnityMainThreadDispatcherTests : IDisposable
         Assert.Equal(2, UnityMainThreadDispatcher.TestHooks.EmittedActionErrorLogCountForTests);
         Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.SuppressedActionErrorLogsForTests);
         Assert.Contains("Suppressed 2 similar action exceptions.", UnityMainThreadDispatcher.TestHooks.LastActionErrorMessageForTests);
+    }
+
+    [Fact]
+    public void Update_ActionErrorCooldown_RecoversWhenClockMovesBackward()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 32;
+        UnityMainThreadDispatcher.MaxActionsPerFrameProvider = () => 1;
+        UnityMainThreadDispatcher.MaxFrameWorkMillisecondsProvider = () => 1000d;
+        UnityMainThreadDispatcher.BacklogWarningFrameThresholdProvider = () => 1000;
+
+        for (var i = 0; i < 2; i++) dispatcher.Enqueue(() => throw new InvalidOperationException("boom"));
+        var update = typeof(UnityMainThreadDispatcher).GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        update.Invoke(dispatcher, null);
+
+        UnityMainThreadDispatcher.TestHooks.LastActionErrorLogTicksForTests = DateTime.UtcNow.AddSeconds(30).Ticks;
+        update.Invoke(dispatcher, null);
+
+        Assert.Equal(2, UnityMainThreadDispatcher.TestHooks.EmittedActionErrorLogCountForTests);
+        Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.SuppressedActionErrorLogsForTests);
+    }
+
+    [Fact]
+    public void Enqueue_WhenQueueBehaviorProviderThrows_FallsBackToDropOldest()
+    {
+        var dispatcher = (UnityMainThreadDispatcher)FormatterServices.GetUninitializedObject(typeof(UnityMainThreadDispatcher));
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => 1;
+        UnityMainThreadDispatcher.QueueOverflowBehaviorProvider = () => throw new InvalidOperationException("queue behavior unavailable");
+
+        var executed = new List<int>();
+        dispatcher.Enqueue(() => executed.Add(1));
+        var error = Record.Exception(() => dispatcher.Enqueue(() => executed.Add(2)));
+
+        typeof(UnityMainThreadDispatcher)
+            .GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(dispatcher, null);
+
+        Assert.Null(error);
+        Assert.Equal(new[] { 2 }, executed);
+        Assert.Equal(1, UnityMainThreadDispatcher.TestHooks.DroppedEnqueueCountForTests);
+        Assert.Equal(0, UnityMainThreadDispatcher.TestHooks.RejectedEnqueueCountForTests);
+    }
+
+    [Fact]
+    public void TestHooks_WhenBudgetProvidersThrow_ExposeDefaultValues()
+    {
+        UnityMainThreadDispatcher.MaxQueueDepthProvider = () => throw new InvalidOperationException("depth unavailable");
+        UnityMainThreadDispatcher.MaxActionsPerFrameProvider = () => throw new InvalidOperationException("frame action budget unavailable");
+        UnityMainThreadDispatcher.MaxFrameWorkMillisecondsProvider = () => throw new InvalidOperationException("frame time budget unavailable");
+        UnityMainThreadDispatcher.BacklogWarningFrameThresholdProvider = () => throw new InvalidOperationException("backlog threshold unavailable");
+
+        Assert.Equal(2048, UnityMainThreadDispatcher.TestHooks.MaxQueueDepthForTests);
+        Assert.Equal(128, UnityMainThreadDispatcher.TestHooks.MaxActionsPerFrameForTests);
+        Assert.Equal(4.0d, UnityMainThreadDispatcher.TestHooks.MaxFrameWorkMillisecondsForTests, 3);
+        Assert.Equal(120, UnityMainThreadDispatcher.TestHooks.BacklogWarningFrameThresholdForTests);
     }
 
     [Fact]

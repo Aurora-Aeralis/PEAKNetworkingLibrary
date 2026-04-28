@@ -24,11 +24,23 @@ public class NetworkingServiceFactoryTests
 
     static IDisposable WithUnavailableNetLogger()
     {
-        var loggerField = typeof(Net).GetField("<Logger>k__BackingField", BindingFlags.Static | BindingFlags.NonPublic);
-        if (loggerField == null) return new ScopeAction(() => { });
-        var original = loggerField.GetValue(null);
-        loggerField.SetValue(null, null);
-        return new ScopeAction(() => loggerField.SetValue(null, original));
+        try
+        {
+            var netType = typeof(NetworkingServiceFactory).Assembly.GetType("NetworkingLibrary.Net", throwOnError: false);
+            var loggerField = netType?.GetField("<Logger>k__BackingField", BindingFlags.Static | BindingFlags.NonPublic);
+            if (loggerField == null) return new ScopeAction(() => { });
+            var original = loggerField.GetValue(null);
+            loggerField.SetValue(null, null);
+            return new ScopeAction(() => loggerField.SetValue(null, original));
+        }
+        catch (System.IO.FileNotFoundException)
+        {
+            return new ScopeAction(() => { });
+        }
+        catch (System.IO.FileLoadException)
+        {
+            return new ScopeAction(() => { });
+        }
     }
 
     sealed class PrivatePropertySteamManagerProbe
@@ -43,7 +55,7 @@ public class NetworkingServiceFactoryTests
         public static void Set(bool value) => Initialized = value;
     }
 
-    sealed class SteamManager
+    sealed class SteamManagerProbe
     {
         public static bool Initialized;
     }
@@ -175,6 +187,31 @@ public class NetworkingServiceFactoryTests
     }
 
     [Fact]
+    public void CreateDefaultService_CallsOfflineFactoryOnce_WhenClientNotRunningFallbackThrows()
+    {
+        var offlineFactoryCalls = 0;
+
+        NetworkingServiceFactory.IsSteamClientRunning = () => false;
+        NetworkingServiceFactory.CreateOfflineService = () =>
+        {
+            offlineFactoryCalls++;
+            throw new InvalidOperationException("offline failed");
+        };
+
+        try
+        {
+            var exception = Assert.Throws<InvalidOperationException>(() => NetworkingServiceFactory.CreateDefaultService());
+            Assert.Equal("offline failed", exception.Message);
+            Assert.Equal(1, offlineFactoryCalls);
+        }
+        finally
+        {
+            NetworkingServiceFactory.ResetTestHooks();
+            NetLog.ResetForTests();
+        }
+    }
+
+    [Fact]
     public void CreateDefaultService_ReturnsOfflineService_WhenReadinessProbeThrows()
     {
         var offline = new FakeService();
@@ -286,10 +323,9 @@ public class NetworkingServiceFactoryTests
     }
 
     [Fact]
-    public void TryReadSteamManagerInitialized_DoesNotUseAmbiguousLoadedSteamManagerType_WhenResolveTypeMisses()
+    public void TryReadSteamManagerInitialized_DoesNotUseNonPreferredLoadedSteamManagerType_WhenResolveTypeMisses()
     {
-        SteamManager.Initialized = true;
-        NetworkingLibrary.Tests.OtherPlugin.SteamManager.Initialized = false;
+        NetworkingLibrary.Tests.OtherPlugin.SteamManager.Initialized = true;
         NetworkingServiceFactory.ResolveType = _ => null;
 
         try
@@ -300,7 +336,26 @@ public class NetworkingServiceFactoryTests
         }
         finally
         {
-            SteamManager.Initialized = false;
+            NetworkingLibrary.Tests.OtherPlugin.SteamManager.Initialized = false;
+            NetworkingServiceFactory.ResetTestHooks();
+        }
+    }
+
+    [Fact]
+    public void TryReadSteamManagerInitialized_DoesNotUseNonPreferredUnqualifiedResolvedType()
+    {
+        NetworkingLibrary.Tests.OtherPlugin.SteamManager.Initialized = true;
+        NetworkingServiceFactory.ResolveType = name =>
+            name == "SteamManager" ? typeof(NetworkingLibrary.Tests.OtherPlugin.SteamManager) : null;
+
+        try
+        {
+            var read = InvokeTryReadSteamManagerInitialized(out var isInitialized);
+            Assert.False(read);
+            Assert.False(isInitialized);
+        }
+        finally
+        {
             NetworkingLibrary.Tests.OtherPlugin.SteamManager.Initialized = false;
             NetworkingServiceFactory.ResetTestHooks();
         }
@@ -312,10 +367,10 @@ public class NetworkingServiceFactoryTests
         NetworkingServiceFactory.ResolveType = name =>
         {
             if (name == "pworld.Scripts.SteamManager, Assembly-CSharp") return typeof(ThrowingInitializedSteamManagerProbe);
-            if (name == "SteamManager, Assembly-CSharp") return typeof(SteamManager);
+            if (name == "SteamManager, Assembly-CSharp") return typeof(SteamManagerProbe);
             return null;
         };
-        SteamManager.Initialized = true;
+        SteamManagerProbe.Initialized = true;
 
         try
         {
@@ -325,7 +380,7 @@ public class NetworkingServiceFactoryTests
         }
         finally
         {
-            SteamManager.Initialized = false;
+            SteamManagerProbe.Initialized = false;
             NetworkingServiceFactory.ResetTestHooks();
             NetLog.ResetForTests();
         }

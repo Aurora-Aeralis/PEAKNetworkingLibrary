@@ -49,11 +49,12 @@ public class SteamNetworkingServiceQueueDepthTests
     public void EnqueueOrSend_HighPriority_DoesNotQueue()
     {
         var service = new SteamNetworkingService();
+        SetField(service, "getLocalSteamId", (Func<CSteamID>)(() => new CSteamID(98765UL)));
 
         InvokeEnqueueOrSend(service, new byte[] { 42 }, 98765UL, ReliableType.Unreliable, "High");
 
-        Assert.Equal(0, GetQueueCount(service, "normalQueue"));
-        Assert.Equal(0, GetQueueCount(service, "lowQueue"));
+        Assert.Empty(GetQueue(service, "normalQueue"));
+        Assert.Empty(GetQueue(service, "lowQueue"));
     }
 
     [Fact]
@@ -82,6 +83,22 @@ public class SteamNetworkingServiceQueueDepthTests
         }
     }
 
+    [Fact]
+    public void Rpc_BroadcastSkipsNilCachedPlayers()
+    {
+        var service = new SteamNetworkingService();
+        const ulong local = 76561198000000000UL;
+        const ulong remote = 76561198000000001UL;
+
+        SetInLobby(service, true);
+        SetField(service, "getLocalSteamId", (Func<CSteamID>)(() => new CSteamID(local)));
+        SetField(service, "players", new[] { CSteamID.Nil, new CSteamID(remote), new CSteamID(local) });
+
+        service.RPC(1u, "Ping", ReliableType.Unreliable);
+
+        Assert.Equal(new[] { remote }, GetQueueTargets(service, "normalQueue"));
+    }
+
     static void SetTimeProvider(double now)
     {
         NetLog.TimeProvider = () => now;
@@ -90,6 +107,16 @@ public class SteamNetworkingServiceQueueDepthTests
     static int GetMaxDepth(string fieldName)
     {
         return (int)typeof(SteamNetworkingService).GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
+    }
+
+    static void SetField(SteamNetworkingService service, string fieldName, object value)
+    {
+        typeof(SteamNetworkingService).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(service, value);
+    }
+
+    static void SetInLobby(SteamNetworkingService service, bool value)
+    {
+        typeof(SteamNetworkingService).GetField("<InLobby>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(service, value);
     }
 
     static void InvokeEnqueueOrSend(SteamNetworkingService service, byte[] framed, ulong target, ReliableType reliable, string priorityName)
@@ -101,17 +128,22 @@ public class SteamNetworkingServiceQueueDepthTests
             .Invoke(service, new object[] { framed, new CSteamID(target), reliable, priority });
     }
 
-    static int GetQueueCount(SteamNetworkingService service, string queueFieldName)
+    static IEnumerable GetQueue(SteamNetworkingService service, string queueFieldName)
     {
-        var queue = (ICollection)typeof(SteamNetworkingService).GetField(queueFieldName, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(service)!;
-        return queue.Count;
+        return (IEnumerable)typeof(SteamNetworkingService).GetField(queueFieldName, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(service)!;
     }
 
     static byte[] GetQueuePayloads(SteamNetworkingService service, string queueFieldName)
     {
-        var queue = (IEnumerable)typeof(SteamNetworkingService).GetField(queueFieldName, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(service)!;
         var queuedSendType = typeof(SteamNetworkingService).GetNestedType("QueuedSend", BindingFlags.NonPublic)!;
         var framedField = queuedSendType.GetField("Framed", BindingFlags.Instance | BindingFlags.Public)!;
-        return queue.Cast<object>().Select(item => ((byte[])framedField.GetValue(item)!)[0]).ToArray();
+        return GetQueue(service, queueFieldName).Cast<object>().Select(item => ((byte[])framedField.GetValue(item)!)[0]).ToArray();
+    }
+
+    static ulong[] GetQueueTargets(SteamNetworkingService service, string queueFieldName)
+    {
+        var queuedSendType = typeof(SteamNetworkingService).GetNestedType("QueuedSend", BindingFlags.NonPublic)!;
+        var targetField = queuedSendType.GetField("Target", BindingFlags.Instance | BindingFlags.Public)!;
+        return GetQueue(service, queueFieldName).Cast<object>().Select(item => ((CSteamID)targetField.GetValue(item)!).m_SteamID).ToArray();
     }
 }

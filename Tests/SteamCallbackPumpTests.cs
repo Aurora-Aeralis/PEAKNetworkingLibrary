@@ -15,11 +15,13 @@ public class SteamCallbackPumpTests : IDisposable
 
     readonly Func<bool> originalIsSteamReady = SteamCallbackPump.IsSteamReady;
     readonly Func<float> originalTimeProvider = SteamCallbackPump.TimeProvider;
+    readonly Action originalRunCallbacks = SteamCallbackPump.RunCallbacks;
 
     public void Dispose()
     {
         SteamCallbackPump.IsSteamReady = originalIsSteamReady;
         SteamCallbackPump.TimeProvider = originalTimeProvider;
+        SteamCallbackPump.RunCallbacks = originalRunCallbacks;
         SteamCallbackPump.DisablePumping();
         NetLog.ResetForTests();
     }
@@ -62,6 +64,57 @@ public class SteamCallbackPumpTests : IDisposable
         Assert.True(NetLog.TryEnterCooldown(cooldownKey, 2d, simulatedTime + 2.1f));
     }
 
+    [Fact]
+    public void Update_WhenIsSteamReadyAndTimeProviderThrow_DoesNotThrow()
+    {
+        var pump = (SteamCallbackPump)FormatterServices.GetUninitializedObject(typeof(SteamCallbackPump));
+        SteamCallbackPump.TimeProvider = () => throw new InvalidOperationException("time failed");
+        SteamCallbackPump.IsSteamReady = () => throw new InvalidOperationException("hook failed");
+        SteamCallbackPump.EnablePumping();
+
+        var exception = Record.Exception(() => InvokeUpdate(pump));
+
+        Assert.Null(exception);
+        Assert.False(ReadPrivateBool(pump, "runCallbacksFaulted"));
+    }
+
+    [Fact]
+    public void Update_WhenRunCallbacksThrows_ThrottlesRepeatedErrorEmission()
+    {
+        var pump = (SteamCallbackPump)FormatterServices.GetUninitializedObject(typeof(SteamCallbackPump));
+        var simulatedTime = 25f;
+        SteamCallbackPump.TimeProvider = () => simulatedTime;
+        SteamCallbackPump.IsSteamReady = () => true;
+        SteamCallbackPump.RunCallbacks = () => throw new InvalidOperationException("callback failed");
+        SteamCallbackPump.EnablePumping();
+
+        var exception = Record.Exception(() => InvokeUpdate(pump));
+        simulatedTime += 0.25f;
+        var repeatedException = Record.Exception(() => InvokeUpdate(pump));
+
+        Assert.Null(exception);
+        Assert.Null(repeatedException);
+        Assert.True(ReadPrivateBool(pump, "runCallbacksFaulted"));
+        Assert.False(NetLog.TryEnterCooldown("SteamCallbackPump.RunCallbacks", 2d, simulatedTime));
+        Assert.True(NetLog.TryEnterCooldown("SteamCallbackPump.RunCallbacks", 2d, simulatedTime + 2.1f));
+    }
+
+    [Fact]
+    public void Update_WhenRunCallbacksRecovers_ClearsFaultState()
+    {
+        var pump = (SteamCallbackPump)FormatterServices.GetUninitializedObject(typeof(SteamCallbackPump));
+        SteamCallbackPump.TimeProvider = () => 10f;
+        SteamCallbackPump.IsSteamReady = () => true;
+        SteamCallbackPump.RunCallbacks = () => throw new InvalidOperationException("callback failed");
+        SteamCallbackPump.EnablePumping();
+
+        InvokeUpdate(pump);
+        SteamCallbackPump.RunCallbacks = () => { };
+        InvokeUpdate(pump);
+
+        Assert.False(ReadPrivateBool(pump, "runCallbacksFaulted"));
+    }
+
     static void InvokeUpdate(SteamCallbackPump pump)
     {
         typeof(SteamCallbackPump).GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(pump, null);
@@ -72,7 +125,7 @@ public class SteamCallbackPumpTests : IDisposable
         return (bool)(typeof(SteamCallbackPump).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(pump) ?? false);
     }
 
-    [Fact]
+    [UnityRuntimeFact]
     public void PrepareCanonicalSteamCallbackPump_NormalizesDuplicates_AndKeepsSingleActiveEnabledPump()
     {
         var canonicalObject = new GameObject("canonical");
@@ -98,7 +151,7 @@ public class SteamCallbackPumpTests : IDisposable
             Assert.False(duplicateWithExtraPump);
             Assert.True(duplicateWithExtraObject);
 
-            var allPumps = UnityEngine.Object.FindObjectsOfType<SteamCallbackPump>(true);
+            var allPumps = UnityEngine.Object.FindObjectsByType<SteamCallbackPump>(FindObjectsInactive.Include, FindObjectsSortMode.None);
             var alivePumps = allPumps.Where(p => p != null).ToArray();
             Assert.Single(alivePumps);
             Assert.Same(canonicalPump, alivePumps[0]);
@@ -111,7 +164,7 @@ public class SteamCallbackPumpTests : IDisposable
         }
     }
 
-    [Fact]
+    [UnityRuntimeFact]
     public void PrepareCanonicalSteamCallbackPump_SelectsDeterministically_WhenMultiplePumpsAreActive()
     {
         var firstObject = new GameObject("first-active");
@@ -135,7 +188,7 @@ public class SteamCallbackPumpTests : IDisposable
         }
     }
 
-    [Fact]
+    [UnityRuntimeFact]
     public void PrepareCanonicalSteamCallbackPump_PromotesCanonicalPumpToActiveHierarchy_WhenParentIsInactive()
     {
         var inactiveParent = new GameObject("inactive-parent");

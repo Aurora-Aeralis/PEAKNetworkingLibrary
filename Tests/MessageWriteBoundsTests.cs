@@ -37,4 +37,14 @@ public class MessageWriteBoundsTests
         Assert.Contains("WriteString exceeds max message size", ex.Message);
         Assert.Equal(lengthBeforeOverflowWrite, message.Length());
     }
+
+    [Fact]
+    public void ReadByte_Rejects_Cursor_Beyond_Buffer_Without_Indexing()
+    {
+        using var message = NewMessage();
+        message.readPos = int.MaxValue;
+
+        var ex = Assert.Throws<InvalidDataException>(() => message.ReadByte());
+        Assert.Contains("ReadByte out of range", ex.Message);
+    }
 }

@@ -44,7 +44,7 @@ namespace NetworkingLibrary.Services
             get
             {
                 if (Lobby == CSteamID.Nil) return 0UL;
-                var owner = getLobbyOwner(Lobby);
+                if (!TryGetLobbyOwner(Lobby, out var owner, LobbyOwnerDebugCooldownKey, "HostSteamId64")) return 0UL;
                 if (owner == CSteamID.Nil) return 0UL;
                 return owner.m_SteamID;
             }
@@ -54,7 +54,7 @@ namespace NetworkingLibrary.Services
             get
             {
                 if (Lobby == CSteamID.Nil) return string.Empty;
-                var owner = getLobbyOwner(Lobby);
+                if (!TryGetLobbyOwner(Lobby, out var owner, LobbyOwnerDebugCooldownKey, "HostIdString")) return string.Empty;
                 return owner == CSteamID.Nil ? string.Empty : owner.ToString();
             }
         }
@@ -133,11 +133,13 @@ namespace NetworkingLibrary.Services
         private readonly List<string> playerDataKeys = new();
         private readonly Dictionary<CSteamID, Dictionary<string, string>> lastPlayerData = new();
         private readonly Dictionary<string, string> lastLobbyData = new();
+        private readonly HashSet<string> localEmptyLobbyDataKeys = new();
+        private readonly HashSet<string> localEmptyPlayerDataKeys = new();
         private Func<CSteamID, int> getNumLobbyMembers = SteamMatchmaking.GetNumLobbyMembers;
         private Func<CSteamID, CSteamID> getLobbyOwner = SteamMatchmaking.GetLobbyOwner;
         private Func<CSteamID> getLocalSteamId = SteamUser.GetSteamID;
         private Func<CSteamID, int, CSteamID> getLobbyMemberByIndex = SteamMatchmaking.GetLobbyMemberByIndex;
-        private Action<CSteamID, string, string> setLobbyData = SteamMatchmaking.SetLobbyData;
+        private Action<CSteamID, string, string> setLobbyData = (lobby, key, value) => SteamMatchmaking.SetLobbyData(lobby, key, value);
         private Func<CSteamID, string, string> getLobbyData = SteamMatchmaking.GetLobbyData;
         private Action<CSteamID, string, string> setLobbyMemberData = SteamMatchmaking.SetLobbyMemberData;
         private Func<CSteamID, CSteamID, string, string> getLobbyMemberData = SteamMatchmaking.GetLobbyMemberData;
@@ -149,6 +151,7 @@ namespace NetworkingLibrary.Services
         Callback<LobbyDataUpdate_t>? cbLobbyDataUpdate;
 
         readonly Dictionary<uint, Dictionary<string, List<MessageHandler>>> rpcs = new();
+        readonly List<RuntimeRegistration> runtimeRegistrations = new();
 
         readonly Queue<QueuedSend> normalQueue = new();
         readonly Queue<QueuedSend> lowQueue = new();
@@ -193,6 +196,12 @@ namespace NetworkingLibrary.Services
             this.messageSizePolicy = messageSizePolicy ?? CreateDefaultMessageSizePolicy();
         }
 
+        static void LogInfo(string message)
+        {
+            try { NetLog.Info(LogSource, message); }
+            catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[{LogSource}] Failed to write info log. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}"); }
+        }
+
         static MessageSizePolicy CreateDefaultMessageSizePolicy()
         {
             try
@@ -224,6 +233,15 @@ namespace NetworkingLibrary.Services
             public MessageHandler Handler = null!;
         }
 
+        sealed class RuntimeRegistration
+        {
+            public object? Instance;
+            public Type Type = null!;
+            public uint ModId;
+            public int Mask;
+            public RegistrationToken Token = null!;
+        }
+
         public void Initialize()
         {
             if (IsInitialized) return;
@@ -237,7 +255,7 @@ namespace NetworkingLibrary.Services
             {
                 try
                 {
-                    var _ = PrepareCanonicalSteamCallbackPump(out createdPumpGameObject, out createdPumpComponent);
+                    PrepareCanonicalSteamCallbackPump(out createdPumpGameObject, out createdPumpComponent);
 
                     SteamCallbackPump.EnablePumping();
                     enabledPumpingInThisInitialize = true;
@@ -264,14 +282,14 @@ namespace NetworkingLibrary.Services
             }
 
             IsInitialized = true;
-            NetLog.Info(LogSource, "SteamNetworkingService initialized");
+            LogInfo("SteamNetworkingService initialized");
         }
 
         static SteamCallbackPump PrepareCanonicalSteamCallbackPump(out GameObject? createdPumpGameObject, out SteamCallbackPump? createdPumpComponent)
         {
             createdPumpGameObject = null;
             createdPumpComponent = null;
-            var existingPumps = UnityEngine.Object.FindObjectsOfType<SteamCallbackPump>(true)
+            var existingPumps = UnityEngine.Object.FindObjectsByType<SteamCallbackPump>(FindObjectsInactive.Include, FindObjectsSortMode.None)
                 .Where(p => p != null && p.gameObject != null)
                 .OrderByDescending(p => p.isActiveAndEnabled)
                 .ThenByDescending(p => p.gameObject.activeInHierarchy)
@@ -286,7 +304,7 @@ namespace NetworkingLibrary.Services
                 {
                     go = new GameObject("SteamCallbackPump");
                     createdPumpGameObject = go;
-                    NetLog.Info(LogSource, "Created SteamCallbackPump GameObject.");
+                    LogInfo("Created SteamCallbackPump GameObject.");
                 }
 
                 canonicalPump = go.GetComponent<SteamCallbackPump>();
@@ -416,10 +434,8 @@ namespace NetworkingLibrary.Services
             catch (Exception ex)
             {
                 NetLog.Error(LogSource, $"Failed to initialize Steam callbacks and crypto: {ex}");
-                cbLobbyEnter = null;
-                cbLobbyCreated = null;
-                cbLobbyChatUpdate = null;
-                cbLobbyDataUpdate = null;
+                DisposeSteamCallbacks();
+                LocalRsa?.Dispose();
                 LocalRsa = null;
                 return false;
             }
@@ -431,17 +447,17 @@ namespace NetworkingLibrary.Services
                 LeaveLobby();
 
             IncomingValidator = null;
-            cbLobbyEnter = null;
-            cbLobbyCreated = null;
-            cbLobbyChatUpdate = null;
-            cbLobbyDataUpdate = null;
+            DisposeSteamCallbacks();
             lock (rpcLock)
             {
                 rpcs.Clear();
+                runtimeRegistrations.Clear();
+                lobbyDataKeys.Clear();
+                playerDataKeys.Clear();
+                localEmptyLobbyDataKeys.Clear();
+                localEmptyPlayerDataKeys.Clear();
             }
             ClearOutboundState();
-            lobbyDataKeys.Clear();
-            playerDataKeys.Clear();
             lastLobbyData.Clear();
             lastPlayerData.Clear();
             players = Array.Empty<CSteamID>();
@@ -476,7 +492,29 @@ namespace NetworkingLibrary.Services
                 staleFragmentKeys.Clear();
                 nextFragmentCleanupAt = DateTime.MinValue;
             }
-            NetLog.Info(LogSource, "SteamNetworkingService shutdown");
+            LogInfo("SteamNetworkingService shutdown");
+        }
+
+        void DisposeSteamCallbacks()
+        {
+            DisposeSteamCallback(cbLobbyEnter, nameof(cbLobbyEnter));
+            DisposeSteamCallback(cbLobbyCreated, nameof(cbLobbyCreated));
+            DisposeSteamCallback(cbLobbyChatUpdate, nameof(cbLobbyChatUpdate));
+            DisposeSteamCallback(cbLobbyDataUpdate, nameof(cbLobbyDataUpdate));
+            cbLobbyEnter = null;
+            cbLobbyCreated = null;
+            cbLobbyChatUpdate = null;
+            cbLobbyDataUpdate = null;
+        }
+
+        static void DisposeSteamCallback<T>(Callback<T>? callback, string fieldName)
+        {
+            if (callback == null) return;
+            try { callback.Dispose(); }
+            catch (Exception ex)
+            {
+                NetLog.DebugThrottled(LogSource, $"SteamNetworkingService.DisposeSteamCallback.{fieldName}", DebugLogCooldownSeconds, $"Failed to dispose {fieldName}: {ex.GetType().Name}: {ex.Message}");
+            }
         }
 
         public void CreateLobby(int maxPlayers = 8)
@@ -629,6 +667,11 @@ namespace NetworkingLibrary.Services
             players = Array.Empty<CSteamID>();
             lastLobbyData.Clear();
             lastPlayerData.Clear();
+            lock (rpcLock)
+            {
+                localEmptyLobbyDataKeys.Clear();
+                localEmptyPlayerDataKeys.Clear();
+            }
             Lobby = CSteamID.Nil;
             InLobby = false;
 
@@ -687,6 +730,19 @@ namespace NetworkingLibrary.Services
             globalSharedSecret = null;
         }
 
+        void SetPeerSymmetricKeyUnderLock(ulong steamId64, HandshakeState state, byte[] sym)
+        {
+            ZeroIfReplaced(state.Sym, sym);
+            if (perPeerSymmetricKey.TryGetValue(steamId64, out var previousSym)) ZeroIfReplaced(previousSym, sym);
+            state.Sym = sym;
+            perPeerSymmetricKey[steamId64] = sym;
+        }
+
+        static void ZeroIfReplaced(byte[]? previous, byte[] next)
+        {
+            if (previous != null && !ReferenceEquals(previous, next)) CryptographicOperations.ZeroMemory(previous);
+        }
+
         void ClearOutboundState()
         {
             lock (queueLock)
@@ -735,8 +791,10 @@ namespace NetworkingLibrary.Services
 
             if (param.m_ulSteamIDLobby == param.m_ulSteamIDMember)
             {
+                string[] keys;
+                lock (rpcLock) keys = lobbyDataKeys.ToArray();
                 List<string>? changed = null;
-                foreach (var key in lobbyDataKeys)
+                foreach (var key in keys)
                 {
                     var data = getLobbyData(Lobby, key);
                     if (!lastLobbyData.TryGetValue(key, out var prev) || prev != data)
@@ -751,13 +809,15 @@ namespace NetworkingLibrary.Services
             else
             {
                 var player = new CSteamID(param.m_ulSteamIDMember);
+                string[] keys;
+                lock (rpcLock) keys = playerDataKeys.ToArray();
                 if (!lastPlayerData.TryGetValue(player, out var playerDataCache))
                 {
                     playerDataCache = new Dictionary<string, string>();
                     lastPlayerData[player] = playerDataCache;
                 }
                 List<string>? changed = null;
-                foreach (var key in playerDataKeys)
+                foreach (var key in keys)
                 {
                     var data = getLobbyMemberData(Lobby, player, key);
                     if (!playerDataCache.TryGetValue(key, out var prev) || prev != data)
@@ -773,18 +833,32 @@ namespace NetworkingLibrary.Services
 
         public void RegisterLobbyDataKey(string key)
         {
-            if (lobbyDataKeys.Contains(key)) NetLog.Warning(LogSource, $"Lobby key {key} already registered");
-            else lobbyDataKeys.Add(key);
+            ValidateDataKey(key, nameof(key));
+            bool alreadyRegistered;
+            lock (rpcLock)
+            {
+                alreadyRegistered = lobbyDataKeys.Contains(key);
+                if (!alreadyRegistered) lobbyDataKeys.Add(key);
+            }
+            if (alreadyRegistered) NetLog.Warning(LogSource, $"Lobby key {key} already registered");
         }
 
         public void SetLobbyData(string key, object value)
         {
+            ValidateDataKey(key, nameof(key));
             if (!InLobby) { NetLog.Error(LogSource, "Cannot set lobby data when not in lobby."); return; }
-            if (!lobbyDataKeys.Contains(key)) NetLog.Warning(LogSource, $"Accessing unregistered lobby key '{key}'.");
+            bool registered;
+            lock (rpcLock) registered = lobbyDataKeys.Contains(key);
+            if (!registered) NetLog.Warning(LogSource, $"Accessing unregistered lobby key '{key}'.");
             var serialized = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
             try
             {
                 setLobbyData(Lobby, key, serialized);
+                lock (rpcLock)
+                {
+                    if (serialized.Length == 0) localEmptyLobbyDataKeys.Add(key);
+                    else localEmptyLobbyDataKeys.Remove(key);
+                }
             }
             catch (Exception ex)
             {
@@ -794,8 +868,11 @@ namespace NetworkingLibrary.Services
 
         public T GetLobbyData<T>(string key)
         {
+            ValidateDataKey(key, nameof(key));
             if (!InLobby) { NetLog.Error(LogSource, "Cannot get lobby data when not in lobby."); return default(T)!; }
-            if (!lobbyDataKeys.Contains(key)) NetLog.Warning(LogSource, $"Accessing unregistered lobby key '{key}'.");
+            bool registered;
+            lock (rpcLock) registered = lobbyDataKeys.Contains(key);
+            if (!registered) NetLog.Warning(LogSource, $"Accessing unregistered lobby key '{key}'.");
             string v;
             try
             {
@@ -806,8 +883,14 @@ namespace NetworkingLibrary.Services
                 NetLog.Error(LogSource, $"GetLobbyData failed for key '{key}': {ex}");
                 return default(T)!;
             }
-            if (string.IsNullOrEmpty(v)) return default(T)!;
-            try { return (T)Convert.ChangeType(v, typeof(T), System.Globalization.CultureInfo.InvariantCulture); }
+            if (string.IsNullOrEmpty(v))
+            {
+                bool locallySetEmpty;
+                lock (rpcLock) locallySetEmpty = localEmptyLobbyDataKeys.Contains(key);
+                if (locallySetEmpty && typeof(T) == typeof(string)) return (T)(object)string.Empty;
+                return default(T)!;
+            }
+            try { return DataValueConverter.ConvertTo<T>(v); }
             catch (Exception ex)
             {
                 NetLog.Error(LogSource, $"Could not parse lobby data [{key},{v}] as {typeof(T).Name}: {ex.GetType().Name}: {ex.Message}");
@@ -817,18 +900,32 @@ namespace NetworkingLibrary.Services
 
         public void RegisterPlayerDataKey(string key)
         {
-            if (playerDataKeys.Contains(key)) NetLog.Warning(LogSource, $"Player key {key} already registered");
-            else playerDataKeys.Add(key);
+            ValidateDataKey(key, nameof(key));
+            bool alreadyRegistered;
+            lock (rpcLock)
+            {
+                alreadyRegistered = playerDataKeys.Contains(key);
+                if (!alreadyRegistered) playerDataKeys.Add(key);
+            }
+            if (alreadyRegistered) NetLog.Warning(LogSource, $"Player key {key} already registered");
         }
 
         public void SetPlayerData(string key, object value)
         {
+            ValidateDataKey(key, nameof(key));
             if (!InLobby) { NetLog.Error(LogSource, "Cannot set player data when not in lobby."); return; }
-            if (!playerDataKeys.Contains(key)) NetLog.Warning(LogSource, $"Accessing unregistered player key '{key}'.");
+            bool registered;
+            lock (rpcLock) registered = playerDataKeys.Contains(key);
+            if (!registered) NetLog.Warning(LogSource, $"Accessing unregistered player key '{key}'.");
             var serialized = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
             try
             {
                 setLobbyMemberData(Lobby, key, serialized);
+                lock (rpcLock)
+                {
+                    if (serialized.Length == 0) localEmptyPlayerDataKeys.Add(key);
+                    else localEmptyPlayerDataKeys.Remove(key);
+                }
             }
             catch (Exception ex)
             {
@@ -838,8 +935,11 @@ namespace NetworkingLibrary.Services
 
         public T GetPlayerData<T>(ulong steamId64, string key)
         {
+            ValidateDataKey(key, nameof(key));
             if (!InLobby) { NetLog.Error(LogSource, "Cannot get player data when not in lobby."); return default(T)!; }
-            if (!playerDataKeys.Contains(key)) NetLog.Warning(LogSource, $"Accessing unregistered player key '{key}'.");
+            bool registered;
+            lock (rpcLock) registered = playerDataKeys.Contains(key);
+            if (!registered) NetLog.Warning(LogSource, $"Accessing unregistered player key '{key}'.");
             var player = new CSteamID(steamId64);
             string v;
             try
@@ -851,13 +951,26 @@ namespace NetworkingLibrary.Services
                 NetLog.Error(LogSource, $"GetPlayerData failed for key '{key}' and player '{steamId64}': {ex}");
                 return default(T)!;
             }
-            if (string.IsNullOrEmpty(v)) return default(T)!;
-            try { return (T)Convert.ChangeType(v, typeof(T), System.Globalization.CultureInfo.InvariantCulture); }
+            if (string.IsNullOrEmpty(v))
+            {
+                bool locallySetEmpty;
+                lock (rpcLock) locallySetEmpty = localEmptyPlayerDataKeys.Contains(key);
+                if (locallySetEmpty && typeof(T) == typeof(string) && TryGetLocalSteamId(out var localSteamId, LocalSteamIdDebugCooldownKey, "GetPlayerData") && localSteamId == player)
+                    return (T)(object)string.Empty;
+                return default(T)!;
+            }
+            try { return DataValueConverter.ConvertTo<T>(v); }
             catch (Exception ex)
             {
                 NetLog.Error(LogSource, $"Could not parse player data [{key},{v}] as {typeof(T).Name}: {ex.GetType().Name}: {ex.Message}");
                 return default(T)!;
             }
+        }
+
+        static void ValidateDataKey(string key, string paramName)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                throw new ArgumentException("Data key must be a non-empty string.", paramName);
         }
 
         public IDisposable RegisterNetworkObject(object instance, uint modId, int mask = 0)
@@ -874,6 +987,7 @@ namespace NetworkingLibrary.Services
         {
             int registered = 0;
             var registeredHandlers = new List<HandlerRegistration>();
+            var token = new RegistrationToken();
             var registrationFlags = instance == null
                 ? BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic
                 : BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
@@ -896,9 +1010,10 @@ namespace NetworkingLibrary.Services
                     if (!rpcs.ContainsKey(modId)) rpcs[modId] = new Dictionary<string, List<MessageHandler>>();
                     if (!rpcs[modId].ContainsKey(method.Name)) rpcs[modId][method.Name] = new List<MessageHandler>();
                     var handlers = rpcs[modId][method.Name];
-                    var alreadyRegisteredStatic = instance == null
-                        && handlers.Any(existing => existing.Mask == mask && existing.Method == method);
-                    if (alreadyRegisteredStatic) continue;
+                    var alreadyRegistered = instance == null
+                        ? handlers.Any(existing => existing.Mask == mask && existing.Method == method)
+                        : handlers.Any(existing => existing.Mask == mask && existing.Method == method && ReferenceEquals(existing.Target, instance));
+                    if (alreadyRegistered) continue;
 
                     var mh = new MessageHandler
                     {
@@ -915,14 +1030,31 @@ namespace NetworkingLibrary.Services
                     registeredHandlers.Add(new HandlerRegistration { MethodName = method.Name, Handler = mh });
                     registered++;
                 }
+
+                if (registeredHandlers.Count > 0)
+                {
+                    runtimeRegistrations.Add(new RuntimeRegistration
+                    {
+                        Instance = instance,
+                        Type = type,
+                        ModId = modId,
+                        Mask = mask,
+                        Token = token
+                    });
+                }
             }
 
             if (instance != null)
-                NetLog.Info(LogSource, $"Registered {registered} RPCs for mod {modId} on {instance} ({instance.GetType().FullName})");
+                LogInfo($"Registered {registered} RPCs for mod {modId} on {instance} ({instance.GetType().FullName})");
             else
-                NetLog.Info(LogSource, $"Registered {registered} static RPCs for mod {modId} on type {type.FullName}");
+                LogInfo($"Registered {registered} static RPCs for mod {modId} on type {type.FullName}");
 
-            return new RegistrationToken(this, modId, registeredHandlers);
+            token.SetDisposeAction(() =>
+            {
+                DeregisterHandlers(modId, registeredHandlers);
+                RemoveRuntimeRegistration(token);
+            });
+            return token;
         }
 
         public void DeregisterNetworkObject(object instance, uint modId, int mask = 0)
@@ -973,8 +1105,14 @@ namespace NetworkingLibrary.Services
                 }
 
                 if (methods.Count == 0) rpcs.Remove(modId);
+                runtimeRegistrations.RemoveAll(registration =>
+                    registration.ModId == modId &&
+                    registration.Mask == mask &&
+                    (instanceOrNull != null
+                        ? ReferenceEquals(registration.Instance, instanceOrNull)
+                        : registration.Instance == null && registration.Type == type));
 
-                NetLog.Info(LogSource, $"Deregistered {removed} RPCs for mod {modId} (type/instance {type.FullName})");
+                LogInfo($"Deregistered {removed} RPCs for mod {modId} (type/instance {type.FullName})");
             }
         }
 
@@ -993,26 +1131,55 @@ namespace NetworkingLibrary.Services
             }
         }
 
+        void RemoveRuntimeRegistration(RegistrationToken token)
+        {
+            lock (rpcLock)
+            {
+                runtimeRegistrations.RemoveAll(registration => ReferenceEquals(registration.Token, token));
+            }
+        }
+
         sealed class RegistrationToken : IDisposable
         {
-            private readonly SteamNetworkingService svc;
-            private readonly uint modId;
-            private readonly List<HandlerRegistration> handlers;
-            private bool disposed;
+            readonly object sync = new();
+            Action? disposeAction;
+            bool disposed;
 
-            public RegistrationToken(SteamNetworkingService svc, uint modId, List<HandlerRegistration> handlers)
+            public void SetDisposeAction(Action? action)
             {
-                this.svc = svc;
-                this.modId = modId;
-                this.handlers = handlers;
-                this.disposed = false;
+                Action? previousAction = null;
+                var disposeIncomingNow = false;
+                lock (sync)
+                {
+                    if (disposed) disposeIncomingNow = true;
+                    else
+                    {
+                        previousAction = disposeAction;
+                        disposeAction = action;
+                    }
+                }
+
+                if (disposeIncomingNow)
+                {
+                    action?.Invoke();
+                    return;
+                }
+
+                previousAction?.Invoke();
             }
 
             public void Dispose()
             {
-                if (disposed) return;
-                disposed = true;
-                svc.DeregisterHandlers(modId, handlers);
+                Action? action;
+                lock (sync)
+                {
+                    if (disposed) return;
+                    disposed = true;
+                    action = disposeAction;
+                    disposeAction = null;
+                }
+
+                action?.Invoke();
             }
         }
 
@@ -1028,7 +1195,7 @@ namespace NetworkingLibrary.Services
 
             foreach (var p in players)
             {
-                if (p == localSteamId)
+                if (p == CSteamID.Nil || p == localSteamId)
                 {
                     continue;
                 }
@@ -1050,7 +1217,7 @@ namespace NetworkingLibrary.Services
 
             foreach (var p in players)
             {
-                if (p == localSteamId)
+                if (p == CSteamID.Nil || p == localSteamId)
                 {
                     continue;
                 }
@@ -1068,10 +1235,10 @@ namespace NetworkingLibrary.Services
         public void RPCTarget(uint modId, string methodName, CSteamID target, ReliableType reliable, params object[] parameters)
         {
             if (!InLobby) { NetLog.Error(LogSource, "Cannot RPC target when not in lobby"); return; }
+            if (target == CSteamID.Nil) { NetLog.Error(LogSource, "Cannot RPC target invalid SteamID 0"); return; }
             var msg = BuildMessage(modId, methodName, 0, parameters, null);
             if (msg == null) return;
-            TryGetLocalSteamId(out var localSteamId, LocalSteamIdDebugCooldownKey, "RPCTarget");
-            if (target == localSteamId)
+            if (TryGetLocalSteamId(out var localSteamId, LocalSteamIdDebugCooldownKey, "RPCTarget") && target == localSteamId)
             {
                 InvokeLocalMessage(new Message(msg.ToArray(), messageSizePolicy), localSteamId);
                 return;
@@ -1088,10 +1255,10 @@ namespace NetworkingLibrary.Services
         public void RPCTarget(uint modId, string methodName, CSteamID target, ReliableType reliable, Type[] parameterTypes, params object?[] parameters)
         {
             if (!InLobby) { NetLog.Error(LogSource, "Cannot RPC target when not in lobby"); return; }
+            if (target == CSteamID.Nil) { NetLog.Error(LogSource, "Cannot RPC target invalid SteamID 0"); return; }
             var msg = BuildMessage(modId, methodName, 0, parameters, parameterTypes);
             if (msg == null) return;
-            TryGetLocalSteamId(out var localSteamId, LocalSteamIdDebugCooldownKey, "RPCTarget");
-            if (target == localSteamId)
+            if (TryGetLocalSteamId(out var localSteamId, LocalSteamIdDebugCooldownKey, "RPCTarget") && target == localSteamId)
             {
                 InvokeLocalMessage(new Message(msg.ToArray(), messageSizePolicy), localSteamId);
                 return;
@@ -1312,8 +1479,7 @@ namespace NetworkingLibrary.Services
                 return;
             }
 
-            TryGetLocalSteamId(out var localSteamId, LocalSteamIdDebugCooldownKey, "SendBytes");
-            if (target == localSteamId)
+            if (TryGetLocalSteamId(out var localSteamId, LocalSteamIdDebugCooldownKey, "SendBytes") && target == localSteamId)
             {
                 ProcessIncomingFrame(data, localSteamId);
                 return;
@@ -1384,7 +1550,7 @@ namespace NetworkingLibrary.Services
                 default:
                     NetLog.Warning(LogSource, $"Unknown {nameof(ReliableType)} value '{reliable}' ({(int)reliable}).");
 #if DEBUG
-                    throw new InvalidEnumArgumentException(nameof(reliable), (int)reliable, typeof(ReliableType));
+                    throw new System.ComponentModel.InvalidEnumArgumentException(nameof(reliable), (int)reliable, typeof(ReliableType));
 #else
                     NetLog.Warning(LogSource, $"Falling back to {ReliableType.Reliable} send mode.");
                     return Constants.k_nSteamNetworkingSend_Reliable;
@@ -1493,7 +1659,7 @@ namespace NetworkingLibrary.Services
                         {
                             bytes = ArrayPool<byte>.Shared.Rent(size);
                             Marshal.Copy(steamMsg.m_pData, bytes, 0, size);
-                            ProcessIncomingFrame(bytes.AsSpan(0, size), sender);
+                            ProcessIncomingFrameCore(bytes.AsSpan(0, size), sender);
                         }
                         catch (Exception ex)
                         {
@@ -1522,7 +1688,13 @@ namespace NetworkingLibrary.Services
         static void LogReceiveMessagesOuterException(Exception ex)
             => NetLog.ErrorThrottled(LogSource, ReceiveMessagesOuterExceptionCooldownKey, DebugLogCooldownSeconds, $"ReceiveMessages outer exception: {ex}");
 
-        void ProcessIncomingFrame(ReadOnlySpan<byte> frame, CSteamID sender)
+        void ProcessIncomingFrame(byte[] frame, CSteamID sender)
+        {
+            if (frame == null) throw new ArgumentNullException(nameof(frame));
+            ProcessIncomingFrameCore(frame, sender);
+        }
+
+        void ProcessIncomingFrameCore(ReadOnlySpan<byte> frame, CSteamID sender)
         {
             if (frame.Length < FRAME_HEADER_SIZE) return;
             int flags = frame[0];
@@ -1565,7 +1737,7 @@ namespace NetworkingLibrary.Services
                     return;
                 }
 
-
+                var signedFrameHeader = hasSign && total == 1 ? frame.Slice(0, headerOffset).ToArray() : Array.Empty<byte>();
                 int remainingHeader = frame.Length - headerOffset;
                 if (remainingHeader <= 0)
                 {
@@ -1679,19 +1851,22 @@ namespace NetworkingLibrary.Services
 
                         var signature = new byte[expectedSigLen];
                         Array.Copy(payloadToProcess, sigSectionStart + 2, signature, 0, expectedSigLen);
-                        var dataOnly = new byte[sigSectionStart];
-                        Array.Copy(payloadToProcess, 0, dataOnly, 0, sigSectionStart);
+                        var payloadOnly = new byte[sigSectionStart];
+                        Array.Copy(payloadToProcess, 0, payloadOnly, 0, sigSectionStart);
+                        var signedData = signedFrameHeader.Length == 0
+                            ? payloadOnly
+                            : CombineArrays(signedFrameHeader, payloadOnly);
 
                         try
                         {
                             using var rsa = RSA.Create();
                             rsa.ImportParameters(rsaParams);
-                            if (!rsa.VerifyData(dataOnly, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
+                            if (!rsa.VerifyData(signedData, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
                             {
                                 continue;
                             }
 
-                            payloadToProcess = dataOnly;
+                            payloadToProcess = payloadOnly;
                             verified = true;
                             break;
                         }
@@ -1775,6 +1950,14 @@ namespace NetworkingLibrary.Services
             ms.Write(frameWithoutTrailingMac, 0, frameWithoutTrailingMac.Length);
             ms.Write(mac, 0, mac.Length);
             return ms.ToArray();
+        }
+
+        static byte[] CombineArrays(byte[] first, byte[] second)
+        {
+            var combined = new byte[first.Length + second.Length];
+            Buffer.BlockCopy(first, 0, combined, 0, first.Length);
+            Buffer.BlockCopy(second, 0, combined, first.Length, second.Length);
+            return combined;
         }
 
         bool VerifyAndStripSingleFrameMac(byte[] framedWithMac, byte[] key, out byte[] strippedFrame)
@@ -2044,7 +2227,7 @@ namespace NetworkingLibrary.Services
                 if (paramless != null)
                 {
                     var obj = paramless.Invoke(null);
-                    AssignRpcIdentityMembers(obj, infoType, sender);
+                    AssignRpcIdentityMembers(obj, infoType, sender, isLocalLoopback);
                     return obj;
                 }
             }
@@ -2055,7 +2238,7 @@ namespace NetworkingLibrary.Services
             return null!;
         }
 
-        static void AssignRpcIdentityMembers(object instance, Type infoType, CSteamID sender)
+        static void AssignRpcIdentityMembers(object instance, Type infoType, CSteamID sender, bool isLocalLoopback)
         {
             var steamId64 = sender.m_SteamID;
             var steamIdString = sender.ToString();
@@ -2064,6 +2247,7 @@ namespace NetworkingLibrary.Services
             AssignRpcIdentityMember(instance, infoType, "Sender", sender, steamId64, steamIdString);
             AssignRpcIdentityMember(instance, infoType, "SteamId64", sender, steamId64, steamIdString);
             AssignRpcIdentityMember(instance, infoType, "SteamIdString", sender, steamId64, steamIdString);
+            AssignRpcLoopbackMember(instance, infoType, isLocalLoopback);
         }
 
         static void AssignRpcIdentityMember(object instance, Type infoType, string memberName, CSteamID sender, ulong steamId64, string steamIdString)
@@ -2078,6 +2262,26 @@ namespace NetworkingLibrary.Services
             var property = infoType.GetProperty(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             if (property == null || !property.CanWrite) return;
             TryAssignMemberValue(property.PropertyType, value => property.SetValue(instance, value), sender, steamId64, steamIdString);
+        }
+
+        static void AssignRpcLoopbackMember(object instance, Type infoType, bool isLocalLoopback)
+        {
+            var field = infoType.GetField("IsLocalLoopback", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (field != null)
+            {
+                TryAssignLoopbackMemberValue(field.FieldType, value => field.SetValue(instance, value), isLocalLoopback);
+                return;
+            }
+
+            var property = infoType.GetProperty("IsLocalLoopback", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (property == null || !property.CanWrite) return;
+            TryAssignLoopbackMemberValue(property.PropertyType, value => property.SetValue(instance, value), isLocalLoopback);
+        }
+
+        static void TryAssignLoopbackMemberValue(Type memberType, Action<object> assign, bool isLocalLoopback)
+        {
+            if (memberType == typeof(bool)) { assign(isLocalLoopback); return; }
+            if (memberType == typeof(bool?)) assign((bool?)isLocalLoopback);
         }
 
         static void TryAssignMemberValue(Type memberType, Action<object> assign, CSteamID sender, ulong steamId64, string steamIdString)
@@ -2217,10 +2421,9 @@ namespace NetworkingLibrary.Services
             {
                 handshakeStates.TryGetValue(sender.m_SteamID, out var state);
                 state ??= new HandshakeState();
-                state.Sym = sym;
+                SetPeerSymmetricKeyUnderLock(sender.m_SteamID, state, sym);
                 state.Completed = true;
                 handshakeStates[sender.m_SteamID] = state;
-                perPeerSymmetricKey[sender.m_SteamID] = sym;
             }
         }
 
@@ -2234,10 +2437,9 @@ namespace NetworkingLibrary.Services
                 {
                     handshakeStates.TryGetValue(sender.m_SteamID, out var state);
                     state ??= new HandshakeState();
-                    state.Sym = sym;
+                    SetPeerSymmetricKeyUnderLock(sender.m_SteamID, state, sym);
                     state.Completed = true;
                     handshakeStates[sender.m_SteamID] = state;
-                    perPeerSymmetricKey[sender.m_SteamID] = sym;
                 }
 
                 var confirm = HmacSha256Raw(sym, Encoding.UTF8.GetBytes(initiatorNonce));
@@ -2358,8 +2560,7 @@ namespace NetworkingLibrary.Services
         {
             if (target == null) throw new ArgumentNullException(nameof(target));
 
-            (object instance, uint modId, int mask)[] objectRegistrations;
-            (Type type, uint modId, int mask)[] typeRegistrations;
+            RuntimeRegistration[] registrationsSnapshot;
             string[] lobbyKeysSnapshot;
             string[] playerKeysSnapshot;
             KeyValuePair<uint, Func<byte[], byte[]>>[] signersSnapshot;
@@ -2367,22 +2568,7 @@ namespace NetworkingLibrary.Services
 
             lock (rpcLock)
             {
-                var objectSet = new HashSet<(object instance, uint modId, int mask)>();
-                var typeSet = new HashSet<(Type type, uint modId, int mask)>();
-                foreach (var modEntry in rpcs)
-                {
-                    foreach (var handlers in modEntry.Value.Values)
-                    {
-                        foreach (var handler in handlers)
-                        {
-                            if (handler.Method.IsStatic) typeSet.Add((handler.Method.DeclaringType!, modEntry.Key, handler.Mask));
-                            else if (handler.Target != null) objectSet.Add((handler.Target, modEntry.Key, handler.Mask));
-                        }
-                    }
-                }
-
-                objectRegistrations = objectSet.ToArray();
-                typeRegistrations = typeSet.ToArray();
+                registrationsSnapshot = runtimeRegistrations.ToArray();
                 lobbyKeysSnapshot = lobbyDataKeys.ToArray();
                 playerKeysSnapshot = playerDataKeys.ToArray();
             }
@@ -2395,13 +2581,31 @@ namespace NetworkingLibrary.Services
                     .ToArray();
             }
 
-            target.IncomingValidator = IncomingValidator;
-            foreach (var registration in objectRegistrations) target.RegisterNetworkObject(registration.instance, registration.modId, registration.mask);
-            foreach (var registration in typeRegistrations) target.RegisterNetworkType(registration.type, registration.modId, registration.mask);
-            foreach (var key in lobbyKeysSnapshot) target.RegisterLobbyDataKey(key);
-            foreach (var key in playerKeysSnapshot) target.RegisterPlayerDataKey(key);
-            foreach (var signer in signersSnapshot) target.RegisterModSigner(signer.Key, signer.Value);
-            foreach (var publicKey in publicKeysSnapshot) target.RegisterModPublicKey(publicKey.Key, publicKey.Value);
+            var migratedHandles = new List<IDisposable>();
+            var originalIncomingValidator = target.IncomingValidator;
+            try
+            {
+                target.IncomingValidator = IncomingValidator;
+                foreach (var registration in registrationsSnapshot)
+                {
+                    migratedHandles.Add(registration.Instance != null
+                        ? target.RegisterNetworkObject(registration.Instance, registration.ModId, registration.Mask)
+                        : target.RegisterNetworkType(registration.Type, registration.ModId, registration.Mask));
+                }
+                foreach (var key in lobbyKeysSnapshot) target.RegisterLobbyDataKey(key);
+                foreach (var key in playerKeysSnapshot) target.RegisterPlayerDataKey(key);
+                foreach (var signer in signersSnapshot) target.RegisterModSigner(signer.Key, signer.Value);
+                foreach (var publicKey in publicKeysSnapshot) target.RegisterModPublicKey(publicKey.Key, publicKey.Value);
+            }
+            catch
+            {
+                try { target.IncomingValidator = originalIncomingValidator; }
+                catch { }
+                for (var i = migratedHandles.Count - 1; i >= 0; i--) migratedHandles[i].Dispose();
+                throw;
+            }
+
+            for (var i = 0; i < registrationsSnapshot.Length; i++) registrationsSnapshot[i].Token.SetDisposeAction(migratedHandles[i].Dispose);
         }
 
         static RSAParameters CloneRsaParameters(RSAParameters source)
@@ -2517,8 +2721,16 @@ namespace NetworkingLibrary.Services
             callParams = null!;
             unread = int.MaxValue;
             var cursor = source.SaveReadCursor();
+            var payloadCursor = cursor;
             try
             {
+                if (cursor.Position == 0)
+                {
+                    payloadCursor = AdvanceCursorPastHeader(source);
+                }
+
+                source.RestoreReadCursor(payloadCursor);
+
                 var paramInfos = handler.Parameters;
                 int paramCount = handler.ParameterCountWithoutRpcInfo;
                 callParams = new object[paramInfos.Length];
@@ -2543,6 +2755,16 @@ namespace NetworkingLibrary.Services
             }
         }
 
+        static Message.ReadCursor AdvanceCursorPastHeader(Message message)
+        {
+            message.ReadByte();
+            message.ReadUInt();
+            message.ReadString();
+            message.ReadInt();
+            if (message.ProtocolVersion >= 3 && message.ReadBool()) message.ReadString();
+            return message.SaveReadCursor();
+        }
+
         Message? BuildMessage(uint modId, string methodName, int mask, object?[] parameters, Type[]? parameterTypes)
         {
             try
@@ -2557,30 +2779,19 @@ namespace NetworkingLibrary.Services
 
                 if (handlersSnapshot.Length > 0)
                 {
-                    MessageHandler chosen = null!;
-                    foreach (var h in handlersSnapshot)
-                    {
-                        if (h.Mask != mask) continue;
-                        var expected = h.Parameters;
-                        int expectedCount = h.ParameterCountWithoutRpcInfo;
-                        if (expectedCount != parameters.Length) continue;
+                    if (parameterTypes != null && parameterTypes.Length != parameters.Length)
+                        throw new ArgumentException($"Parameter type count mismatch: expected {parameterTypes.Length}, got {parameters.Length}", nameof(parameters));
 
-                        bool ok = true;
-                        for (int i = 0; i < expectedCount; i++)
-                        {
-                            var t = expected[i].ParameterType;
-                            var p = parameters[i];
-                            if (p == null)
-                            {
-                                if (t.IsValueType && Nullable.GetUnderlyingType(t) == null) { ok = false; break; }
-                                continue;
-                            }
-                            if (!t.IsAssignableFrom(p.GetType())) { ok = false; break; }
-                        }
-                        if (ok) { chosen = h; break; }
-                    }
+                    MessageHandler? chosen = null;
+                    if (parameterTypes != null)
+                        chosen = FindTypedHandler(exactMatch: true) ?? FindTypedHandler(exactMatch: false)!;
 
                     if (chosen == null)
+                    {
+                        chosen = FindUntypedHandler(allowNullableConversions: false) ?? FindUntypedHandler(allowNullableConversions: true);
+                    }
+
+                    if (chosen == null && parameterTypes == null)
                     {
                         chosen = handlersSnapshot.FirstOrDefault(h =>
                         {
@@ -2608,7 +2819,7 @@ namespace NetworkingLibrary.Services
                             msg.WriteObject(t, null!);
                             continue;
                         }
-                        if (!t.IsAssignableFrom(p.GetType()))
+                        if (!IsParameterValueCompatible(t, p))
                             throw new ArgumentException($"Parameter {i} type mismatch: expected {t}, got {p.GetType()}", nameof(parameters));
                         msg.WriteObject(t, p);
                     }
@@ -2630,7 +2841,7 @@ namespace NetworkingLibrary.Services
                                 msg.WriteObject(t, null!);
                                 continue;
                             }
-                            if (!t.IsAssignableFrom(p.GetType()))
+                            if (!IsParameterValueCompatible(t, p))
                                 throw new ArgumentException($"Parameter {i} type mismatch: expected {t}, got {p.GetType()}", nameof(parameters));
                             msg.WriteObject(t, p);
                         }
@@ -2652,6 +2863,60 @@ namespace NetworkingLibrary.Services
                 }
 
                 return msg;
+
+                MessageHandler? FindTypedHandler(bool exactMatch)
+                {
+                    foreach (var h in handlersSnapshot)
+                    {
+                        if (h.Mask != mask) continue;
+                        var expected = h.Parameters;
+                        int expectedCount = h.ParameterCountWithoutRpcInfo;
+                        if (expectedCount != parameterTypes!.Length) continue;
+
+                        bool ok = true;
+                        for (int i = 0; i < expectedCount; i++)
+                        {
+                            var t = expected[i].ParameterType;
+                            var typed = parameterTypes[i] ?? throw new ArgumentNullException(nameof(parameterTypes), $"Parameter type {i} for {methodName} cannot be null.");
+                            if (!IsParameterTypeCompatible(t, typed, exactMatch)) { ok = false; break; }
+                            var p = parameters[i];
+                            if (p == null)
+                            {
+                                if (t.IsValueType && Nullable.GetUnderlyingType(t) == null) { ok = false; break; }
+                                continue;
+                            }
+                            if (!IsParameterValueCompatible(t, p)) { ok = false; break; }
+                        }
+                        if (ok) return h;
+                    }
+                    return null;
+                }
+
+                MessageHandler? FindUntypedHandler(bool allowNullableConversions)
+                {
+                    foreach (var h in handlersSnapshot)
+                    {
+                        if (h.Mask != mask) continue;
+                        var expected = h.Parameters;
+                        int expectedCount = h.ParameterCountWithoutRpcInfo;
+                        if (expectedCount != parameters.Length) continue;
+
+                        bool ok = true;
+                        for (int i = 0; i < expectedCount; i++)
+                        {
+                            var t = expected[i].ParameterType;
+                            var p = parameters[i];
+                            if (p == null)
+                            {
+                                if (t.IsValueType && Nullable.GetUnderlyingType(t) == null) { ok = false; break; }
+                                continue;
+                            }
+                            if (allowNullableConversions ? !IsParameterValueCompatible(t, p) : !IsParameterValueCompatibleWithoutNullableFallback(t, p)) { ok = false; break; }
+                        }
+                        if (ok) return h;
+                    }
+                    return null;
+                }
             }
             catch (Exception ex)
             {
@@ -2666,6 +2931,27 @@ namespace NetworkingLibrary.Services
             int parameterCount = handler.TakesInfo ? pi.Length - 1 : pi.Length;
             if (parameterCount <= 0) return string.Empty;
             return string.Join("|", pi.Take(parameterCount).Select(p => p.ParameterType.AssemblyQualifiedName ?? p.ParameterType.FullName ?? p.ParameterType.Name));
+        }
+
+        static bool IsParameterValueCompatible(Type parameterType, object value)
+        {
+            var nullableType = Nullable.GetUnderlyingType(parameterType);
+            return nullableType != null
+                ? nullableType.IsAssignableFrom(value.GetType())
+                : parameterType.IsAssignableFrom(value.GetType());
+        }
+
+        static bool IsParameterValueCompatibleWithoutNullableFallback(Type parameterType, object value)
+        {
+            if (Nullable.GetUnderlyingType(parameterType) != null) return false;
+            return parameterType.IsAssignableFrom(value.GetType());
+        }
+
+        static bool IsParameterTypeCompatible(Type parameterType, Type suppliedType, bool exactMatch)
+        {
+            if (exactMatch) return parameterType == suppliedType;
+            var nullableType = Nullable.GetUnderlyingType(parameterType);
+            return parameterType.IsAssignableFrom(suppliedType) || nullableType?.IsAssignableFrom(suppliedType) == true;
         }
 
         SlidingWindowRateLimiter GetOrCreateRateLimiter(ulong steam64)
@@ -2717,9 +3003,6 @@ using System.Security.Cryptography;
 
 namespace NetworkingLibrary.Services
 {
-    /// <summary>
-    /// Editor-safe fallback that preserves the SteamNetworkingService type without Steamworks dependencies.
-    /// </summary>
     public class SteamNetworkingService : INetworkingService, INetworkingServiceStateTransfer
     {
         readonly OfflineNetworkingService offline = new();

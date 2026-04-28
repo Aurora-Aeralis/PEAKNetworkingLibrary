@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using NetworkingLibrary.Modules;
 using Xunit;
@@ -142,7 +143,7 @@ public class MessageCompressionBoundsTests
         var policy = new MessageSizePolicy(1024);
 
         using var source = new Message(40u, "compress", 1);
-        source.WriteBytes(new byte[policy.MaxLogicalSize]);
+        source.WriteBytes(new byte[policy.MaxLogicalSize - source.Length() - sizeof(int)]);
         var compressed = source.CompressPayload();
 
         using var scopedMessage = new Message(41u, "compress", 1, policy);

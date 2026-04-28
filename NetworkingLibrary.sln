@@ -1,11 +1,13 @@
-﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.12.35527.113
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NetworkingLibrary", "NetworkingLibrary.csproj", "{1AC33A9F-81C4-462B-8F7C-07DFD0EBD8C6}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4C6BC}") = "NetworkingLibrary", "NetworkingLibrary.csproj", "{1AC33A9F-81C4-462B-8F7C-07DFD0EBD8C6}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NetworkingLibrary.Tests", "Tests\NetworkingLibrary.Tests.csproj", "{4B78D82D-5EE5-4E59-8F82-A8D876711D22}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4C6BC}") = "NetworkingLibrary.Tests", "Tests\NetworkingLibrary.Tests.csproj", "{4B78D82D-5EE5-4E59-8F82-A8D876711D22}"
+	ProjectSection(ProjectDependencies) = postProject
+		{1AC33A9F-81C4-462B-8F7C-07DFD0EBD8C6} = {1AC33A9F-81C4-462B-8F7C-07DFD0EBD8C6}
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

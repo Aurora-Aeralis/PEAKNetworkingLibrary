@@ -13,6 +13,7 @@ namespace NetworkingLibrary.Modules
         public static bool CallbackPumpingEnabled { get; private set; }
         internal static Func<bool> IsSteamReady = ProbeSteamReady;
         internal static Func<float> TimeProvider = () => Time.unscaledTime;
+        internal static Action RunCallbacks = SteamAPI.RunCallbacks;
 
         string? lastSkipReason;
         bool runCallbacksFaulted;
@@ -23,7 +24,7 @@ namespace NetworkingLibrary.Modules
         public static void DisableAndDestroyExisting()
         {
             DisablePumping();
-            var pumps = UnityEngine.Object.FindObjectsOfType<SteamCallbackPump>(true);
+            var pumps = UnityEngine.Object.FindObjectsByType<SteamCallbackPump>(FindObjectsInactive.Include, FindObjectsSortMode.None);
             if (pumps == null || pumps.Length == 0) return;
 
             for (int i = 0; i < pumps.Length; i++)
@@ -70,14 +71,13 @@ namespace NetworkingLibrary.Modules
 
             try
             {
-                SteamAPI.RunCallbacks();
-                runCallbacksFaulted = false;
+                RunCallbacks();
+                if (runCallbacksFaulted) runCallbacksFaulted = false;
             }
             catch (Exception ex)
             {
-                if (runCallbacksFaulted) return;
                 runCallbacksFaulted = true;
-                NetLog.Error(LogSource, $"SteamAPI.RunCallbacks error (logging once until recovery): {ex}");
+                LogExceptionWithCooldown("RunCallbacks", $"SteamAPI.RunCallbacks failed. Exception: {ex.GetType().Name}: {ex.Message}");
             }
         }
 
@@ -115,8 +115,28 @@ namespace NetworkingLibrary.Modules
 
         static void LogExceptionWithCooldown(string key, string message)
         {
-            if (!NetLog.TryEnterCooldown($"SteamCallbackPump.{key}", ErrorLogCooldownSeconds, TimeProvider())) return;
-            NetLog.Error(LogSource, message);
+            if (!NetLog.TryEnterCooldown($"SteamCallbackPump.{key}", ErrorLogCooldownSeconds, ResolveTime())) return;
+            try
+            {
+                NetLog.Error(LogSource, message);
+            }
+            catch
+            {
+                var fallback = $"[{LogSource}] {message}";
+                try { Debug.LogError(fallback); }
+                catch { System.Diagnostics.Trace.TraceError(fallback); }
+            }
+        }
+
+        static double ResolveTime()
+        {
+            try
+            {
+                var time = TimeProvider();
+                if (!float.IsNaN(time) && !float.IsInfinity(time)) return time;
+            }
+            catch { }
+            return DateTime.UtcNow.Subtract(DateTime.UnixEpoch).TotalSeconds;
         }
 
         void LogSkipReasonOnce(string message)

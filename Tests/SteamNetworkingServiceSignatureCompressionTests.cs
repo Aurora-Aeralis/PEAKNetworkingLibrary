@@ -20,7 +20,7 @@ public class SteamNetworkingServiceSignatureCompressionTests
         var service = new SteamNetworkingService();
         var sink = new RpcSink();
         using var registration = service.RegisterNetworkObject(sink, TestModId);
-        service.RegisterModSigner(TestModId, bytes => rsa.SignData(bytes, CryptoConfig.MapNameToOID("SHA256")));
+        service.RegisterModSigner(TestModId, bytes => rsa.SignData(bytes, "SHA256"));
         service.RegisterModPublicKey(TestModId, rsa.ExportParameters(false));
 
         var frame = BuildFrame(service, BuildMessage("short"), ReliableType.Unreliable);
@@ -37,7 +37,7 @@ public class SteamNetworkingServiceSignatureCompressionTests
         var service = new SteamNetworkingService();
         var sink = new RpcSink();
         using var registration = service.RegisterNetworkObject(sink, TestModId);
-        service.RegisterModSigner(TestModId, bytes => rsa.SignData(bytes, CryptoConfig.MapNameToOID("SHA256")));
+        service.RegisterModSigner(TestModId, bytes => rsa.SignData(bytes, "SHA256"));
         service.RegisterModPublicKey(TestModId, rsa.ExportParameters(false));
 
         var payload = new string('x', 6000);
@@ -56,7 +56,7 @@ public class SteamNetworkingServiceSignatureCompressionTests
         var service = new SteamNetworkingService();
         var sink = new RpcSink();
         using var registration = service.RegisterNetworkObject(sink, TestModId);
-        service.RegisterModSigner(TestModId, bytes => signerRsa.SignData(bytes, CryptoConfig.MapNameToOID("SHA256")));
+        service.RegisterModSigner(TestModId, bytes => signerRsa.SignData(bytes, "SHA256"));
         service.RegisterModPublicKey(TestModId, verifierRsa.ExportParameters(false));
 
         var frame = BuildFrame(service, BuildMessage("bad-signature"), ReliableType.Unreliable);
@@ -88,7 +88,7 @@ public class SteamNetworkingServiceSignatureCompressionTests
         var service = new SteamNetworkingService();
         var sink = new RpcSink();
         using var registration = service.RegisterNetworkObject(sink, TestModId);
-        service.RegisterModSigner(TestModId, bytes => signerRsa.SignData(bytes, CryptoConfig.MapNameToOID("SHA256")));
+        service.RegisterModSigner(TestModId, bytes => signerRsa.SignData(bytes, "SHA256"));
         service.RegisterModPublicKey(TestModId, signerRsa.ExportParameters(false));
 
         var firstSnapshot = GetModPublicKeySnapshot(service);

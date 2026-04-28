@@ -66,6 +66,18 @@ public class MessageNullContractTests
     }
 
     [Fact]
+    public void GenericIListInterface_RoundTrips_Null_And_Value()
+    {
+        var write = NewMessage();
+        write.WriteObject(typeof(System.Collections.Generic.IList<int>), null!);
+        write.WriteObject(typeof(System.Collections.Generic.IList<int>), new List<int> { 8, 13, 21 });
+
+        var read = Roundtrip(write);
+        Assert.Null(read.ReadObject(typeof(System.Collections.Generic.IList<int>)));
+        Assert.Equal(new List<int> { 8, 13, 21 }, (List<int>)read.ReadObject(typeof(System.Collections.Generic.IList<int>)));
+    }
+
+    [Fact]
     public void Collection_RoundTrips_Null_And_Value()
     {
         var write = NewMessage();
@@ -110,9 +122,26 @@ public class MessageNullContractTests
         var read = Roundtrip(write);
         Assert.Null(read.ReadObject(typeof(UnsupportedRef)));
 
-        var ex = Assert.Throws<NotSupportedException>(() => NewMessage().WriteObject(typeof(UnsupportedRef), new UnsupportedRef { Value = 1 }));
+        var rejected = NewMessage();
+        var lengthBeforeWrite = rejected.Length();
+        var ex = Assert.Throws<NotSupportedException>(() => rejected.WriteObject(typeof(UnsupportedRef), new UnsupportedRef { Value = 1 }));
+
         Assert.Contains("Null handling", ex.Message);
         Assert.Contains("RegisterSerializer", ex.Message);
+        Assert.Equal(lengthBeforeWrite, rejected.Length());
+    }
+
+    [Fact]
+    public void WriteObject_NonGenericIList_Rejects_WithoutMutating()
+    {
+        var rejected = NewMessage();
+        rejected.WriteInt(123);
+        var bytesBeforeWrite = rejected.ToArray();
+
+        var ex = Assert.Throws<NotSupportedException>(() => rejected.WriteObject(typeof(System.Collections.IList), new System.Collections.ArrayList { 1, 2 }));
+
+        Assert.Contains("non-generic IList", ex.Message);
+        Assert.Equal(bytesBeforeWrite, rejected.ToArray());
     }
 
     [Fact]
@@ -217,6 +246,44 @@ public class MessageNullContractTests
     }
 
     [Fact]
+    public void ReadObject_IntArray_Rejects_Length_Exceeding_AvailablePayload()
+    {
+        var malformed = NewMessage();
+        malformed.WriteBool(true);
+        malformed.WriteInt(Message.MaxLogicalSize);
+
+        var read = Roundtrip(malformed);
+        var ex = Assert.Throws<InvalidDataException>(() => read.ReadObject(typeof(int[])));
+        Assert.Contains("length exceeds available payload", ex.Message);
+    }
+
+    [Fact]
+    public void ReadObject_List_Rejects_Length_Exceeding_AvailablePayload()
+    {
+        var malformed = NewMessage();
+        malformed.WriteBool(true);
+        malformed.WriteInt(2);
+        malformed.WriteInt(12);
+
+        var read = Roundtrip(malformed);
+        var ex = Assert.Throws<InvalidDataException>(() => read.ReadObject(typeof(List<int>)));
+        Assert.Contains("length exceeds available payload", ex.Message);
+    }
+
+    [Fact]
+    public void ReadObject_StringArray_Rejects_Length_Exceeding_AvailablePayload()
+    {
+        var malformed = NewMessage();
+        malformed.WriteBool(true);
+        malformed.WriteInt(2);
+        malformed.WriteString("");
+
+        var read = Roundtrip(malformed);
+        var ex = Assert.Throws<InvalidDataException>(() => read.ReadObject(typeof(string[])));
+        Assert.Contains("length exceeds available payload", ex.Message);
+    }
+
+    [Fact]
     public void ReadObject_TypeWithNonBclIListName_DoesNotUseListDeserialization()
     {
         var malformed = NewMessage();
@@ -257,6 +324,18 @@ public class MessageNullContractTests
     {
         var message = NewMessage();
         Assert.Throws<ArgumentNullException>(() => message.WriteBytes(null!));
+    }
+
+    [Fact]
+    public void WriteObject_ArrayType_Rejects_NonArrayValue_WithoutMutating()
+    {
+        var message = NewMessage();
+        var lengthBeforeWrite = message.Length();
+
+        var ex = Assert.Throws<ArgumentException>(() => message.WriteObject(typeof(object[]), "not an array"));
+
+        Assert.Contains("array type", ex.Message);
+        Assert.Equal(lengthBeforeWrite, message.Length());
     }
 
     private static byte[] BuildLegacyMessageData(Action<Message> writePayload)

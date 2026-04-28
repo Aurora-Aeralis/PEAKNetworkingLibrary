@@ -1,8 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <AssemblyName>off_grid.NetworkingLibrary</AssemblyName>
+    <AssemblyName>AeralisFoundation.NetworkingLibrary</AssemblyName>
     <Product>NetworkingLibrary</Product>
-    <Version>1.0.7</Version>
+    <Version>1.0.9</Version>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -14,10 +14,18 @@
 
   <PropertyGroup>
     <PackageId>PEAKNetworkingLibrary</PackageId>
-    <Company>DAaCollective</Company>
+    <Company>AeralisFoundation</Company>
     <Description>Networking library for mods using Steam instead of PUN.</Description>
     <PackageLicenseExpression>LGPL-3.0-or-later</PackageLicenseExpression>
-    <PackageTags>BepInEx;Networking;Library</PackageTags>
-    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>PEAK;BepInEx;Networking;Library</PackageTags>
+    <GeneratePackageOnBuild Condition="'$(Configuration)' == 'Release' And '$(ThunderstorePackable)' != 'false'">true</GeneratePackageOnBuild>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="Tests\**\*.cs" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="LICENSE.md" Pack="true" PackagePath="\" />
+    <None Include="COPYING.LGPLv3" Pack="true" PackagePath="\" />
+  </ItemGroup>
 </Project>

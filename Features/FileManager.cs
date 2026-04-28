@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Threading;
 using BepInEx.Configuration;
 using BepInEx;
 
@@ -20,6 +21,8 @@ namespace NetworkingLibrary.Features
         const string PluginVersionInfo = "Tracks plugin release version.";
         const string DaModsFolderName = "DAa Mods";
         const string ConfigFileName = "config.cfg";
+        const int ConfigSaveRetryCount = 4;
+        const int ConfigIoRetryDelayMilliseconds = 15;
         static readonly object ConfigMigrationLock = new();
         static readonly ConcurrentDictionary<Type, Lazy<MethodInfo?>> RemoveMethodCache = new();
         static readonly ConcurrentDictionary<Type, Lazy<PropertyInfo?>> OrphanedEntriesPropertyCache = new();
@@ -55,28 +58,54 @@ namespace NetworkingLibrary.Features
         {
             lock (ConfigMigrationLock)
             {
-                var schemaVersionEntry = BindSchemaVersion(config, string.Empty);
-                var legacyVersion = ReadLegacyVersion(config);
-                var storedVersion = GetStoredVersion(schemaVersionEntry.Value, legacyVersion);
-                if (TryParseSchemaVersion(storedVersion, out var storedSchemaVersion)
-                    && TryParseSchemaVersion(currentVersion, out var currentSchemaVersion)
-                    && storedSchemaVersion > currentSchemaVersion)
+                var saveOnConfigSet = config.SaveOnConfigSet;
+                config.SaveOnConfigSet = false;
+                try
                 {
-                    Net.Logger?.LogWarning($"Stored config schema version '{storedVersion}' is newer than supported schema '{currentVersion}'. Migration skipped to avoid destructive downgrade.");
-                    return;
+                    var schemaVersionEntry = BindSchemaVersion(config, string.Empty);
+                    var hasLegacyVersion = TryReadLegacyVersion(config, out var legacyVersion);
+                    var legacyDefinition = new ConfigDefinition(VersionSection, LegacyVersionKey);
+                    var hasLegacyInConfig = hasLegacyVersion || HasLegacyVersionInConfig(config, legacyDefinition);
+                    var storedVersion = GetStoredVersion(schemaVersionEntry.Value, legacyVersion);
+                    if (TryParseSchemaVersion(storedVersion, out var storedSchemaVersion)
+                        && TryParseSchemaVersion(currentVersion, out var currentSchemaVersion)
+                        && storedSchemaVersion > currentSchemaVersion)
+                    {
+                        Net.Logger?.LogWarning($"Stored config schema version '{storedVersion}' is newer than supported schema '{currentVersion}'. Migration skipped to avoid destructive downgrade.");
+                        return;
+                    }
+
+                    var needsNormalization = string.IsNullOrWhiteSpace(schemaVersionEntry.Value) && hasLegacyVersion;
+                    if (storedVersion == currentVersion && !needsNormalization && !hasLegacyInConfig)
+                        return;
+
+                    bool shouldPersistTargetVersion;
+                    if (string.IsNullOrWhiteSpace(storedVersion))
+                    {
+                        if (!TryParseSchemaVersion(currentVersion, out _))
+                            throw new InvalidOperationException($"Current config schema version '{currentVersion}' is not a valid schema identifier.");
+                        shouldPersistTargetVersion = true;
+                    }
+                    else
+                    {
+                        shouldPersistTargetVersion = MigrateConfig(schemaVersionEntry, storedVersion, currentVersion, legacyVersion);
+                    }
+                    if (!shouldPersistTargetVersion)
+                        return;
+
+                    schemaVersionEntry.Value = currentVersion;
+                    Exception? removeException = null, orphanedEntriesException = null;
+                    var cleanedInMemory = !hasLegacyInConfig || DropLegacyVersionFromConfig(config, legacyDefinition, out removeException, out orphanedEntriesException);
+                    SaveConfig(config);
+                    Exception? fileCleanupException = null;
+                    var cleanedFile = !hasLegacyVersion && cleanedInMemory || ClearLegacyVersionInFile(config, out fileCleanupException);
+                    if (!cleanedInMemory && !cleanedFile)
+                        Net.Logger?.LogWarning($"Legacy config key '{LegacyVersionKey}' could not be removed during migration.{BuildCleanupFailureContext(removeException, orphanedEntriesException, fileCleanupException)}");
                 }
-
-                var needsNormalization = string.IsNullOrWhiteSpace(schemaVersionEntry.Value) && !string.IsNullOrWhiteSpace(legacyVersion);
-                if (storedVersion == currentVersion && !needsNormalization)
-                    return;
-
-                var shouldPersistTargetVersion = MigrateConfig(schemaVersionEntry, storedVersion, currentVersion, legacyVersion);
-                if (!shouldPersistTargetVersion)
-                    return;
-
-                schemaVersionEntry.Value = currentVersion;
-                DropLegacyVersionFromConfig(config);
-                config.Save();
+                finally
+                {
+                    config.SaveOnConfigSet = saveOnConfigSet;
+                }
             }
         }
 
@@ -97,7 +126,8 @@ namespace NetworkingLibrary.Features
             if (!sourceVersionValid || startVersion < 0)
             {
                 startVersion = 0;
-                Net.Logger?.LogWarning($"Invalid source schema version '{sourceVersion}'. Starting migration at schema 0.");
+                if (!string.IsNullOrWhiteSpace(sourceVersion))
+                    Net.Logger?.LogWarning($"Invalid source schema version '{sourceVersion}'. Starting migration at schema 0.");
             }
             else if (startVersion > targetVersion)
             {
@@ -139,14 +169,15 @@ namespace NetworkingLibrary.Features
             return config.Bind(VersionSection, VersionKey, value, SchemaVersionInfo);
         }
 
-        static string ReadLegacyVersion(ConfigFile config)
+        static bool TryReadLegacyVersion(ConfigFile config, out string legacyVersion)
         {
+            legacyVersion = string.Empty;
             var configPath = config.ConfigFilePath;
             if (!File.Exists(configPath))
-                return string.Empty;
+                return false;
 
             var inVersionSection = false;
-            foreach (var line in File.ReadLines(configPath))
+            foreach (var line in ReadAllLinesWithRetry(configPath))
             {
                 var trimmed = line.Trim();
                 if (trimmed.StartsWith("[", StringComparison.Ordinal) && trimmed.EndsWith("]", StringComparison.Ordinal))
@@ -159,7 +190,7 @@ namespace NetworkingLibrary.Features
                 if (!inVersionSection)
                     continue;
 
-                if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#", StringComparison.Ordinal) || trimmed.StartsWith(";", StringComparison.Ordinal))
+                if (string.IsNullOrWhiteSpace(trimmed) || IsConfigComment(trimmed))
                     continue;
 
                 var separatorIndex = line.IndexOf('=');
@@ -170,10 +201,11 @@ namespace NetworkingLibrary.Features
                 if (!key.Equals(LegacyVersionKey, StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                return NormalizeLegacyVersionValue(line[(separatorIndex + 1)..]);
+                legacyVersion = NormalizeLegacyVersionValue(line[(separatorIndex + 1)..]);
+                return true;
             }
 
-            return string.Empty;
+            return false;
         }
 
         static string NormalizeLegacyVersionValue(string value)
@@ -187,17 +219,72 @@ namespace NetworkingLibrary.Features
             return normalized.Trim();
         }
 
-        static void DropLegacyVersionFromConfig(ConfigFile config)
+        static bool IsConfigComment(string trimmed)
         {
-            var legacyDefinition = new ConfigDefinition(VersionSection, LegacyVersionKey);
-            if (TryRemoveViaConfigApi(config, legacyDefinition, out var removeException))
-                return;
-            if (TryRemoveViaOrphanedEntries(config, legacyDefinition, out var orphanedEntriesException))
-                return;
-            if (ClearLegacyVersionInFile(config, out var fileCleanupException))
-                return;
+            return trimmed.StartsWith("#", StringComparison.Ordinal) || trimmed.StartsWith(";", StringComparison.Ordinal);
+        }
 
-            Net.Logger?.LogWarning($"Legacy config key '{LegacyVersionKey}' could not be removed during migration.{BuildCleanupFailureContext(removeException, orphanedEntriesException, fileCleanupException)}");
+        static bool DropLegacyVersionFromConfig(ConfigFile config, ConfigDefinition legacyDefinition, out Exception? removeException, out Exception? orphanedEntriesException)
+        {
+            if (TryRemoveViaConfigApi(config, legacyDefinition, out removeException))
+            {
+                orphanedEntriesException = null;
+                return true;
+            }
+            return TryRemoveViaOrphanedEntries(config, legacyDefinition, out orphanedEntriesException);
+        }
+
+        static bool HasLegacyVersionInConfig(ConfigFile config, ConfigDefinition legacyDefinition)
+        {
+            try
+            {
+                if (config.ContainsKey(legacyDefinition))
+                    return true;
+                return GetOrphanedEntries(config)?.Contains(legacyDefinition) == true;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        static void SaveConfig(ConfigFile config)
+        {
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    config.Save();
+                    return;
+                }
+                catch (IOException) when (attempt < ConfigSaveRetryCount)
+                {
+                    Thread.Sleep(ConfigIoRetryDelayMilliseconds * attempt);
+                }
+                catch (UnauthorizedAccessException) when (attempt < ConfigSaveRetryCount)
+                {
+                    Thread.Sleep(ConfigIoRetryDelayMilliseconds * attempt);
+                }
+            }
+        }
+
+        static string[] ReadAllLinesWithRetry(string path)
+        {
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    return File.ReadAllLines(path);
+                }
+                catch (IOException) when (attempt < ConfigSaveRetryCount)
+                {
+                    Thread.Sleep(ConfigIoRetryDelayMilliseconds * attempt);
+                }
+                catch (UnauthorizedAccessException) when (attempt < ConfigSaveRetryCount)
+                {
+                    Thread.Sleep(ConfigIoRetryDelayMilliseconds * attempt);
+                }
+            }
         }
 
         static bool TryRemoveViaConfigApi(ConfigFile config, ConfigDefinition legacyDefinition, out Exception? exception)
@@ -257,7 +344,7 @@ namespace NetworkingLibrary.Features
                     return false;
 
                 stage = "read";
-                var lines = File.ReadAllLines(configPath);
+                var lines = ReadAllLinesWithRetry(configPath);
                 var keptLines = new List<string>(lines.Length);
                 var changed = false;
                 var inVersionSection = false;
@@ -279,7 +366,7 @@ namespace NetworkingLibrary.Features
                         continue;
                     }
 
-                    if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#", StringComparison.Ordinal) || trimmed.StartsWith(";", StringComparison.Ordinal))
+                    if (string.IsNullOrWhiteSpace(trimmed) || IsConfigComment(trimmed))
                     {
                         keptLines.Add(lines[i]);
                         continue;
@@ -299,6 +386,7 @@ namespace NetworkingLibrary.Features
                         continue;
                     }
 
+                    DropTrailingLegacyMetadata(keptLines);
                     changed = true;
                 }
 
@@ -321,14 +409,14 @@ namespace NetworkingLibrary.Features
                         {
                             File.Replace(tempPath, configPath, null);
                         }
-                        catch (PlatformNotSupportedException)
+                        catch (Exception ex) when (ex is PlatformNotSupportedException || ex is IOException || ex is UnauthorizedAccessException)
                         {
-                            File.Move(tempPath, configPath, true);
+                            File.Copy(tempPath, configPath, true);
                         }
                     }
                     else
                     {
-                        File.Move(tempPath, configPath, true);
+                        File.Move(tempPath, configPath);
                     }
                 }
                 finally
@@ -344,6 +432,16 @@ namespace NetworkingLibrary.Features
                 exception = new InvalidOperationException($"Failed to clear legacy version in config file at '{configPath}' during stage '{stage}'.", ex);
                 return false;
             }
+        }
+
+        static void DropTrailingLegacyMetadata(List<string> keptLines)
+        {
+            var index = keptLines.Count - 1;
+            while (index >= 0 && string.IsNullOrWhiteSpace(keptLines[index])) index--;
+            var commentEnd = index;
+            while (index >= 0 && IsConfigComment(keptLines[index].Trim())) index--;
+            if (commentEnd == index) return;
+            keptLines.RemoveRange(index + 1, keptLines.Count - index - 1);
         }
 
         static string BuildCleanupFailureContext(Exception? removeException, Exception? orphanedEntriesException, Exception? fileCleanupException)
@@ -372,10 +470,10 @@ namespace NetworkingLibrary.Features
             return orphanedEntriesProperty.Value;
         }
 
-        internal static IDictionary? GetOrphanedEntries(ConfigFile config, PropertyInfo? orphanedEntriesProperty = null)
+        internal static System.Collections.IDictionary? GetOrphanedEntries(ConfigFile config, PropertyInfo? orphanedEntriesProperty = null)
         {
             orphanedEntriesProperty ??= GetOrphanedEntriesProperty(config);
-            return orphanedEntriesProperty?.GetValue(config) as IDictionary;
+            return orphanedEntriesProperty?.GetValue(config) as System.Collections.IDictionary;
         }
 
         static ConfigEntry<string> BindPluginVersion(ConfigFile config, string value)

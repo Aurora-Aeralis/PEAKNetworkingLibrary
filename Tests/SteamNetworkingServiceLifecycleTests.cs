@@ -18,6 +18,8 @@ public class SteamNetworkingServiceLifecycleTests
 {
     const uint TestModId = 777;
 
+    enum DataKind { Unknown = 0, Scout = 1, Runner = 2 }
+
     sealed class RpcReceiver
     {
         public int LastValue { get; private set; } = -1;
@@ -127,31 +129,27 @@ public class SteamNetworkingServiceLifecycleTests
         SetInLobby(service, true);
         EnqueueTo(service, "normalQueue");
         EnqueueTo(service, "lowQueue");
-        EnqueueTo(service, "highQueue");
 
         InvokeNonPublic(service, "OnLobbyLeftInternal");
 
         AssertQueueCount(service, "normalQueue", 0);
         AssertQueueCount(service, "lowQueue", 0);
-        AssertQueueCount(service, "highQueue", 0);
 
         SetInLobby(service, true);
         EnqueueTo(service, "normalQueue");
         EnqueueTo(service, "lowQueue");
-        EnqueueTo(service, "highQueue");
 
         service.Shutdown();
 
         AssertQueueCount(service, "normalQueue", 0);
         AssertQueueCount(service, "lowQueue", 0);
-        AssertQueueCount(service, "highQueue", 0);
     }
 
     [Fact]
     public void LeaveLobby_ResetsOutgoingSequenceCounters_BeforeNextLobbySession()
     {
         var service = new SteamNetworkingService();
-        var msg = new Message(TestModId, nameof(RpcReceiver.OnPing), 0);
+        var msg = new Message(TestModId, "OnPing", 0);
         msg.WriteObject(typeof(int), 1);
 
         SeedLastSeenSequence(service);
@@ -275,18 +273,38 @@ public class SteamNetworkingServiceLifecycleTests
         var rpcs = (IDictionary)GetField(service, "rpcs")!;
         var modSigners = (IDictionary)GetField(service, "modSigners")!;
         var modPublicKeys = (IDictionary)GetField(service, "modPublicKeys")!;
-        Assert.Equal(0, rpcs.Count);
-        Assert.Equal(0, modSigners.Count);
-        Assert.Equal(0, modPublicKeys.Count);
+        Assert.Empty(rpcs);
+        Assert.Empty(modSigners);
+        Assert.Empty(modPublicKeys);
     }
 
     [Fact]
+    public void SetPeerSymmetricKeyUnderLock_ZeroesPreviousPeerKey_OnReplacement()
+    {
+        var service = new SteamNetworkingService();
+        var peerId = 76561198000000001UL;
+        var previous = Enumerable.Range(1, 32).Select(i => (byte)i).ToArray();
+        var next = Enumerable.Range(101, 32).Select(i => (byte)i).ToArray();
+        var stateType = typeof(SteamNetworkingService).GetNestedType("HandshakeState", BindingFlags.NonPublic)!;
+        var state = Activator.CreateInstance(stateType)!;
+        var symField = stateType.GetField("Sym", BindingFlags.Instance | BindingFlags.Public)!;
+        symField.SetValue(state, previous);
+        ((IDictionary)GetField(service, "perPeerSymmetricKey")!)[peerId] = previous;
+
+        InvokeNonPublic(service, "SetPeerSymmetricKeyUnderLock", peerId, state, next);
+
+        Assert.All(previous, b => Assert.Equal(0, b));
+        Assert.Same(next, symField.GetValue(state));
+        Assert.Same(next, ((IDictionary)GetField(service, "perPeerSymmetricKey")!)[peerId]);
+    }
+
+    [UnityRuntimeFact]
     public void Shutdown_ClearsIncomingValidator_AndReinitializeRequiresExplicitReconfiguration()
     {
         var service = new SteamNetworkingService();
         service.IncomingValidator = (_, _) => false;
         SetInLobby(service, true);
-        SetLobby(service, new CSteamID(9001UL));
+        SetLobby(service, 9001UL);
 
         service.Shutdown();
 
@@ -381,7 +399,7 @@ public class SteamNetworkingServiceLifecycleTests
         Assert.Contains("Cannot register instance RPC method", ex.Message);
 
         var rpcs = (IDictionary)GetField(service, "rpcs")!;
-        Assert.Equal(0, rpcs.Count);
+        Assert.Empty(rpcs);
     }
 
     [Fact]
@@ -393,9 +411,9 @@ public class SteamNetworkingServiceLifecycleTests
 
         Assert.Equal(2, GetRegisteredHandlerCount(service, TestModId));
 
-        DispatchMessage(service, nameof(VisibilityRpcReceiver.PublicPing), 2);
-        DispatchMessage(service, "PrivatePing", 3);
-        DispatchMessage(service, nameof(VisibilityRpcReceiver.NotRpc), 4);
+        DispatchMessage(service, nameof(VisibilityRpcReceiver.PublicPing), 2, mask: 5);
+        DispatchMessage(service, "PrivatePing", 3, mask: 5);
+        DispatchMessage(service, nameof(VisibilityRpcReceiver.NotRpc), 4, mask: 5);
 
         Assert.Equal(2, receiver.PublicCallCount);
         Assert.Equal(3, receiver.PrivateCallCount);
@@ -417,6 +435,21 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void InvokeLocalMessage_RawConstructedMessage_ReadsPayloadAfterHeader()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new RpcReceiver();
+        RegisterHandlerWithoutNetLog(service, receiver, "OnPing");
+
+        var message = new Message(TestModId, "OnPing", 0);
+        message.WriteObject(typeof(int), 42);
+        InvokeNonPublic(service, "InvokeLocalMessage", message, new CSteamID(1234UL));
+
+        Assert.Equal(1, receiver.CallCount);
+        Assert.Equal(42, receiver.LastValue);
+    }
+
+    [Fact]
     public void DispatchIncoming_RemoteReceive_SetsRpcInfoLoopbackFalse()
     {
         var service = new SteamNetworkingService();
@@ -429,6 +462,37 @@ public class SteamNetworkingServiceLifecycleTests
         Assert.Equal(1, receiver.CallCount);
         Assert.False(receiver.LastInfo.IsLocalLoopback);
         Assert.Equal(5678UL, receiver.LastInfo.SteamId64);
+    }
+
+    [Fact]
+    public void DispatchIncoming_RawConstructedMessage_ReadsPayloadAfterHeader()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new RpcReceiver();
+        RegisterHandlerWithoutNetLog(service, receiver, "OnPing");
+
+        var message = new Message(TestModId, "OnPing", 0);
+        message.WriteObject(typeof(int), 64);
+        InvokeNonPublic(service, "DispatchIncoming", message, new CSteamID(5678UL));
+
+        Assert.Equal(1, receiver.CallCount);
+        Assert.Equal(64, receiver.LastValue);
+    }
+
+    [Fact]
+    public void RPCTarget_InvalidTarget_DoesNotDispatchAsLocal_WhenLocalSteamLookupFails()
+    {
+        var service = new SteamNetworkingService();
+        var receiver = new RpcReceiver();
+        using var _ = service.RegisterNetworkObject(receiver, TestModId, mask: 0);
+        SetInLobby(service, true);
+        SetField(service, "getLocalSteamId", (Func<CSteamID>)(() => throw new InvalidOperationException("local id unavailable")));
+
+        var exception = Record.Exception(() => service.RPCTarget(TestModId, "OnPing", 0UL, ReliableType.Reliable, 33));
+
+        Assert.Null(exception);
+        Assert.Equal(0, receiver.CallCount);
+        Assert.Equal(-1, receiver.LastValue);
     }
 
     [Fact]
@@ -446,7 +510,32 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
-    public void Shutdown_PreservesRpcRegistrationsAcrossReinitializeAndLobbyEnter()
+    public void CopyRuntimeStateTo_PreservesRegistrationDisposableAcrossServicePromotion()
+    {
+        var source = new SteamNetworkingService();
+        var target = new OfflineNetworkingService();
+        var receiver = new RpcReceiver();
+
+        target.Initialize();
+        target.CreateLobby();
+        var registration = source.RegisterNetworkObject(receiver, TestModId);
+
+        ((INetworkingServiceStateTransfer)source).CopyRuntimeStateTo(target);
+        source.Shutdown();
+
+        target.RPC(TestModId, "OnPing", ReliableType.Reliable, 5);
+        Assert.Equal(1, receiver.CallCount);
+        Assert.Equal(5, receiver.LastValue);
+
+        registration.Dispose();
+
+        target.RPC(TestModId, "OnPing", ReliableType.Reliable, 9);
+        Assert.Equal(1, receiver.CallCount);
+        Assert.Equal(5, receiver.LastValue);
+    }
+
+    [UnityRuntimeFact]
+    public void Shutdown_ReinitializeRequiresRpcReregistration()
     {
         var service = new SteamNetworkingService();
         var receiver = new RpcReceiver();
@@ -460,11 +549,11 @@ public class SteamNetworkingServiceLifecycleTests
         DispatchPing(service, 42);
 
         Assert.True(service.InLobby);
-        Assert.Equal(42, receiver.LastValue);
-        Assert.Equal(1, receiver.CallCount);
+        Assert.Equal(-1, receiver.LastValue);
+        Assert.Equal(0, receiver.CallCount);
     }
 
-    [Fact]
+    [UnityRuntimeFact]
     public void Initialize_WhenCallbackAndCryptoSetupFails_KeepsServiceUninitialized_ClearsPartialState_AndPreservesExistingPumpState()
     {
         var service = new SteamNetworkingService();
@@ -490,7 +579,7 @@ public class SteamNetworkingServiceLifecycleTests
         }
     }
 
-    [Fact]
+    [UnityRuntimeFact]
     public void CleanupFailedPumpSetup_UsesEquivalentCleanupBehavior_ForBothInitializeFailurePaths()
     {
         static (bool pumpingEnabledAfterCleanup, bool gameObjectDestroyed, bool componentDestroyed) RunCleanup(string contextKey)
@@ -576,6 +665,31 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void HostIdentityProperties_WhenOwnerLookupThrows_ReturnFallback_AndHitStableThrottleKey()
+    {
+        var service = new SteamNetworkingService();
+        NetLog.ResetForTests();
+        try
+        {
+            SetLobby(service, 9001UL);
+            SetField(service, "getLobbyOwner", (Func<CSteamID, CSteamID>)(_ => throw new InvalidOperationException("owner unavailable")));
+
+            var exception = Record.Exception(() =>
+            {
+                Assert.Equal(0UL, service.HostSteamId64);
+                Assert.Equal(string.Empty, service.HostIdString);
+            });
+
+            Assert.Null(exception);
+            Assert.False(NetLog.TryEnterCooldown("SteamNetworkingService.LobbyOwner", 2d));
+        }
+        finally
+        {
+            NetLog.ResetForTests();
+        }
+    }
+
+    [Fact]
     public void IsHost_WhenOwnerLookupThrows_ReturnsFalse_AndHitsThrottledDebugPath()
     {
         var service = new SteamNetworkingService();
@@ -612,7 +726,7 @@ public class SteamNetworkingServiceLifecycleTests
             SetLobby(service, 9001UL);
             SetField(service, "getLobbyOwner", (Func<CSteamID, CSteamID>)(_ => throw new InvalidOperationException("owner unavailable")));
 
-            var exception = Record.Exception(() => service.RPCToHost(1u, "Ping", ReliableType.No, Array.Empty<object>()));
+            var exception = Record.Exception(() => service.RPCToHost(1u, "Ping", ReliableType.Unreliable, Array.Empty<object>()));
             Assert.Null(exception);
             Assert.False(NetLog.TryEnterCooldown("SteamNetworkingService.LobbyOwner", 2d));
         }
@@ -634,7 +748,7 @@ public class SteamNetworkingServiceLifecycleTests
             SetInLobby(service, true);
             SetField(service, "getLocalSteamId", (Func<CSteamID>)(() => throw new InvalidOperationException("steam id unavailable")));
 
-            var exception = Record.Exception(() => service.RPC(TestModId, nameof(RpcReceiver.OnPing), ReliableType.Reliable, 7));
+            var exception = Record.Exception(() => service.RPC(TestModId, "OnPing", ReliableType.Reliable, 7));
 
             Assert.Null(exception);
             Assert.Equal(0, receiver.CallCount);
@@ -792,6 +906,72 @@ public class SteamNetworkingServiceLifecycleTests
     }
 
     [Fact]
+    public void EmptyStringLobbyAndPlayerData_RoundTrips_AfterSuccessfulLocalSet()
+    {
+        var service = new SteamNetworkingService();
+        const ulong localSteamId = 76561198000000000UL;
+        var lobbyValues = new Dictionary<string, string>();
+        var playerValues = new Dictionary<string, string>();
+
+        SetInLobby(service, true);
+        SetLobby(service, 9001UL);
+        SetField(service, "getLocalSteamId", (Func<CSteamID>)(() => new CSteamID(localSteamId)));
+        SetField(service, "setLobbyData", (Action<CSteamID, string, string>)((_, key, value) => lobbyValues[key] = value));
+        SetField(service, "getLobbyData", (Func<CSteamID, string, string>)((_, key) => lobbyValues.TryGetValue(key, out var value) ? value : string.Empty));
+        SetField(service, "setLobbyMemberData", (Action<CSteamID, string, string>)((_, key, value) => playerValues[key] = value));
+        SetField(service, "getLobbyMemberData", (Func<CSteamID, CSteamID, string, string>)((_, player, key) => player.m_SteamID == localSteamId && playerValues.TryGetValue(key, out var value) ? value : string.Empty));
+        service.RegisterLobbyDataKey("nullable");
+        service.RegisterPlayerDataKey("alias");
+
+        service.SetLobbyData("nullable", null!);
+        service.SetPlayerData("alias", string.Empty);
+
+        Assert.Equal(string.Empty, service.GetLobbyData<string>("nullable"));
+        Assert.Equal(string.Empty, service.GetPlayerData<string>(localSteamId, "alias"));
+        Assert.Null(service.GetLobbyData<string>("missing"));
+        Assert.Null(service.GetPlayerData<string>(localSteamId, "missing"));
+    }
+
+    [Fact]
+    public void LobbyAndPlayerData_ReadsBackEnumsAndNullableValues()
+    {
+        var service = new SteamNetworkingService();
+        const ulong localSteamId = 76561198000000000UL;
+
+        SetInLobby(service, true);
+        SetLobby(service, 9001UL);
+        SetField(service, "getLocalSteamId", (Func<CSteamID>)(() => new CSteamID(localSteamId)));
+        SetField(service, "getLobbyData", (Func<CSteamID, string, string>)((_, key) => key == "kind" ? "Runner" : string.Empty));
+        SetField(service, "getLobbyMemberData", (Func<CSteamID, CSteamID, string, string>)((_, player, key) => player.m_SteamID == localSteamId && key == "score" ? "42" : string.Empty));
+
+        Assert.Equal(DataKind.Runner, service.GetLobbyData<DataKind>("kind"));
+        Assert.Equal(DataKind.Runner, service.GetLobbyData<DataKind?>("kind"));
+        Assert.Equal(42, service.GetPlayerData<int?>(localSteamId, "score"));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void LobbyAndPlayerDataKeys_Reject_NullOrWhitespace(string? key)
+    {
+        var service = new SteamNetworkingService();
+        SetInLobby(service, true);
+        SetLobby(service, 9001UL);
+        SetField(service, "setLobbyData", (Action<CSteamID, string, string>)((_, _, _) => throw new InvalidOperationException("set lobby should not run")));
+        SetField(service, "setLobbyMemberData", (Action<CSteamID, string, string>)((_, _, _) => throw new InvalidOperationException("set player should not run")));
+        SetField(service, "getLobbyData", (Func<CSteamID, string, string>)((_, _) => throw new InvalidOperationException("get lobby should not run")));
+        SetField(service, "getLobbyMemberData", (Func<CSteamID, CSteamID, string, string>)((_, _, _) => throw new InvalidOperationException("get player should not run")));
+
+        Assert.Equal("key", Assert.Throws<ArgumentException>(() => service.RegisterLobbyDataKey(key!)).ParamName);
+        Assert.Equal("key", Assert.Throws<ArgumentException>(() => service.SetLobbyData(key!, "forest")).ParamName);
+        Assert.Equal("key", Assert.Throws<ArgumentException>(() => service.GetLobbyData<string>(key!)).ParamName);
+        Assert.Equal("key", Assert.Throws<ArgumentException>(() => service.RegisterPlayerDataKey(key!)).ParamName);
+        Assert.Equal("key", Assert.Throws<ArgumentException>(() => service.SetPlayerData(key!, "blue")).ParamName);
+        Assert.Equal("key", Assert.Throws<ArgumentException>(() => service.GetPlayerData<string>(1234UL, key!)).ParamName);
+    }
+
+    [Fact]
     public void GetLobbyData_AndGetPlayerData_ReturnDefault_WhenSteamCallsFail()
     {
         var service = new SteamNetworkingService();
@@ -906,6 +1086,54 @@ public class SteamNetworkingServiceLifecycleTests
         Assert.Single(events);
         Assert.Equal(player.m_SteamID, events[0].playerId);
         Assert.Equal(new[] { "score" }, events[0].keys);
+    }
+
+    [Fact]
+    public void OnLobbyDataUpdate_LobbyBranch_UsesKeySnapshot_WhenRegistrationChangesDuringLookup()
+    {
+        var service = new SteamNetworkingService();
+        SetInLobby(service, true);
+        SetLobby(service, 9001UL);
+        service.RegisterLobbyDataKey("map");
+        SetField(service, "getLobbyData", (Func<CSteamID, string, string>)((_, key) =>
+        {
+            service.RegisterLobbyDataKey("mode");
+            return key == "map" ? "forest" : "survival";
+        }));
+
+        var events = new List<string[]>();
+        service.LobbyDataChanged += keys => events.Add(keys);
+
+        var exception = Record.Exception(() => InvokeNonPublic(service, "OnLobbyDataUpdate", new LobbyDataUpdate_t { m_ulSteamIDLobby = 9001UL, m_ulSteamIDMember = 9001UL }));
+
+        Assert.Null(exception);
+        Assert.Single(events);
+        Assert.Equal(new[] { "map" }, events[0]);
+    }
+
+    [Fact]
+    public void OnLobbyDataUpdate_PlayerBranch_UsesKeySnapshot_WhenRegistrationChangesDuringLookup()
+    {
+        var service = new SteamNetworkingService();
+        var player = new CSteamID(7001UL);
+        SetInLobby(service, true);
+        SetLobby(service, 9001UL);
+        service.RegisterPlayerDataKey("team");
+        SetField(service, "getLobbyMemberData", (Func<CSteamID, CSteamID, string, string>)((_, _, key) =>
+        {
+            service.RegisterPlayerDataKey("score");
+            return key == "team" ? "blue" : "10";
+        }));
+
+        var events = new List<(ulong playerId, string[] keys)>();
+        service.PlayerDataChanged += (playerId, keys) => events.Add((playerId, keys));
+
+        var exception = Record.Exception(() => InvokeNonPublic(service, "OnLobbyDataUpdate", new LobbyDataUpdate_t { m_ulSteamIDLobby = 9001UL, m_ulSteamIDMember = player.m_SteamID }));
+
+        Assert.Null(exception);
+        Assert.Single(events);
+        Assert.Equal(player.m_SteamID, events[0].playerId);
+        Assert.Equal(new[] { "team" }, events[0].keys);
     }
 
     [Fact]
@@ -1030,8 +1258,9 @@ public class SteamNetworkingServiceLifecycleTests
         var receiver = new RpcReceiver();
         using var _ = service.RegisterNetworkObject(receiver, TestModId, mask: 0);
 
-        var local = SteamUser.GetSteamID();
-        var msg = new Message(TestModId, nameof(RpcReceiver.OnPing), 0);
+        var local = new CSteamID(76561198000000000UL);
+        SetField(service, "getLocalSteamId", (Func<CSteamID>)(() => local));
+        var msg = new Message(TestModId, "OnPing", 0);
         msg.WriteObject(typeof(int), 73);
         var framed = BuildFramed(service, msg, TestModId, ReliableType.Reliable);
 
@@ -1049,8 +1278,9 @@ public class SteamNetworkingServiceLifecycleTests
         var receiver = new RpcReceiver();
         using var _ = service.RegisterNetworkObject(receiver, TestModId, mask: 0);
 
-        var local = SteamUser.GetSteamID();
-        var msg = new Message(TestModId, nameof(RpcReceiver.OnPing), 0);
+        var local = new CSteamID(76561198000000000UL);
+        SetField(service, "getLocalSteamId", (Func<CSteamID>)(() => local));
+        var msg = new Message(TestModId, "OnPing", 0);
         msg.WriteObject(typeof(int), 5);
         var framed = BuildFramed(service, msg, TestModId, ReliableType.Unreliable);
         var validatorCalls = 0;
@@ -1124,7 +1354,7 @@ public class SteamNetworkingServiceLifecycleTests
         SetField(service, "nextFragmentCleanupAt", DateTime.UtcNow - TimeSpan.FromSeconds(1));
         InvokeNonPublic(service, "ProcessIncomingFrame", BuildFragmentFrame(999999UL, total: 3, index: 0, new byte[] { 7, 7, 7 }), sender);
 
-        Assert.Equal(1, FragmentBuffers(service).Count);
+        Assert.Single(FragmentBuffers(service));
     }
 
     static void SetInLobby(SteamNetworkingService service, bool value)
@@ -1290,9 +1520,37 @@ public class SteamNetworkingServiceLifecycleTests
 
     static int GetRegisteredHandlerCount(SteamNetworkingService service, uint modId)
     {
-        var rpcs = (Dictionary<uint, Dictionary<string, List<MessageHandler>>>)GetField(service, "rpcs")!;
-        if (!rpcs.TryGetValue(modId, out var methods)) return 0;
-        return methods.Sum(entry => entry.Value.Count);
+        var rpcs = (IDictionary)GetField(service, "rpcs")!;
+        if (!rpcs.Contains(modId)) return 0;
+        var methods = (IDictionary)rpcs[modId]!;
+        var count = 0;
+        foreach (DictionaryEntry entry in methods) count += ((ICollection)entry.Value!).Count;
+        return count;
+    }
+
+    static void RegisterHandlerWithoutNetLog(SteamNetworkingService service, object target, string methodName, int mask = 0)
+    {
+        var handlerType = typeof(SteamNetworkingService).GetNestedType("MessageHandler", BindingFlags.NonPublic)!;
+        var handler = Activator.CreateInstance(handlerType)!;
+        var method = target.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
+        var parameters = method.GetParameters();
+
+        handlerType.GetField("Target", BindingFlags.Instance | BindingFlags.Public)!.SetValue(handler, target);
+        handlerType.GetField("Method", BindingFlags.Instance | BindingFlags.Public)!.SetValue(handler, method);
+        handlerType.GetField("Parameters", BindingFlags.Instance | BindingFlags.Public)!.SetValue(handler, parameters);
+        handlerType.GetField("TakesInfo", BindingFlags.Instance | BindingFlags.Public)!.SetValue(handler, false);
+        handlerType.GetField("Mask", BindingFlags.Instance | BindingFlags.Public)!.SetValue(handler, mask);
+        handlerType.GetField("ParameterCountWithoutRpcInfo", BindingFlags.Instance | BindingFlags.Public)!.SetValue(handler, parameters.Length);
+        handlerType.GetField("OverloadKey", BindingFlags.Instance | BindingFlags.Public)!.SetValue(handler, string.Empty);
+
+        var rpcs = (IDictionary)GetField(service, "rpcs")!;
+        var listType = typeof(List<>).MakeGenericType(handlerType);
+        if (!rpcs.Contains(TestModId))
+            rpcs[TestModId] = Activator.CreateInstance(typeof(Dictionary<,>).MakeGenericType(typeof(string), listType))!;
+
+        var methods = (IDictionary)rpcs[TestModId]!;
+        if (!methods.Contains(methodName)) methods[methodName] = Activator.CreateInstance(listType)!;
+        ((IList)methods[methodName]!).Add(handler);
     }
 
     static byte[] BuildFramed(SteamNetworkingService service, Message message, uint modId, ReliableType reliable)
@@ -1340,14 +1598,14 @@ public class SteamNetworkingServiceLifecycleTests
         DispatchMessage(service, "OnPing", value);
     }
 
-    static void DispatchMessage(SteamNetworkingService service, string methodName, int value)
+    static void DispatchMessage(SteamNetworkingService service, string methodName, int value, int mask = 0)
     {
         var invokeLocal = typeof(SteamNetworkingService).GetMethod("InvokeLocalMessage", BindingFlags.Instance | BindingFlags.NonPublic);
         if (invokeLocal != null)
         {
-            var message = new Message(TestModId, methodName, 0);
+            var message = new Message(TestModId, methodName, mask);
             message.WriteObject(typeof(int), value);
-            invokeLocal.Invoke(service, new object[] { message, new CSteamID(1234UL) });
+            invokeLocal.Invoke(service, new object[] { new Message(message.ToArray()), new CSteamID(1234UL) });
             return;
         }
 

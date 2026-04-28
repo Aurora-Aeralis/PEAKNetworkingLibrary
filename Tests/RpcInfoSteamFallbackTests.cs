@@ -25,4 +25,16 @@ public class RpcInfoSteamFallbackTests
         Assert.Equal(sid.ToString(), info.SteamIdString);
         Assert.False(info.IsLocalLoopback);
     }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void Constructor_UsesNumericIdentifier_WhenStringIdentifierIsMissing(string? steamIdString)
+    {
+        var info = new RPCInfo(42UL, steamIdString!);
+
+        Assert.Equal(42UL, info.SteamId64);
+        Assert.Equal("42", info.SteamIdString);
+    }
 }

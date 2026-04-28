@@ -6,6 +6,7 @@ using Photon.Realtime;
 using Steamworks;
 using NetworkingLibrary.Services;
 using UnityEngine;
+using PhotonPlayer = Photon.Realtime.Player;
 
 namespace NetworkingLibrary.Modules
 {
@@ -27,6 +28,9 @@ namespace NetworkingLibrary.Modules
         static readonly Dictionary<ulong, PersonaNameCacheEntry> PersonaNameCache = new Dictionary<ulong, PersonaNameCacheEntry>();
         static readonly object PersonaNameCacheLock = new object();
         static DateTime PersonaNameCacheNextPruneUtc = DateTime.MinValue;
+        const ulong SteamId64Base = 76561197960265728UL;
+        internal static Func<bool> PhotonInRoom = () => PhotonNetwork.InRoom;
+        internal static Func<Room?> CurrentPhotonRoom = () => PhotonNetwork.CurrentRoom;
         internal static Func<ulong, string> PersonaNameLookup = sid => SteamFriends.GetFriendPersonaName(new CSteamID(sid));
         internal static Func<DateTime> UtcNow = () => DateTime.UtcNow;
         static readonly string[] StableIdPropertyKeys =
@@ -45,16 +49,14 @@ namespace NetworkingLibrary.Modules
             var map = new Dictionary<int, ulong>();
             if (svc == null) return map;
 
+            if (!TryGetCurrentPhotonRoom(out var room)) return map;
             var lobbyIds = svc.GetLobbyMemberSteamIds();
             if (lobbyIds == null || lobbyIds.Length == 0) return map;
-            if (!PhotonNetwork.InRoom) return map;
-            var room = PhotonNetwork.CurrentRoom;
-            if (room == null) return map;
 
             var lobbyIdSet = new HashSet<ulong>(lobbyIds);
             var personaByName = BuildPersonaLookupIndex(lobbyIds);
 
-            foreach (var kv in room.Players)
+            foreach (var kv in room!.Players)
             {
                 int actor = kv.Key;
                 var player = kv.Value;
@@ -86,7 +88,23 @@ namespace NetworkingLibrary.Modules
             return map;
         }
 
-        static bool TryResolveStableIdentity(Player player, HashSet<ulong> lobbyIdSet, out ulong matchedSteamId, out string? issue)
+        static bool TryGetCurrentPhotonRoom(out Room? room)
+        {
+            room = null;
+            try
+            {
+                if (!PhotonInRoom()) return false;
+                room = CurrentPhotonRoom();
+                return room != null;
+            }
+            catch (Exception ex)
+            {
+                LogWarning($"Photon room state unavailable while mapping actors; actor map left empty. Exception: {ex.GetType().Name}: {ex.Message}");
+                return false;
+            }
+        }
+
+        static bool TryResolveStableIdentity(PhotonPlayer player, HashSet<ulong> lobbyIdSet, out ulong matchedSteamId, out string? issue)
         {
             matchedSteamId = 0;
             issue = null;
@@ -120,7 +138,7 @@ namespace NetworkingLibrary.Modules
             return false;
         }
 
-        static IEnumerable<ulong> GetStableIdCandidates(Player player)
+        static IEnumerable<ulong> GetStableIdCandidates(PhotonPlayer player)
         {
             if (player == null) yield break;
 
@@ -152,21 +170,63 @@ namespace NetworkingLibrary.Modules
 
             switch (raw)
             {
+                case CSteamID sid when IsPlausibleSteam64(sid.m_SteamID):
+                    steamId = sid.m_SteamID;
+                    return true;
                 case ulong u when IsPlausibleSteam64(u):
                     steamId = u;
                     return true;
                 case long l when l > 0 && IsPlausibleSteam64((ulong)l):
                     steamId = (ulong)l;
                     return true;
-                case string s when !string.IsNullOrWhiteSpace(s) && ulong.TryParse(s, out var parsed) && IsPlausibleSteam64(parsed):
-                    steamId = parsed;
+                case string s when TryParseSteamIdString(s, out var parsedString):
+                    steamId = parsedString;
                     return true;
                 default:
                     return false;
             }
         }
 
-        static bool IsPlausibleSteam64(ulong value) => value >= 76561197960265728UL;
+        static bool TryParseSteamIdString(string raw, out ulong steamId)
+        {
+            steamId = 0;
+            if (string.IsNullOrWhiteSpace(raw)) return false;
+
+            var value = raw.Trim();
+            if (ulong.TryParse(value, out var parsed) && IsPlausibleSteam64(parsed))
+            {
+                steamId = parsed;
+                return true;
+            }
+
+            if (value.StartsWith("STEAM_", StringComparison.OrdinalIgnoreCase))
+            {
+                var parts = value.Substring(6).Split(':');
+                if (parts.Length != 3) return false;
+                if (!int.TryParse(parts[0], out var universe) || (universe != 0 && universe != 1)) return false;
+                if (!int.TryParse(parts[1], out var authServer) || (authServer != 0 && authServer != 1)) return false;
+                if (!ulong.TryParse(parts[2], out var accountNumber)) return false;
+                if (accountNumber > (ulong.MaxValue - (ulong)authServer) / 2UL) return false;
+                return TryComposePublicSteam64(accountNumber * 2UL + (ulong)authServer, out steamId);
+            }
+
+            if (value.Length > 2 && value[0] == '[' && value[value.Length - 1] == ']') value = value.Substring(1, value.Length - 2);
+            var steam3Parts = value.Split(':');
+            if (steam3Parts.Length != 3 || !steam3Parts[0].Equals("U", StringComparison.OrdinalIgnoreCase)) return false;
+            if (!int.TryParse(steam3Parts[1], out var steam3Universe) || steam3Universe != 1) return false;
+            if (!ulong.TryParse(steam3Parts[2], out var accountId)) return false;
+            return TryComposePublicSteam64(accountId, out steamId);
+        }
+
+        static bool TryComposePublicSteam64(ulong accountId, out ulong steamId)
+        {
+            steamId = 0;
+            if (accountId > ulong.MaxValue - SteamId64Base) return false;
+            steamId = SteamId64Base + accountId;
+            return IsPlausibleSteam64(steamId);
+        }
+
+        static bool IsPlausibleSteam64(ulong value) => value >= SteamId64Base;
 
         internal static bool TryParseSteamIdForTests(object raw, out ulong steamId)
         {
@@ -178,9 +238,12 @@ namespace NetworkingLibrary.Modules
             var personaByName = new Dictionary<string, List<ulong>>(StringComparer.Ordinal);
             if (lobbyIds == null || lobbyIds.Length == 0) return personaByName;
 
+            var seenLobbyIds = new HashSet<ulong>();
             for (int i = 0; i < lobbyIds.Length; i++)
             {
                 var sid = lobbyIds[i];
+                if (!IsPlausibleSteam64(sid)) continue;
+                if (!seenLobbyIds.Add(sid)) continue;
                 if (!TryGetPersonaName(sid, out var name) || string.IsNullOrEmpty(name)) continue;
                 if (!personaByName.TryGetValue(name, out var ids)) personaByName[name] = ids = new List<ulong>(1);
                 ids.Add(sid);
@@ -189,7 +252,7 @@ namespace NetworkingLibrary.Modules
             return personaByName;
         }
 
-        static bool TryGetPersonaName(ulong sid, out string name)
+        static bool TryGetPersonaName(ulong sid, out string? name)
         {
             var now = UtcNow();
             lock (PersonaNameCacheLock)
@@ -200,7 +263,9 @@ namespace NetworkingLibrary.Modules
                     PersonaNameCacheNextPruneUtc = now + PersonaNameCacheTtl;
                 }
 
-                if (PersonaNameCache.TryGetValue(sid, out var cached) && now - cached.UpdatedUtc < PersonaNameCacheTtl)
+                if (PersonaNameCache.TryGetValue(sid, out var cached)
+                    && now >= cached.UpdatedUtc
+                    && now - cached.UpdatedUtc < PersonaNameCacheTtl)
                 {
                     name = cached.Name;
                     return true;
@@ -209,12 +274,12 @@ namespace NetworkingLibrary.Modules
 
             try
             {
-                name = PersonaNameLookup(sid);
+                name = PersonaNameLookup(sid) ?? string.Empty;
             }
             catch (Exception ex)
             {
                 LogPersonaLookupExceptionThrottled(ex, sid);
-                name = null;
+                name = string.Empty;
                 return false;
             }
 
@@ -235,7 +300,7 @@ namespace NetworkingLibrary.Modules
         {
             if (PersonaNameCache.Count == 0) return;
             var expiresBeforeUtc = nowUtc - PersonaNameCachePruneAge;
-            List<ulong> keysToRemove = null;
+            List<ulong>? keysToRemove = null;
             foreach (var entry in PersonaNameCache)
             {
                 if (entry.Value.UpdatedUtc >= expiresBeforeUtc) continue;
@@ -284,21 +349,46 @@ namespace NetworkingLibrary.Modules
             UtcNow = () => DateTime.UtcNow;
         }
 
+        internal static void ResetPhotonRoomStateForTests()
+        {
+            PhotonInRoom = () => PhotonNetwork.InRoom;
+            CurrentPhotonRoom = () => PhotonNetwork.CurrentRoom;
+        }
+
         static void LogWarning(string message)
         {
-            try { Net.Logger?.LogWarning(message); }
+            try
+            {
+                if (TryLogWarningWithNetLogger(message)) return;
+            }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[NetworkingPhotonExtensions] Failed to write warning log. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
+                LogWarningOrTrace($"[NetworkingPhotonExtensions] Failed to write warning log. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
+                return;
             }
+            LogWarningOrTrace(message);
+        }
+
+        static bool TryLogWarningWithNetLogger(string message)
+        {
+            var logger = Net.Logger;
+            if (logger == null) return false;
+            logger.LogWarning(message);
+            return true;
+        }
+
+        static void LogWarningOrTrace(string message)
+        {
+            try { Debug.LogWarning(message); }
+            catch { System.Diagnostics.Trace.TraceWarning(message); }
         }
 
         static void LogPersonaLookupExceptionThrottled(Exception ex, ulong steamId)
         {
-            var now = DateTime.UtcNow;
+            var now = UtcNow();
             lock (personaLookupExceptionLock)
             {
-                if (lastPersonaLookupExceptionUtc != DateTime.MinValue && now - lastPersonaLookupExceptionUtc < PersonaLookupExceptionCooldown)
+                if (lastPersonaLookupExceptionUtc != DateTime.MinValue && now >= lastPersonaLookupExceptionUtc && now - lastPersonaLookupExceptionUtc < PersonaLookupExceptionCooldown)
                 {
                     suppressedPersonaLookupExceptions++;
                     return;
@@ -314,7 +404,7 @@ namespace NetworkingLibrary.Modules
 
         static void LogUnresolvedMappingWarning(int actorNumber, string issueText, string message)
         {
-            if (!ShouldEmitUnresolvedMappingWarning(actorNumber, issueText, DateTime.UtcNow)) return;
+            if (!ShouldEmitUnresolvedMappingWarning(actorNumber, issueText, UtcNow())) return;
             LogWarning(message);
         }
 
@@ -328,7 +418,9 @@ namespace NetworkingLibrary.Modules
                     PruneUnresolvedMappingWarningThrottle(nowUtc);
                     UnresolvedMappingWarningNextPruneUtc = nowUtc + UnresolvedMappingWarningCooldown;
                 }
-                if (UnresolvedMappingWarningThrottle.TryGetValue(key, out var previous) && nowUtc - previous < UnresolvedMappingWarningCooldown) return false;
+                if (UnresolvedMappingWarningThrottle.TryGetValue(key, out var previous)
+                    && nowUtc >= previous
+                    && nowUtc - previous < UnresolvedMappingWarningCooldown) return false;
                 UnresolvedMappingWarningThrottle[key] = nowUtc;
                 CapUnresolvedMappingWarningThrottle();
                 return true;
@@ -354,7 +446,7 @@ namespace NetworkingLibrary.Modules
             if (UnresolvedMappingWarningThrottle.Count == 0) return;
 
             var expiredBeforeUtc = nowUtc - UnresolvedMappingWarningPruneAge;
-            List<string> keysToRemove = null;
+            List<string>? keysToRemove = null;
             foreach (var entry in UnresolvedMappingWarningThrottle)
             {
                 if (entry.Value >= expiredBeforeUtc) continue;

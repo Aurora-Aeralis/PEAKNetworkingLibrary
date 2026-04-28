@@ -2,6 +2,7 @@ using HarmonyLib;
 using NetworkingLibrary.Modules;
 using NetworkingLibrary.Services;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -206,6 +207,7 @@ public class NetLifecycleTeardownTests : IDisposable
         public Func<Modules.Message, ulong, bool>? IncomingValidator { get; set; }
         public int ShutdownCallCount { get; private set; }
         public bool CopyCalled { get; private set; }
+        public bool ThrowOnCopy { get; set; }
 
         public event Action? LobbyCreated;
         public event Action? LobbyEntered;
@@ -244,6 +246,7 @@ public class NetLifecycleTeardownTests : IDisposable
         public void CopyRuntimeStateTo(INetworkingService target)
         {
             CopyCalled = true;
+            if (ThrowOnCopy) throw new InvalidOperationException("copy failed");
             target.RegisterLobbyDataKey("persisted");
         }
 
@@ -281,7 +284,7 @@ public class NetLifecycleTeardownTests : IDisposable
         Message.ResetSerializersForTests();
     }
 
-    [Fact]
+    [Fact(Skip = "Requires Harmony runtime detours unavailable in the .NET test host.")]
     public void OnDestroy_ShutsDownService_ClearsStaticService_AndUnpatchesHarmony()
     {
         var harmonyField = typeof(Net).GetField("Harmony", BindingFlags.Static | BindingFlags.NonPublic)!;
@@ -415,7 +418,9 @@ public class NetLifecycleTeardownTests : IDisposable
             Assert.True(initialized);
             Assert.Same(fallbackService, service);
             Assert.True(defaultService.InitializeCalled);
+            Assert.True(defaultService.ShutdownCalled);
             Assert.True(fallbackService.InitializeCalled);
+            Assert.False(fallbackService.ShutdownCalled);
         }
         finally
         {
@@ -439,7 +444,9 @@ public class NetLifecycleTeardownTests : IDisposable
             Assert.False(initialized);
             Assert.Null(service);
             Assert.True(defaultService.InitializeCalled);
+            Assert.True(defaultService.ShutdownCalled);
             Assert.True(fallbackService.InitializeCalled);
+            Assert.True(fallbackService.ShutdownCalled);
         }
         finally
         {
@@ -447,7 +454,7 @@ public class NetLifecycleTeardownTests : IDisposable
         }
     }
 
-    [Fact]
+    [UnityRuntimeFact]
     public void CleanupDuplicatePollers_DestroysWholeGameObject_WhenDuplicateOnlyHasTransformAndPoller()
     {
         var canonicalObject = new GameObject("canonical-poller");
@@ -470,7 +477,7 @@ public class NetLifecycleTeardownTests : IDisposable
         }
     }
 
-    [Fact]
+    [UnityRuntimeFact]
     public void CleanupDuplicatePollers_DestroysOnlyPollerComponent_WhenDuplicateHasOtherComponents()
     {
         var canonicalObject = new GameObject("canonical-poller");
@@ -494,7 +501,7 @@ public class NetLifecycleTeardownTests : IDisposable
         }
     }
 
-    [Fact]
+    [UnityRuntimeFact]
     public void DestroyPollerDuringStartup_UsesDestroy_WhenApplicationIsPlaying()
     {
         var pollerObject = new GameObject("startup-destroy-play");
@@ -523,7 +530,7 @@ public class NetLifecycleTeardownTests : IDisposable
         }
     }
 
-    [Fact]
+    [UnityRuntimeFact]
     public void DestroyPollerDuringStartup_UsesDestroyImmediate_WhenApplicationIsNotPlaying()
     {
         var pollerObject = new GameObject("startup-destroy-editor");
@@ -668,6 +675,29 @@ public class NetLifecycleTeardownTests : IDisposable
             Assert.Equal(1, previous.ShutdownCallCount);
             Assert.Equal(1, next.RegisterLobbyDataKeyCalls);
             Assert.Same(next, GetService());
+        }
+        finally
+        {
+            SetService(null);
+        }
+    }
+
+    [Fact]
+    public void ReplaceService_KeepsPreviousService_WhenRuntimeStateMigrationFails()
+    {
+        var previous = new TransferSourceService { ThrowOnCopy = true };
+        var next = new CapturingService();
+        SetService(previous);
+
+        try
+        {
+            InvokeReplaceService(previous, next, "test migration failure");
+
+            Assert.True(previous.CopyCalled);
+            Assert.Equal(0, previous.ShutdownCallCount);
+            Assert.Equal(1, next.ShutdownCallCount);
+            Assert.Equal(0, next.RegisterLobbyDataKeyCalls);
+            Assert.Same(previous, GetService());
         }
         finally
         {

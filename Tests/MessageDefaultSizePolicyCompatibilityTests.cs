@@ -7,6 +7,7 @@ using Xunit;
 
 namespace NetworkingLibrary.Tests;
 
+#pragma warning disable CS0618
 public class MessageDefaultSizePolicyCompatibilityTests
 {
     [Fact]
@@ -57,13 +58,19 @@ public class MessageDefaultSizePolicyCompatibilityTests
     {
         var low = 2048;
         var high = 8192;
-        var oversizedForLow = new byte[(low * 16) + 1];
         var errors = new ConcurrentQueue<Exception>();
         var until = DateTime.UtcNow + TimeSpan.FromMilliseconds(800);
 
         Message.SetMaxSize(high);
         try
         {
+            byte[] oversizedForLow;
+            using (var message = new Message(7u, "size", 0, new MessageSizePolicy(high)))
+            {
+                message.WriteBytes(new byte[(low * 16) + 1]);
+                oversizedForLow = message.ToArray();
+            }
+
             var writer = Task.Run(() =>
             {
                 try
@@ -90,9 +97,8 @@ public class MessageDefaultSizePolicyCompatibilityTests
                 {
                     while (DateTime.UtcNow < until)
                     {
-                        var maxSize = Message.GetMaxSize();
-                        var maxLogicalSize = Message.MaxLogicalSize;
-                        Assert.Equal(maxSize * 16, maxLogicalSize);
+                        var defaultPolicy = Message.DefaultSizePolicy;
+                        Assert.Equal(defaultPolicy.MaxSize * 16, defaultPolicy.MaxLogicalSize);
 
                         using var write = new Message(7u, "size", 0);
                         Assert.Equal(write.SizePolicy.MaxSize * 16, write.SizePolicy.MaxLogicalSize);
@@ -102,10 +108,7 @@ public class MessageDefaultSizePolicyCompatibilityTests
                             using var read = new Message(oversizedForLow);
                             Assert.True(read.SizePolicy.MaxLogicalSize >= oversizedForLow.Length);
                         }
-                        catch (InvalidDataException)
-                        {
-                            // Low-policy reads are expected to reject this payload.
-                        }
+                        catch (InvalidDataException) { }
                     }
                 }
                 catch (Exception ex)
@@ -123,3 +126,4 @@ public class MessageDefaultSizePolicyCompatibilityTests
         }
     }
 }
+#pragma warning restore CS0618

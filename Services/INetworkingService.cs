@@ -9,11 +9,6 @@ namespace NetworkingLibrary.Services
     {
         bool IsInitialized { get; }
         bool InLobby { get; }
-        /// <summary>
-        /// Host peer Steam64 identity for RPC routing in the current lobby.
-        /// Steam implementation returns the current lobby owner Steam64.
-        /// Offline implementation returns the local Steam64 in single-process simulation.
-        /// </summary>
         ulong HostSteamId64 { get; }
         string HostIdString { get; }
         bool IsHost { get; }
@@ -23,9 +18,6 @@ namespace NetworkingLibrary.Services
         void Shutdown();
 
         void CreateLobby(int maxPlayers = 8);
-        /// <summary>
-        /// Join a lobby by lobby identity (Steam lobby id in Steam implementation).
-        /// </summary>
         void JoinLobby(ulong lobbySteamId64);
         void LeaveLobby();
         void InviteToLobby(ulong steamId64);
@@ -55,13 +47,7 @@ namespace NetworkingLibrary.Services
 
         void PollReceive();
 
-        /// <summary>
-        /// Registers a per-mod message signer used to authenticate outbound payload bytes.
-        /// </summary>
         void RegisterModSigner(uint modId, Func<byte[], byte[]> signerDelegate);
-        /// <summary>
-        /// Registers a per-mod public key used to verify signed inbound payload bytes.
-        /// </summary>
         void RegisterModPublicKey(uint modId, System.Security.Cryptography.RSAParameters pub);
 
         event Action? LobbyCreated;
@@ -72,9 +58,6 @@ namespace NetworkingLibrary.Services
         event Action<string[]>? LobbyDataChanged;
         event Action<ulong, string[]>? PlayerDataChanged;
 
-        /// <summary>
-        /// Optional inbound gate run before dispatch; return <c>false</c> to drop the message.
-        /// </summary>
         Func<Message, ulong, bool>? IncomingValidator { get; set; }
     }
 }

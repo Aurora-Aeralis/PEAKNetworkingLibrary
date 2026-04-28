@@ -4,6 +4,7 @@ using BepInEx.Logging;
 using HarmonyLib;
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using System.Linq;
 
@@ -18,12 +19,11 @@ namespace NetworkingLibrary
     {
         public static Net Instance { get; private set; } = null!;
         internal new static ManualLogSource Logger { get; private set; } = null!;
-        internal static Harmony? Harmony = new Harmony(MyPluginInfo.PLUGIN_GUID);
+        internal static Harmony? Harmony;
 
         public ConfigFile config = null!;
         public static INetworkingService? Service { get; private set; } 
 
-        internal static Func<INetworkingService> CreateDefaultNetworkingService = NetworkingServiceFactory.CreateDefaultService;
         internal static Func<(INetworkingService service, DefaultServiceSelectionReason reason)> CreateDefaultNetworkingServiceWithReason = () =>
         {
             var service = NetworkingServiceFactory.CreateDefaultServiceWithReason(out var reason);
@@ -31,10 +31,10 @@ namespace NetworkingLibrary
         };
         internal static Func<INetworkingService> CreateOfflineNetworkingService = () => new OfflineNetworkingService();
         internal static Func<bool> IsApplicationPlaying = () => Application.isPlaying;
-        internal static Action<UnityEngine.Object> DestroyObject = UnityEngine.Object.Destroy;
+        internal new static Action<UnityEngine.Object> DestroyObject = UnityEngine.Object.Destroy;
         internal static Action<UnityEngine.Object> DestroyObjectImmediate = UnityEngine.Object.DestroyImmediate;
         internal static Func<float> RealtimeSinceStartupProvider = () => Time.realtimeSinceStartup;
-        internal static Func<float, YieldInstruction> WaitForSecondsRealtimeFactory = seconds => new WaitForSecondsRealtime(seconds);
+        internal static Func<float, object?> WaitForSecondsRealtimeFactory = seconds => new WaitForSecondsRealtime(seconds);
 
         const string StartupRetryLogSource = "Net.StartupRetry";
         const string StartupRetryTransitionLogKey = "Net.StartupRetry.Transition";
@@ -43,8 +43,6 @@ namespace NetworkingLibrary
         const float StartupRetryInitialDelaySeconds = 0.5f;
         const float StartupRetryMaxDelaySeconds = 3f;
         const float StartupRetryBackoffMultiplier = 1.8f;
-
-        Coroutine? startupRetryCoroutine;
 
         private void OnDestroy()
         {
@@ -104,12 +102,10 @@ namespace NetworkingLibrary
             Service = initializedService;
 
             if (serviceSelectionReason == DefaultServiceSelectionReason.SteamApiNotReady && Service is OfflineNetworkingService)
-            {
-                startupRetryCoroutine = StartCoroutine(RetrySteamInitializationForStartupWindow(StartupRetryWindowSeconds));
-            }
+                StartCoroutine(RetrySteamInitializationForStartupWindow(StartupRetryWindowSeconds));
 
             var pollerName = $"{MyPluginInfo.PLUGIN_NAME}.Poller";
-            var pollers = FindObjectsOfType<NetworkingPoller>(true)
+            var pollers = UnityEngine.Object.FindObjectsByType<NetworkingPoller>(FindObjectsInactive.Include, FindObjectsSortMode.None)
                 .OrderByDescending(poller => poller.isActiveAndEnabled)
                 .ThenByDescending(poller => poller.gameObject.activeInHierarchy)
                 .ThenBy(poller => poller.GetInstanceID())
@@ -231,6 +227,8 @@ namespace NetworkingLibrary
             }
             catch (Exception exception)
             {
+                SafeShutdown(service, "failed default networking service initialization");
+                service = null;
                 logger?.LogError($"Failed to initialize default networking service. Attempting OfflineNetworkingService fallback. Exception: {exception}");
             }
 
@@ -256,6 +254,7 @@ namespace NetworkingLibrary
             }
             catch (Exception exception)
             {
+                SafeShutdown(service, "failed fallback OfflineNetworkingService initialization");
                 logger?.LogError($"FATAL: Failed to initialize fallback OfflineNetworkingService. Networking service disabled. Exception: {exception}");
                 service = null;
                 return false;
@@ -352,6 +351,8 @@ namespace NetworkingLibrary
             catch (Exception ex)
             {
                 Logger?.LogWarning($"Failed to migrate networking runtime state before service replacement: {ex.Message}");
+                SafeShutdown(nextService, "startup retry failed replacement candidate");
+                return;
             }
             SafeShutdown(previousService, "startup retry previous service");
             Service = nextService;
@@ -378,7 +379,6 @@ namespace NetworkingLibrary
 
         internal static void ResetNetworkingStartupHooks()
         {
-            CreateDefaultNetworkingService = NetworkingServiceFactory.CreateDefaultService;
             CreateDefaultNetworkingServiceWithReason = () =>
             {
                 var service = NetworkingServiceFactory.CreateDefaultServiceWithReason(out var reason);

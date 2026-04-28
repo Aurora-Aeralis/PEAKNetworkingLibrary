@@ -3,6 +3,7 @@ using Steamworks;
 using System;
 using System.ComponentModel;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using Xunit;
 
 namespace NetworkingLibrary.Tests;
@@ -35,6 +36,14 @@ public class SteamNetworkingServiceSendFlagsTests
     static int InvokeResolveSendModeFlag(ReliableType reliableType)
     {
         var method = typeof(SteamNetworkingService).GetMethod("ResolveSendModeFlag", BindingFlags.NonPublic | BindingFlags.Static)!;
-        return (int)method.Invoke(null, new object[] { reliableType })!;
+        try
+        {
+            return (int)method.Invoke(null, new object[] { reliableType })!;
+        }
+        catch (TargetInvocationException ex) when (ex.InnerException != null)
+        {
+            ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+            throw;
+        }
     }
 }

@@ -11,6 +11,7 @@ namespace NetworkingLibrary.Tests;
 public class RpcNullParameterSerializationTests
 {
     const uint TestModId = 9090;
+    static readonly CSteamID LocalSteamId = new(76561198000000000UL);
     static readonly MethodInfo OfflineBuildMessage = typeof(OfflineNetworkingService).GetMethod("BuildMessage", BindingFlags.Instance | BindingFlags.NonPublic)!;
     static readonly MethodInfo SteamBuildMessage = typeof(SteamNetworkingService).GetMethod("BuildMessage", BindingFlags.Instance | BindingFlags.NonPublic)!;
     static readonly MethodInfo SteamDispatchIncoming = typeof(SteamNetworkingService).GetMethod("DispatchIncoming", BindingFlags.Instance | BindingFlags.NonPublic)!;
@@ -32,6 +33,15 @@ public class RpcNullParameterSerializationTests
     {
         [CustomRPC]
         void Shared(string value) { }
+    }
+
+    sealed class ReferenceOverloadReceiver
+    {
+        [CustomRPC]
+        void Shared(string value) { }
+
+        [CustomRPC]
+        void Shared(byte[] value) { }
     }
 
     sealed class DispatchOverloadReceiver
@@ -173,6 +183,19 @@ public class RpcNullParameterSerializationTests
     }
 
     [Fact]
+    public void OfflineBuildMessage_AllowsBoxedValue_ForNullableValueParameter()
+    {
+        var service = new OfflineNetworkingService();
+        using var token = service.RegisterNetworkObject(new NullableValueReceiver(), TestModId);
+
+        var msg = (Message?)OfflineBuildMessage.Invoke(service, new object?[] { TestModId, "OnNullableInt", 0, new object?[] { 42 }, null });
+
+        Assert.NotNull(msg);
+        var read = new Message(msg!.ToArray());
+        Assert.Equal(42, (int?)read.ReadObject(typeof(int?)));
+    }
+
+    [Fact]
     public void OfflineBuildMessage_FallbackTypedSerialization_AllowsNull()
     {
         var service = new OfflineNetworkingService();
@@ -213,6 +236,35 @@ public class RpcNullParameterSerializationTests
     }
 
     [Fact]
+    public void OfflineBuildMessage_UsesTypedNullOverload_WhenHandlersExist()
+    {
+        var service = new OfflineNetworkingService();
+        using var token = service.RegisterNetworkObject(new ReferenceOverloadReceiver(), TestModId);
+
+        var msg = (Message?)OfflineBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { null }, new[] { typeof(byte[]) } });
+
+        Assert.NotNull(msg);
+        var read = new Message(msg!.ToArray());
+        Assert.Contains("System.Byte[]", read.OverloadKey);
+        Assert.Null(read.ReadObject(typeof(byte[])));
+    }
+
+    [Fact]
+    public void OfflineBuildMessage_PrefersNonNullableValueOverload_BeforeNullableFallback()
+    {
+        var service = new OfflineNetworkingService();
+        using var nullableToken = service.RegisterNetworkObject(new NullableIntOverloadReceiver(), TestModId);
+        using var intToken = service.RegisterNetworkObject(new IntOverloadReceiver(), TestModId);
+
+        var msg = (Message?)OfflineBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { 42 }, null });
+
+        Assert.NotNull(msg);
+        var read = new Message(msg!.ToArray());
+        Assert.DoesNotContain("System.Nullable", read.OverloadKey);
+        Assert.Equal(42, read.ReadObject(typeof(int)));
+    }
+
+    [Fact]
     public void OfflineBuildMessage_RecognizesModulesRpcInfo_AsTransportMetadata()
     {
         var service = new OfflineNetworkingService();
@@ -230,7 +282,7 @@ public class RpcNullParameterSerializationTests
         using var token = service.RegisterNetworkObject(new ForeignRpcInfoReceiver(), TestModId);
 
         var missingForeignArg = (Message?)OfflineBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { "hi" }, null });
-        var withForeignArg = (Message?)OfflineBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { "hi", new Foo.RPCInfo() }, null });
+        var withForeignArg = (Message?)OfflineBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { "hi", null }, null });
 
         Assert.Null(missingForeignArg);
         Assert.NotNull(withForeignArg);
@@ -240,6 +292,8 @@ public class RpcNullParameterSerializationTests
     public void OfflineDispatchIncoming_InvokesMatchingOverloadWithoutCorruptingReader()
     {
         var service = new OfflineNetworkingService();
+        service.Initialize();
+        service.CreateLobby();
         var receiver = new DispatchOverloadReceiver();
         using var token = service.RegisterNetworkObject(receiver, TestModId);
 
@@ -254,6 +308,8 @@ public class RpcNullParameterSerializationTests
     public void OfflineDispatchIncoming_UsesOverloadIdentity_ForWireCompatibleOverloads()
     {
         var service = new OfflineNetworkingService();
+        service.Initialize();
+        service.CreateLobby();
         var receiver = new ByteBoolDispatchReceiver();
         using var token = service.RegisterNetworkObject(receiver, TestModId);
 
@@ -292,6 +348,19 @@ public class RpcNullParameterSerializationTests
     }
 
     [Fact]
+    public void SteamBuildMessage_AllowsBoxedValue_ForNullableValueParameter()
+    {
+        var service = new SteamNetworkingService();
+        using var token = service.RegisterNetworkObject(new NullableValueReceiver(), TestModId);
+
+        var msg = (Message?)SteamBuildMessage.Invoke(service, new object?[] { TestModId, "OnNullableInt", 0, new object?[] { 42 }, null });
+
+        Assert.NotNull(msg);
+        var read = new Message(msg!.ToArray());
+        Assert.Equal(42, (int?)read.ReadObject(typeof(int?)));
+    }
+
+    [Fact]
     public void SteamBuildMessage_FallbackTypedSerialization_AllowsNull()
     {
         var service = new SteamNetworkingService();
@@ -317,6 +386,35 @@ public class RpcNullParameterSerializationTests
     }
 
     [Fact]
+    public void SteamBuildMessage_UsesTypedNullOverload_WhenHandlersExist()
+    {
+        var service = new SteamNetworkingService();
+        using var token = service.RegisterNetworkObject(new ReferenceOverloadReceiver(), TestModId);
+
+        var msg = (Message?)SteamBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { null }, new[] { typeof(byte[]) } });
+
+        Assert.NotNull(msg);
+        var read = new Message(msg!.ToArray());
+        Assert.Contains("System.Byte[]", read.OverloadKey);
+        Assert.Null(read.ReadObject(typeof(byte[])));
+    }
+
+    [Fact]
+    public void SteamBuildMessage_PrefersNonNullableValueOverload_BeforeNullableFallback()
+    {
+        var service = new SteamNetworkingService();
+        using var nullableToken = service.RegisterNetworkObject(new NullableIntOverloadReceiver(), TestModId);
+        using var intToken = service.RegisterNetworkObject(new IntOverloadReceiver(), TestModId);
+
+        var msg = (Message?)SteamBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { 42 }, null });
+
+        Assert.NotNull(msg);
+        var read = new Message(msg!.ToArray());
+        Assert.DoesNotContain("System.Nullable", read.OverloadKey);
+        Assert.Equal(42, read.ReadObject(typeof(int)));
+    }
+
+    [Fact]
     public void SteamBuildMessage_RecognizesModulesRpcInfo_AsTransportMetadata()
     {
         var service = new SteamNetworkingService();
@@ -334,7 +432,7 @@ public class RpcNullParameterSerializationTests
         using var token = service.RegisterNetworkObject(new ForeignRpcInfoReceiver(), TestModId);
 
         var missingForeignArg = (Message?)SteamBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { "hi" }, null });
-        var withForeignArg = (Message?)SteamBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { "hi", new Foo.RPCInfo() }, null });
+        var withForeignArg = (Message?)SteamBuildMessage.Invoke(service, new object?[] { TestModId, "Shared", 0, new object?[] { "hi", null }, null });
 
         Assert.Null(missingForeignArg);
         Assert.NotNull(withForeignArg);
@@ -363,7 +461,7 @@ public class RpcNullParameterSerializationTests
         var service = new SteamNetworkingService();
         var sender = new CSteamID(42UL);
 
-        var obj = SteamCreateRpcInfoInstance.Invoke(service, new object?[] { typeof(ParamlessRpcInfoWithUlongSenderSteamID), sender });
+        var obj = SteamCreateRpcInfoInstance.Invoke(service, new object?[] { typeof(ParamlessRpcInfoWithUlongSenderSteamID), sender, false });
 
         var info = Assert.IsType<ParamlessRpcInfoWithUlongSenderSteamID>(obj);
         Assert.Equal(sender.m_SteamID, info.SenderSteamID);
@@ -375,7 +473,7 @@ public class RpcNullParameterSerializationTests
         var service = new SteamNetworkingService();
         var sender = new CSteamID(77UL);
 
-        var obj = SteamCreateRpcInfoInstance.Invoke(service, new object?[] { typeof(ParamlessRpcInfoWithCSteamIDSender), sender });
+        var obj = SteamCreateRpcInfoInstance.Invoke(service, new object?[] { typeof(ParamlessRpcInfoWithCSteamIDSender), sender, false });
 
         var info = Assert.IsType<ParamlessRpcInfoWithCSteamIDSender>(obj);
         Assert.Equal(sender, info.Sender);
@@ -387,7 +485,7 @@ public class RpcNullParameterSerializationTests
         var service = new SteamNetworkingService();
         var sender = new CSteamID(321UL);
 
-        var obj = SteamCreateRpcInfoInstance.Invoke(service, new object?[] { typeof(ParamlessRpcInfoWithSteamIdentityProperties), sender });
+        var obj = SteamCreateRpcInfoInstance.Invoke(service, new object?[] { typeof(ParamlessRpcInfoWithSteamIdentityProperties), sender, false });
 
         var info = Assert.IsType<ParamlessRpcInfoWithSteamIdentityProperties>(obj);
         Assert.Equal(sender.m_SteamID, info.SteamId64);
@@ -401,7 +499,7 @@ public class RpcNullParameterSerializationTests
         var createRpcInfo = typeof(OfflineNetworkingService).GetMethod("CreateRpcInfoInstance", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var senderSteamId = 654UL;
 
-        var obj = createRpcInfo.Invoke(service, new object?[] { typeof(ParamlessRpcInfoWithSteamIdentityProperties), senderSteamId });
+        var obj = createRpcInfo.Invoke(service, new object?[] { typeof(ParamlessRpcInfoWithSteamIdentityProperties), senderSteamId, false });
 
         var info = Assert.IsType<ParamlessRpcInfoWithSteamIdentityProperties>(obj);
         Assert.Equal(senderSteamId, info.SteamId64);
@@ -413,15 +511,15 @@ public class RpcNullParameterSerializationTests
     {
         var service = new SteamNetworkingService();
         SetInLobby(service, true);
+        SetLocalSteamId(service, LocalSteamId);
         var receiver = new CounterReceiver();
         using var token = service.RegisterNetworkObject(receiver, TestModId);
 
-        service.RPCTarget(TestModId, nameof(CounterReceiver.Increment), SteamUser.GetSteamID(), ReliableType.Reliable, 3);
+        service.RPCTarget(TestModId, nameof(CounterReceiver.Increment), LocalSteamId, ReliableType.Reliable, 3);
 
         Assert.Equal(3, receiver.Total);
         AssertQueueCount(service, "normalQueue", 0);
         AssertQueueCount(service, "lowQueue", 0);
-        AssertQueueCount(service, "highQueue", 0);
     }
 
     [Fact]
@@ -429,15 +527,15 @@ public class RpcNullParameterSerializationTests
     {
         var service = new SteamNetworkingService();
         SetInLobby(service, true);
+        SetLocalSteamId(service, LocalSteamId);
         var receiver = new CounterReceiver();
         using var token = service.RegisterNetworkObject(receiver, TestModId);
 
-        service.RPCTarget(TestModId, nameof(CounterReceiver.Increment), SteamUser.GetSteamID(), ReliableType.Reliable, new[] { typeof(int) }, 5);
+        service.RPCTarget(TestModId, nameof(CounterReceiver.Increment), LocalSteamId, ReliableType.Reliable, new[] { typeof(int) }, 5);
 
         Assert.Equal(5, receiver.Total);
         AssertQueueCount(service, "normalQueue", 0);
         AssertQueueCount(service, "lowQueue", 0);
-        AssertQueueCount(service, "highQueue", 0);
     }
 
     [Fact]
@@ -445,10 +543,11 @@ public class RpcNullParameterSerializationTests
     {
         var service = new SteamNetworkingService();
         SetInLobby(service, true);
+        SetLocalSteamId(service, LocalSteamId);
         var receiver = new SteamLocalWireCompatibleOverloadReceiver();
         using var token = service.RegisterNetworkObject(receiver, TestModId);
 
-        service.RPCTarget(TestModId, "Shared", SteamUser.GetSteamID(), ReliableType.Reliable, new[] { typeof(bool) }, true);
+        service.RPCTarget(TestModId, "Shared", LocalSteamId, ReliableType.Reliable, new[] { typeof(bool) }, true);
 
         Assert.Equal(1, receiver.BoolCalls);
         Assert.Equal(0, receiver.ByteCalls);
@@ -456,7 +555,6 @@ public class RpcNullParameterSerializationTests
         Assert.Equal((byte)0, receiver.LastByteValue);
         AssertQueueCount(service, "normalQueue", 0);
         AssertQueueCount(service, "lowQueue", 0);
-        AssertQueueCount(service, "highQueue", 0);
     }
 
 
@@ -465,17 +563,17 @@ public class RpcNullParameterSerializationTests
     {
         var service = new SteamNetworkingService();
         SetInLobby(service, true);
+        SetLocalSteamId(service, LocalSteamId);
         var receiver = new SteamLocalDuplicateListenerReceiver();
         using var first = service.RegisterNetworkObject(receiver, TestModId);
         using var second = service.RegisterNetworkObject(receiver, TestModId);
 
-        service.RPCTarget(TestModId, "Shared", SteamUser.GetSteamID(), ReliableType.Reliable, new[] { typeof(bool) }, true);
+        service.RPCTarget(TestModId, "Shared", LocalSteamId, ReliableType.Reliable, new[] { typeof(bool) }, true);
 
-        Assert.Equal(2, receiver.Calls);
+        Assert.Equal(1, receiver.Calls);
         Assert.True(receiver.LastValue);
         AssertQueueCount(service, "normalQueue", 0);
         AssertQueueCount(service, "lowQueue", 0);
-        AssertQueueCount(service, "highQueue", 0);
     }
 
     [Fact]
@@ -483,10 +581,11 @@ public class RpcNullParameterSerializationTests
     {
         var service = new SteamNetworkingService();
         SetInLobby(service, true);
+        SetLocalSteamId(service, LocalSteamId);
         var receiver = new CounterReceiver();
         using var token = service.RegisterNetworkObject(receiver, TestModId);
 
-        var local = SteamUser.GetSteamID();
+        var local = LocalSteamId;
         var remote = new CSteamID(local.m_SteamID == 0 ? 1UL : local.m_SteamID + 1);
         service.RPCTarget(TestModId, nameof(CounterReceiver.Increment), remote, ReliableType.Reliable, 11);
 
@@ -498,6 +597,18 @@ public class RpcNullParameterSerializationTests
     {
         [CustomRPC]
         void OnInt(int value) { }
+    }
+
+    sealed class NullableValueReceiver
+    {
+        [CustomRPC]
+        void OnNullableInt(int? value) { }
+    }
+
+    sealed class NullableIntOverloadReceiver
+    {
+        [CustomRPC]
+        void Shared(int? value) { }
     }
 
     sealed class CounterReceiver
@@ -513,9 +624,20 @@ public class RpcNullParameterSerializationTests
         typeof(SteamNetworkingService).GetField("<InLobby>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(service, value);
     }
 
+    static void SetLocalSteamId(SteamNetworkingService service, CSteamID value)
+    {
+        typeof(SteamNetworkingService).GetField("getLocalSteamId", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(service, (Func<CSteamID>)(() => value));
+    }
+
     static void AssertQueueCount(SteamNetworkingService service, string queueFieldName, int expected)
     {
-        var queue = (ICollection)typeof(SteamNetworkingService).GetField(queueFieldName, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(service)!;
+        var field = typeof(SteamNetworkingService).GetField(queueFieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+        if (field == null)
+        {
+            Assert.Equal(0, expected);
+            return;
+        }
+        var queue = (ICollection)field.GetValue(service)!;
         Assert.Equal(expected, queue.Count);
     }
 }

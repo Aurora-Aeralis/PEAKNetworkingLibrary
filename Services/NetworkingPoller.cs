@@ -6,13 +6,16 @@ namespace NetworkingLibrary.Services
 {
     public class NetworkingPoller : MonoBehaviour
     {
+        const string LogSource = "NetworkingPoller";
         const float ErrorLogCooldownSeconds = 2f;
+        internal static Func<float> TimeProvider = () => Time.unscaledTime;
+        internal static Func<double> FallbackTimeProvider = () => DateTime.UtcNow.Subtract(DateTime.UnixEpoch).TotalSeconds;
 
-        float mainThreadDispatcherLastErrorLogTime = float.NegativeInfinity;
+        double mainThreadDispatcherLastErrorLogTime = double.NegativeInfinity;
         bool mainThreadDispatcherHadFault;
         bool mainThreadDispatcherSuppressedFault;
         int mainThreadDispatcherSuppressedExceptionCount;
-        float pollReceiveLastErrorLogTime = float.NegativeInfinity;
+        double pollReceiveLastErrorLogTime = double.NegativeInfinity;
         bool pollReceiveHadFault;
         bool pollReceiveSuppressedFault;
         int pollReceiveSuppressedExceptionCount;
@@ -39,7 +42,7 @@ namespace NetworkingLibrary.Services
         static void PollGuarded(
             Action action,
             string name,
-            ref float lastErrorLogTime,
+            ref double lastErrorLogTime,
             ref bool hadFault,
             ref bool suppressedFault,
             ref int suppressedExceptionCount)
@@ -54,11 +57,11 @@ namespace NetworkingLibrary.Services
                 succeeded = false;
                 hadFault = true;
 
-                var currentTime = Time.unscaledTime;
-                if (currentTime - lastErrorLogTime >= ErrorLogCooldownSeconds)
+                var currentTime = ResolveTime();
+                if (currentTime < lastErrorLogTime || currentTime - lastErrorLogTime >= ErrorLogCooldownSeconds)
                 {
                     lastErrorLogTime = currentTime;
-                    Net.Logger?.LogError($"{name} error: {ex}");
+                    NetLog.Error(LogSource, $"{name} error: {ex}");
                     suppressedFault = false;
                     suppressedExceptionCount = 0;
                 }
@@ -70,12 +73,30 @@ namespace NetworkingLibrary.Services
             }
 
             if (!succeeded || !hadFault) return;
-            Net.Logger?.LogInfo(suppressedFault
+            NetLog.Info(LogSource, suppressedFault
                 ? $"{name} recovered after repeated failures. Suppressed {suppressedExceptionCount} errors since last emitted error."
                 : $"{name} recovered. Suppressed {suppressedExceptionCount} errors since last emitted error.");
             hadFault = false;
             suppressedFault = false;
             suppressedExceptionCount = 0;
+        }
+
+        static double ResolveTime()
+        {
+            try
+            {
+                var time = TimeProvider();
+                if (!float.IsNaN(time) && !float.IsInfinity(time)) return time;
+            }
+            catch { }
+
+            try
+            {
+                var time = FallbackTimeProvider();
+                if (!double.IsNaN(time) && !double.IsInfinity(time)) return time;
+            }
+            catch { }
+            return DateTime.UtcNow.Subtract(DateTime.UnixEpoch).TotalSeconds;
         }
 
         void Awake()

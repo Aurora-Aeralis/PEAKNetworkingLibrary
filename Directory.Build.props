@@ -9,9 +9,8 @@
   />
 
   <PropertyGroup>
-    <Authors>DAaCollective</Authors>
-    <PackageTags>PEAK;$(PackageTags)</PackageTags>
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Authors>AeralisFoundation</Authors>
+    <PackageTags Condition="'$(PackageTags)' == ''">PEAK</PackageTags>
   </PropertyGroup>
   <PropertyGroup Condition="$([System.String]::Copy('$(MSBuildProjectName)').EndsWith('.Tests'))">
     <IsPackable>false</IsPackable>
@@ -22,6 +21,7 @@
     <Nullable>enable</Nullable>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <UseArtifactsOutput>true</UseArtifactsOutput>
+    <DefaultItemExcludes>$(DefaultItemExcludes);$(SolutionRoot)artifacts\**;$(SolutionRoot)**\artifacts\**;artifacts\**;artifacts/**;**\artifacts\**;**/artifacts/**</DefaultItemExcludes>
     <DebugSymbols>true</DebugSymbols>
     <DebugType>embedded</DebugType>
   </PropertyGroup>
@@ -32,8 +32,8 @@
   <PropertyGroup>
     <PathBeforeSteam Condition="'$([MSBuild]::IsOSUnixLike())' == 'true'">$(HOME)/.local/share/</PathBeforeSteam>
     <PathBeforeSteam Condition="'$([MSBuild]::IsOSUnixLike())' != 'true'">$(MSBuildProgramFiles32)/</PathBeforeSteam>
-    <PeakGameRootDir Condition="$(PeakGameRootDir) == ''">$(PathBeforeSteam)Steam/steamapps/common/PEAK/</PeakGameRootDir>
-    <PeakPluginsDir Condition="$(PeakPluginsDir) == ''">$(PeakGameRootDir)/BepInEx/plugins/</PeakPluginsDir>
+    <PeakGameRootDir Condition="'$(PeakGameRootDir)' == ''">$(PathBeforeSteam)Steam/steamapps/common/PEAK/</PeakGameRootDir>
+    <PeakPluginsDir Condition="'$(PeakPluginsDir)' == ''">$(PeakGameRootDir)/BepInEx/plugins/</PeakPluginsDir>
     <ManagedDir>$(PeakGameRootDir)/PEAK_Data/Managed/</ManagedDir>
   </PropertyGroup>
 

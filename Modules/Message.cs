@@ -47,15 +47,8 @@ namespace NetworkingLibrary.Modules
         public const int MinMaxSize = 1024;
         public const int MaxMaxSize = int.MaxValue / 16;
         private static readonly object DefaultSizePolicyLock = new();
-        /// <summary>
-        /// Legacy max-size field kept for binary compatibility.
-        /// Read effective limits through <see cref="GetMaxSize"/> or <see cref="MaxLogicalSize"/>.
-        /// </summary>
         [Obsolete("Use SetMaxSize(int bytes) so validation and size policy rebuild happen under lock. This field remains for binary compatibility.", false)]
         public static int MaxSize = DefaultMaxSize;
-        /// <summary>
-        /// Logical payload cap from the synchronized default policy.
-        /// </summary>
         public static int MaxLogicalSize => ResolveDefaultSizePolicy().MaxLogicalSize;
         private static MessageSizePolicy defaultSizePolicy = new(DefaultMaxSize);
         public static MessageSizePolicy DefaultSizePolicy
@@ -64,11 +57,9 @@ namespace NetworkingLibrary.Modules
             private set => Volatile.Write(ref defaultSizePolicy, value);
         }
 
-        /// <summary>
-        /// Returns the synchronized default max payload size.
-        /// </summary>
         public static int GetMaxSize() => ResolveDefaultSizePolicy().MaxSize;
 
+#pragma warning disable CS0618
         public static void SetMaxSize(int bytes)
         {
             ValidateMaxSize(bytes);
@@ -103,6 +94,7 @@ namespace NetworkingLibrary.Modules
                 return current;
             }
         }
+#pragma warning restore CS0618
 
         public static void ValidateMaxSize(int bytes)
         {
@@ -284,6 +276,20 @@ namespace NetworkingLibrary.Modules
             AppendSpan(tmp);
         }
 
+        private void WriteInt16LE(short value)
+        {
+            Span<byte> tmp = stackalloc byte[2];
+            BinaryPrimitives.WriteInt16LittleEndian(tmp, value);
+            AppendSpan(tmp);
+        }
+
+        private void WriteUInt16LE(ushort value)
+        {
+            Span<byte> tmp = stackalloc byte[2];
+            BinaryPrimitives.WriteUInt16LittleEndian(tmp, value);
+            AppendSpan(tmp);
+        }
+
         private void WriteInt64LE(long value)
         {
             Span<byte> tmp = stackalloc byte[8];
@@ -302,11 +308,14 @@ namespace NetworkingLibrary.Modules
 
         private static int ReadInt32LE(byte[] bytes, int offset) => BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset, 4));
         private static uint ReadUInt32LE(byte[] bytes, int offset) => BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(offset, 4));
+        private static short ReadInt16LE(byte[] bytes, int offset) => BinaryPrimitives.ReadInt16LittleEndian(bytes.AsSpan(offset, 2));
+        private static ushort ReadUInt16LE(byte[] bytes, int offset) => BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(offset, 2));
         private static long ReadInt64LE(byte[] bytes, int offset) => BinaryPrimitives.ReadInt64LittleEndian(bytes.AsSpan(offset, 8));
         private static ulong ReadUInt64LE(byte[] bytes, int offset) => BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan(offset, 8));
         private static float ReadSingleLE(byte[] bytes, int offset) => BitConverter.Int32BitsToSingle(ReadInt32LE(bytes, offset));
 
         public Message WriteByte(byte v) { ThrowIfDisposed(); EnsureCanAppend(1, nameof(WriteByte)); buffer.Add(v); readableBufferDirty = true; return this; }
+        public Message WriteSByte(sbyte v) => WriteByte((byte)v);
         public Message WriteBytes(byte[] v)
         {
             ThrowIfDisposed();
@@ -318,6 +327,8 @@ namespace NetworkingLibrary.Modules
             readableBufferDirty = true;
             return this;
         }
+        public Message WriteShort(short v) { ThrowIfDisposed(); WriteInt16LE(v); return this; }
+        public Message WriteUShort(ushort v) { ThrowIfDisposed(); WriteUInt16LE(v); return this; }
         public Message WriteInt(int v) { ThrowIfDisposed(); WriteInt32LE(v); return this; }
         public Message WriteUInt(uint v) { ThrowIfDisposed(); WriteUInt32LE(v); return this; }
         public Message WriteLong(long v) { ThrowIfDisposed(); WriteInt64LE(v); return this; }
@@ -353,11 +364,23 @@ namespace NetworkingLibrary.Modules
                 return;
             }
 
-            if (!type.IsValueType && UsesReferencePresenceFlags)
+            var listElemType = TryGetGenericListElementType(type);
+            if (value != null)
             {
-                bool has = value != null;
-                WriteBool(has);
-                if (!has) return;
+                if (type.IsArray && value is not Array)
+                    throw new ArgumentException($"Cannot serialize value of type {value.GetType().FullName} as array type {type.FullName}.", nameof(value));
+                if (listElemType != null && value is not IEnumerable)
+                    throw new ArgumentException($"Cannot serialize value of type {value.GetType().FullName} as list type {type.FullName}.", nameof(value));
+            }
+
+            var writesReferencePresence = !type.IsValueType && UsesReferencePresenceFlags;
+            if (writesReferencePresence)
+            {
+                if (value == null)
+                {
+                    WriteBool(false);
+                    return;
+                }
             }
             else if (value == null)
             {
@@ -366,6 +389,7 @@ namespace NetworkingLibrary.Modules
 
             if (writeCasters.TryGetValue(type, out var w))
             {
+                if (writesReferencePresence) WriteBool(true);
                 w(this, value!);
                 return;
             }
@@ -379,13 +403,31 @@ namespace NetworkingLibrary.Modules
 
             if (type.IsArray)
             {
+                if (writesReferencePresence) WriteBool(true);
                 var elemType = type.GetElementType()!;
-                var arr = value as Array ?? Array.CreateInstance(elemType, 0);
+                var arr = (Array)value!;
                 WriteInt(arr.Length);
                 for (int i = 0; i < arr.Length; i++)
                 {
                     WriteObject(elemType, arr.GetValue(i)!);
                 }
+                return;
+            }
+
+            if (listElemType != null && value is IEnumerable enumerable)
+            {
+                if (writesReferencePresence) WriteBool(true);
+                if (value is ICollection collection)
+                {
+                    WriteInt(collection.Count);
+                    foreach (var item in collection) WriteObject(listElemType, item!);
+                    return;
+                }
+
+                var items = new List<object?>();
+                foreach (var item in enumerable) items.Add(item);
+                WriteInt(items.Count);
+                for (int i = 0; i < items.Count; i++) WriteObject(listElemType, items[i]!);
                 return;
             }
 
@@ -397,17 +439,16 @@ namespace NetworkingLibrary.Modules
                     var args = type.GetGenericArguments();
                     if (args.Length == 1) elemType = args[0];
                 }
+                if (elemType == null)
+                    throw new NotSupportedException("Cannot serialize non-generic IList (heterogeneous lists) without explicit serializer registration.");
+                if (value is not IList list)
+                    throw new ArgumentException($"Cannot serialize value of type {value!.GetType().FullName} as list type {type.FullName}.", nameof(value));
 
-                var list = (IList)value!;
-                if (elemType != null)
-                {
-                    WriteInt(list.Count);
-                    for (int i = 0; i < list.Count; i++)
-                        WriteObject(elemType, list[i]!);
-                    return;
-                }
-
-                throw new NotSupportedException("Cannot serialize non-generic IList (heterogeneous lists) without explicit serializer registration.");
+                if (writesReferencePresence) WriteBool(true);
+                WriteInt(list.Count);
+                for (int i = 0; i < list.Count; i++)
+                    WriteObject(elemType, list[i]!);
+                return;
             }
 
             throw new NotSupportedException($"Unsupported type for WriteObject: {type.FullName}. Register a serializer using Message.RegisterSerializer. Null handling: reference-like types (including arrays/lists/string/byte[]) are encoded with a leading presence flag and may be null; non-null values for unsupported reference types still require registration.");
@@ -445,7 +486,10 @@ namespace NetworkingLibrary.Modules
         private static void RegisterBuiltInSerializers()
         {
             writeCasters[typeof(byte)] = (m, o) => m.WriteByte((byte)o);
+            writeCasters[typeof(sbyte)] = (m, o) => m.WriteSByte((sbyte)o);
             writeCasters[typeof(byte[])] = (m, o) => m.WriteBytes((byte[])o);
+            writeCasters[typeof(short)] = (m, o) => m.WriteShort((short)o);
+            writeCasters[typeof(ushort)] = (m, o) => m.WriteUShort((ushort)o);
             writeCasters[typeof(int)] = (m, o) => m.WriteInt((int)o);
             writeCasters[typeof(uint)] = (m, o) => m.WriteUInt((uint)o);
             writeCasters[typeof(long)] = (m, o) => m.WriteLong((long)o);
@@ -469,15 +513,19 @@ namespace NetworkingLibrary.Modules
             };
 
             readCasters[typeof(byte)] = (m) => m.ReadByte();
+            readCasters[typeof(sbyte)] = (m) => m.ReadSByte();
             readCasters[typeof(byte[])] = (m) => {
-                int len = m.ReadCollectionLength(nameof(Byte[]));
+                var opName = typeof(byte[]).Name;
+                int len = m.ReadCollectionLength(opName);
                 if (len == 0) return Array.Empty<byte>();
-                m.EnsureReadable(len, nameof(Byte[]));
+                m.EnsureReadable(len, opName);
                 var arr = new byte[len];
                 m.readableBuffer.AsSpan(m.readPos, len).CopyTo(arr);
                 m.readPos += len;
                 return arr;
             };
+            readCasters[typeof(short)] = (m) => m.ReadShort();
+            readCasters[typeof(ushort)] = (m) => m.ReadUShort();
             readCasters[typeof(int)] = (m) => m.ReadInt();
             readCasters[typeof(uint)] = (m) => m.ReadUInt();
             readCasters[typeof(long)] = (m) => m.ReadLong();
@@ -490,15 +538,17 @@ namespace NetworkingLibrary.Modules
             readCasters[typeof(CSteamID)] = (m) => new CSteamID(m.ReadULong());
 
             readCasters[typeof(int[])] = (m) => {
-                int len = m.ReadCollectionLength(nameof(Int32[]));
+                int len = m.ReadCollectionLength(typeof(int[]).Name);
                 if (len == 0) return Array.Empty<int>();
+                m.EnsureCollectionPayloadAvailable(typeof(int), len, typeof(int[]).Name);
                 var a = new int[len];
                 for (int i = 0; i < len; i++) a[i] = m.ReadInt();
                 return a;
             };
             readCasters[typeof(string[])] = (m) => {
-                int len = m.ReadCollectionLength(nameof(String[]));
+                int len = m.ReadCollectionLength(typeof(string[]).Name);
                 if (len == 0) return Array.Empty<string>();
+                m.EnsureCollectionPayloadAvailable(sizeof(int), len, typeof(string[]).Name);
                 var a = new string[len];
                 for (int i = 0; i < len; i++) a[i] = m.ReadString();
                 return a;
@@ -507,7 +557,7 @@ namespace NetworkingLibrary.Modules
         private void EnsureReadable(int count, string opName)
         {
             EnsureReadableBuffer();
-            if (count < 0 || readPos < 0 || readPos + count > readableBuffer.Length)
+            if (count < 0 || readPos < 0 || readPos > readableBuffer.Length || count > readableBuffer.Length - readPos)
             {
                 throw new InvalidDataException($"{opName} out of range");
             }
@@ -532,6 +582,38 @@ namespace NetworkingLibrary.Modules
                 throw new InvalidDataException($"{opName} length exceeds max {sizePolicy.MaxLogicalSize}");
             }
             return len;
+        }
+
+        private void EnsureCollectionPayloadAvailable(Type elementType, int count, string opName)
+        {
+            EnsureCollectionPayloadAvailable(GetMinimumSerializedBytes(elementType), count, opName);
+        }
+
+        private void EnsureCollectionPayloadAvailable(int minimumBytesPerItem, int count, string opName)
+        {
+            if (count <= 0 || minimumBytesPerItem <= 0) return;
+            EnsureReadableBuffer();
+            var available = readableBuffer.Length - readPos;
+            if (count > available / minimumBytesPerItem)
+            {
+                throw new InvalidDataException($"{opName} length exceeds available payload");
+            }
+        }
+
+        private int GetMinimumSerializedBytes(Type type)
+        {
+            var nullable = Nullable.GetUnderlyingType(type);
+            if (nullable != null) return 1;
+            if (!type.IsValueType && UsesReferencePresenceFlags) return 1;
+            if (type.IsEnum) return GetMinimumSerializedBytes(Enum.GetUnderlyingType(type));
+            if (type == typeof(byte) || type == typeof(sbyte) || type == typeof(bool)) return 1;
+            if (type == typeof(short) || type == typeof(ushort)) return 2;
+            if (type == typeof(int) || type == typeof(uint) || type == typeof(float)) return 4;
+            if (type == typeof(long) || type == typeof(ulong) || type == typeof(CSteamID)) return 8;
+            if (type == typeof(Vector3)) return 12;
+            if (type == typeof(Quaternion)) return 16;
+            if (type == typeof(string) || type == typeof(byte[]) || type.IsArray || TryGetGenericListElementType(type) != null) return sizeof(int);
+            return 0;
         }
 
         private static bool IsConcreteConstructible(Type type)
@@ -610,10 +692,16 @@ namespace NetworkingLibrary.Modules
         private static void TraceListMaterializationFallback(Type targetType, Type elementType, string reason)
         {
             var message = $"List deserialization fallback to List<{elementType.Name}> for {targetType.FullName}: {reason}";
-            if (Debug.unityLogger != null)
+            try
             {
-                Debug.unityLogger.LogWarning(nameof(Message), message);
-                return;
+                if (Debug.unityLogger != null)
+                {
+                    Debug.unityLogger.LogWarning(nameof(Message), message);
+                    return;
+                }
+            }
+            catch (Exception)
+            {
             }
             System.Diagnostics.Trace.TraceWarning(message);
         }
@@ -624,6 +712,23 @@ namespace NetworkingLibrary.Modules
             EnsureReadable(1, nameof(ReadByte));
             byte v = readableBuffer[readPos];
             readPos++;
+            return v;
+        }
+        public sbyte ReadSByte() => (sbyte)ReadByte();
+        public short ReadShort()
+        {
+            ThrowIfDisposed();
+            EnsureReadable(2, nameof(ReadShort));
+            short v = ReadInt16LE(readableBuffer, readPos);
+            readPos += 2;
+            return v;
+        }
+        public ushort ReadUShort()
+        {
+            ThrowIfDisposed();
+            EnsureReadable(2, nameof(ReadUShort));
+            ushort v = ReadUInt16LE(readableBuffer, readPos);
+            readPos += 2;
             return v;
         }
         public int ReadInt()
@@ -727,6 +832,7 @@ namespace NetworkingLibrary.Modules
             {
                 var elemType = type.GetElementType()!;
                 int len = ReadCollectionLength(type.FullName ?? nameof(Array));
+                EnsureCollectionPayloadAvailable(elemType, len, type.FullName ?? nameof(Array));
                 var arr = Array.CreateInstance(elemType, len);
                 for (int i = 0; i < len; i++)
                 {
@@ -741,51 +847,53 @@ namespace NetworkingLibrary.Modules
                 var genDef = type.GetGenericTypeDefinition();
                 if (genDef == typeof(List<>) || genDef == typeof(IList<>))
                 {
-                    var elemType = type.GetGenericArguments()[0];
+                    var listElemType = type.GetGenericArguments()[0];
                     int len = ReadCollectionLength(type.FullName ?? "List");
-                    var listType = typeof(List<>).MakeGenericType(elemType);
+                    EnsureCollectionPayloadAvailable(listElemType, len, type.FullName ?? "List");
+                    var listType = typeof(List<>).MakeGenericType(listElemType);
                     var list = (IList)Activator.CreateInstance(listType)!;
                     for (int i = 0; i < len; i++)
                     {
-                        var item = ReadObject(elemType);
+                        var item = ReadObject(listElemType);
                         list.Add(item);
                     }
                     return list;
                 }
+            }
 
-                var elemType = TryGetGenericListElementType(type);
-                bool isListLike = typeof(IList).IsAssignableFrom(type) || ImplementsExactGenericIList(type);
-                if (elemType != null && isListLike)
+            var listLikeElemType = TryGetGenericListElementType(type);
+            bool isListLike = typeof(IList).IsAssignableFrom(type) || ImplementsExactGenericIList(type);
+            if (listLikeElemType != null && isListLike)
+            {
+                int len = ReadCollectionLength(type.FullName ?? "List");
+                EnsureCollectionPayloadAvailable(listLikeElemType, len, type.FullName ?? "List");
+                var tempListType = typeof(List<>).MakeGenericType(listLikeElemType);
+                var tempList = (IList)Activator.CreateInstance(tempListType)!;
+                for (int i = 0; i < len; i++)
                 {
-                    int len = ReadCollectionLength(type.FullName ?? "List");
-                    var tempListType = typeof(List<>).MakeGenericType(elemType);
-                    var tempList = (IList)Activator.CreateInstance(tempListType)!;
-                    for (int i = 0; i < len; i++)
-                    {
-                        tempList.Add(ReadObject(elemType));
-                    }
+                    tempList.Add(ReadObject(listLikeElemType));
+                }
 
-                    if (!IsConcreteConstructible(type))
+                if (!IsConcreteConstructible(type))
+                {
+                    TraceListMaterializationFallback(type, listLikeElemType, "target type is not concrete/constructible");
+                    return tempList;
+                }
+
+                try
+                {
+                    var target = Activator.CreateInstance(type)!;
+                    if (!TryCopyItemsToListTarget(target, listLikeElemType, tempList))
                     {
-                        TraceListMaterializationFallback(type, elemType, "target type is not concrete/constructible");
+                        TraceListMaterializationFallback(type, listLikeElemType, "target rejected copied items");
                         return tempList;
                     }
-
-                    try
-                    {
-                        var target = Activator.CreateInstance(type)!;
-                        if (!TryCopyItemsToListTarget(target, elemType, tempList))
-                        {
-                            TraceListMaterializationFallback(type, elemType, "target rejected copied items");
-                            return tempList;
-                        }
-                        return target;
-                    }
-                    catch (Exception ex) when (ex is MissingMethodException || ex is MemberAccessException || ex is TargetInvocationException || ex is ArgumentException || ex is InvalidOperationException)
-                    {
-                        TraceListMaterializationFallback(type, elemType, ex.GetType().Name);
-                        return tempList;
-                    }
+                    return target;
+                }
+                catch (Exception ex) when (ex is MissingMethodException || ex is MemberAccessException || ex is TargetInvocationException || ex is ArgumentException || ex is InvalidOperationException)
+                {
+                    TraceListMaterializationFallback(type, listLikeElemType, ex.GetType().Name);
+                    return tempList;
                 }
             }
 
@@ -818,9 +926,6 @@ namespace NetworkingLibrary.Modules
             return DecompressPayloadCore(compressed, maxOutputSize);
         }
 
-        /// <summary>
-        /// Decompresses GZip payload data with the default policy cap when no max is provided.
-        /// </summary>
         public static byte[] DecompressPayload(byte[] compressed, int maxOutputSize = -1)
         {
             if (maxOutputSize < 0) maxOutputSize = ResolveDefaultSizePolicy().MaxLogicalSize;

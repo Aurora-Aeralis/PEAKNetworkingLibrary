@@ -1,18 +1,19 @@
 <Project>
   <PropertyGroup>
     <RestoreAdditionalProjectSources>
-		https://api.nuget.org/v3/index.json;
-		https://nuget.bepinex.dev/v3/index.json;
-		https://nuget.windows10ce.com/nuget/v3/index.json
-	</RestoreAdditionalProjectSources>
+      $(RestoreAdditionalProjectSources);
+      https://api.nuget.org/v3/index.json;
+      https://nuget.bepinex.dev/v3/index.json;
+      https://nuget.windows10ce.com/nuget/v3/index.json
+    </RestoreAdditionalProjectSources>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="BepInEx.Core" Version="5.4.21" />
-    <PackageReference Include="BepInEx.Analyzers" Version="1.*" PrivateAssets="all" />
+    <PackageReference Include="BepInEx.Analyzers" Version="1.0.8" PrivateAssets="all" />
     <PackageReference Include="BepInEx.AssemblyPublicizer.MSBuild" Version="0.4.3" PrivateAssets="all" />
-    <PackageReference Include="PolySharp" Version="1.15.0" PrivateAssets="all" />
-	<PackageReference Include="BepInEx.PluginInfoProps" Version="2.*" PrivateAssets="all" />
+    <PackageReference Include="PolySharp" Version="1.15.0" PrivateAssets="all" Condition="!$([System.String]::Copy('$(MSBuildProjectName)').EndsWith('.Tests'))" />
+    <PackageReference Include="BepInEx.PluginInfoProps" Version="2.1.0" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup Condition="!Exists('$(ManagedDir)')">
@@ -20,13 +21,14 @@
   </ItemGroup>
 
   <ItemGroup Condition="Exists('$(ManagedDir)')">
-    <!-- Exclude framework/base assemblies from local game reference glob to avoid reference conflicts. -->
     <LocalReferences
       Include="$(ManagedDir)*.dll"
       Exclude="$(ManagedDir)Mono*.dll;$(ManagedDir)netstandard.dll;$(ManagedDir)System*.dll;$(ManagedDir)mscorlib.dll"
     />
-    <Reference Include="@(LocalReferences)" Private="false" />
-    <Reference Include="$(ManagedDir)Assembly-CSharp.dll" Private="false" Publicize="true" />
+    <Reference Include="@(LocalReferences)" Private="false" Condition="!$([System.String]::Copy('$(MSBuildProjectName)').EndsWith('.Tests'))" />
+    <Reference Include="@(LocalReferences)" Private="true" Condition="$([System.String]::Copy('$(MSBuildProjectName)').EndsWith('.Tests'))" />
+    <Reference Include="$(ManagedDir)Assembly-CSharp.dll" Private="false" Publicize="true" Condition="!$([System.String]::Copy('$(MSBuildProjectName)').EndsWith('.Tests'))" />
+    <Reference Include="$(ManagedDir)Assembly-CSharp.dll" Private="true" Publicize="true" Condition="$([System.String]::Copy('$(MSBuildProjectName)').EndsWith('.Tests'))" />
   </ItemGroup>
 
   <Target Name="PackTS" AfterTargets="Build" Condition="'$(Configuration)' == 'Release' And '$(IsPackable)' == 'true' And '$(ThunderstorePackable)' != 'false'">

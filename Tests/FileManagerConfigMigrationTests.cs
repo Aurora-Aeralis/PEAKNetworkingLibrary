@@ -6,6 +6,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -18,18 +19,36 @@ public class FileManagerConfigMigrationTests
     {
         using var scope = new TempConfigScope();
         var config = new ConfigFile(scope.ConfigPath, true);
+        using var loggerScope = new NetLoggerScope();
 
         FileManager.MigrateConfigIfNeeded(config, "1");
 
         var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
-        var pluginVersion = config.Bind("Version", "PluginVersion", string.Empty).Value;
         var configText = File.ReadAllText(scope.ConfigPath);
+        var pluginVersion = config.Bind("Version", "PluginVersion", string.Empty).Value;
 
         Assert.Equal("1", schemaVersion);
         Assert.DoesNotContain("Current Version =", configText, StringComparison.Ordinal);
         Assert.Contains("ConfigSchemaVersion = 1", configText, StringComparison.Ordinal);
         Assert.DoesNotContain("PluginVersion =", configText, StringComparison.Ordinal);
         Assert.True(string.IsNullOrWhiteSpace(pluginVersion));
+        Assert.Empty(loggerScope.Warnings);
+    }
+
+    [Fact]
+    public void MigrateConfigIfNeeded_NewConfigWithFutureSchema_DoesNotRequireHistoricalMigrationPath()
+    {
+        using var scope = new TempConfigScope();
+        var config = new ConfigFile(scope.ConfigPath, true);
+
+        FileManager.MigrateConfigIfNeeded(config, "2");
+
+        var schemaVersion = config.Bind("Version", "ConfigSchemaVersion", string.Empty).Value;
+        var configText = File.ReadAllText(scope.ConfigPath);
+
+        Assert.Equal("2", schemaVersion);
+        Assert.Contains("ConfigSchemaVersion = 2", configText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Current Version =", configText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -215,7 +234,7 @@ public class FileManagerConfigMigrationTests
     }
 
     [Fact]
-    public void MigrateConfigIfNeeded_TotalCleanupFailure_LogsSingleWarning()
+    public void MigrateConfigIfNeeded_FileMissingDuringCleanup_RecreatesAndClearsLegacyKey()
     {
         using var scope = new TempConfigScope();
         var seedConfig = new ConfigFile(scope.ConfigPath, true);
@@ -228,7 +247,9 @@ public class FileManagerConfigMigrationTests
         using var loggerScope = new NetLoggerScope();
         FileManager.MigrateConfigIfNeeded(config, "1");
 
-        Assert.Single(loggerScope.Warnings);
+        var configText = File.ReadAllText(scope.ConfigPath);
+        Assert.Empty(loggerScope.Warnings);
+        Assert.DoesNotContain("Current Version = 1", configText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -290,6 +311,33 @@ public class FileManagerConfigMigrationTests
 
         Assert.Equal("1", schemaVersion);
         Assert.True(IsLegacyVersionRemoved(configText));
+    }
+
+    [Fact]
+    public void ClearLegacyVersionInFile_RemovesAdjacentLegacyCommentBlock()
+    {
+        using var scope = new TempConfigScope();
+        File.WriteAllText(scope.ConfigPath,
+            "[Version]\n" +
+            "## Legacy version marker\n" +
+            "# Default value: 1\n" +
+            "\n" +
+            "Current Version = 1\n" +
+            "ConfigSchemaVersion = 1\n");
+
+        var config = new ConfigFile(scope.ConfigPath, false);
+        var args = new object?[] { config, null };
+        var cleaned = (bool)typeof(FileManager)
+            .GetMethod("ClearLegacyVersionInFile", BindingFlags.Static | BindingFlags.NonPublic)!
+            .Invoke(null, args)!;
+        var configText = File.ReadAllText(scope.ConfigPath);
+
+        Assert.True(cleaned);
+        Assert.Null(args[1]);
+        Assert.DoesNotContain("Legacy version marker", configText, StringComparison.Ordinal);
+        Assert.DoesNotContain("# Default value: 1", configText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Current Version = 1", configText, StringComparison.Ordinal);
+        Assert.Contains("ConfigSchemaVersion = 1", configText, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -362,10 +410,11 @@ public class FileManagerConfigMigrationTests
             "Current Version = 1\n");
 
         const int MigrationAttempts = 24;
-        Parallel.For(0, MigrationAttempts, _ =>
+        var configs = new ConfigFile[MigrationAttempts];
+        for (var i = 0; i < configs.Length; i++) configs[i] = new ConfigFile(scope.ConfigPath, true);
+        Parallel.For(0, MigrationAttempts, index =>
         {
-            var config = new ConfigFile(scope.ConfigPath, true);
-            FileManager.MigrateConfigIfNeeded(config, "1");
+            FileManager.MigrateConfigIfNeeded(configs[index], "1");
         });
 
         var finalConfig = new ConfigFile(scope.ConfigPath, true);
@@ -385,6 +434,37 @@ public class FileManagerConfigMigrationTests
         Assert.True(IsLegacyVersionRemoved(finalConfigText));
         Assert.Equal(baselineConfigText, repeatedConfigText);
         Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(scope.ConfigPath)!, "*.tmp"));
+    }
+
+    [Fact]
+    public async Task MigrateConfigIfNeeded_ConfigReadContention_RetriesAndCompletes()
+    {
+        using var scope = new TempConfigScope();
+        File.WriteAllText(scope.ConfigPath,
+            "[Version]\n" +
+            "Current Version = 1\n");
+
+        var config = new ConfigFile(scope.ConfigPath, false);
+        var lockedConfig = new FileStream(scope.ConfigPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        var releaseLock = Task.Run(() =>
+        {
+            Thread.Sleep(50);
+            lockedConfig.Dispose();
+        });
+
+        try
+        {
+            FileManager.MigrateConfigIfNeeded(config, "1");
+        }
+        finally
+        {
+            await releaseLock;
+            lockedConfig.Dispose();
+        }
+
+        var configText = File.ReadAllText(scope.ConfigPath);
+        Assert.Contains("ConfigSchemaVersion = 1", configText, StringComparison.Ordinal);
+        Assert.True(IsLegacyVersionRemoved(configText));
     }
 
     static bool IsLegacyVersionRemoved(string configText)
@@ -418,6 +498,8 @@ public class FileManagerConfigMigrationTests
 
     sealed class TrackingRemoveConfigFile : ConfigFile
     {
+        readonly IDictionary _orphanedEntries = new Hashtable();
+
         internal int RemoveCalls { get; private set; }
         internal int OrphanedEntriesAccesses { get; private set; }
 
@@ -429,12 +511,12 @@ public class FileManagerConfigMigrationTests
             return true;
         }
 
-        public new IDictionary OrphanedEntries
+        public IDictionary OrphanedEntries
         {
             get
             {
                 OrphanedEntriesAccesses++;
-                return base.OrphanedEntries;
+                return _orphanedEntries;
             }
         }
     }
@@ -458,7 +540,7 @@ public class FileManagerConfigMigrationTests
             throw new InvalidOperationException("Simulated Remove reflection failure.");
         }
 
-        public new IDictionary OrphanedEntries
+        public IDictionary OrphanedEntries
         {
             get
             {
@@ -481,7 +563,7 @@ public class FileManagerConfigMigrationTests
             throw new InvalidOperationException("Simulated Remove reflection failure.");
         }
 
-        public new IDictionary OrphanedEntries
+        public IDictionary OrphanedEntries
         {
             get
             {
@@ -510,7 +592,7 @@ public class FileManagerConfigMigrationTests
             return false;
         }
 
-        public new IDictionary OrphanedEntries
+        public IDictionary OrphanedEntries
         {
             get
             {
@@ -535,7 +617,7 @@ public class FileManagerConfigMigrationTests
             throw new InvalidOperationException("Simulated Remove reflection failure.");
         }
 
-        public new IDictionary OrphanedEntries
+        public IDictionary OrphanedEntries
         {
             get
             {
@@ -579,6 +661,7 @@ public class FileManagerConfigMigrationTests
 
             _originalLogger = _loggerField.GetValue(null);
             Logger.Listeners.Add(_listener);
+            Logger.Sources.Add(_logger);
             _loggerField.SetValue(null, _logger);
         }
 
@@ -586,6 +669,7 @@ public class FileManagerConfigMigrationTests
         {
             if (_loggerField != null)
                 _loggerField.SetValue(null, _originalLogger);
+            Logger.Sources.Remove(_logger);
             Logger.Listeners.Remove(_listener);
             _logger.Dispose();
         }

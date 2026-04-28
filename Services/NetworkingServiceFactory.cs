@@ -49,28 +49,30 @@ namespace NetworkingLibrary.Services
             NetLog.Info(LogSource, "UNITY_EDITOR detected. Creating OfflineNetworkingService.");
             return new OfflineNetworkingService();
 #else
+            var fallbackReason = DefaultServiceSelectionReason.SteamApiNotReady;
             try
             {
                 var isSteamClientRunning = IsSteamClientRunning();
                 NetLog.Info(LogSource, $"Steam client running: {isSteamClientRunning}.");
                 if (!isSteamClientRunning)
                 {
-                    reason = DefaultServiceSelectionReason.SteamClientNotRunning;
+                    fallbackReason = DefaultServiceSelectionReason.SteamClientNotRunning;
                     NetLog.Info(LogSource, "Falling back to OfflineNetworkingService. Reason: Steam client is not running.");
-                    return CreateOfflineService();
                 }
-
-                var isSteamApiInitialized = IsSteamApiInitialized();
-                NetLog.Info(LogSource, $"Steam API initialized: {isSteamApiInitialized}.");
-                if (isSteamApiInitialized)
+                else
                 {
-                    reason = DefaultServiceSelectionReason.SteamReady;
-                    NetLog.Info(LogSource, "Steam ready. Creating SteamNetworkingService.");
-                    return CreateSteamService();
-                }
+                    var isSteamApiInitialized = IsSteamApiInitialized();
+                    NetLog.Info(LogSource, $"Steam API initialized: {isSteamApiInitialized}.");
+                    if (isSteamApiInitialized)
+                    {
+                        reason = DefaultServiceSelectionReason.SteamReady;
+                        NetLog.Info(LogSource, "Steam ready. Creating SteamNetworkingService.");
+                        return CreateSteamService();
+                    }
 
-                reason = DefaultServiceSelectionReason.SteamApiNotReady;
-                NetLog.Info(LogSource, "Falling back to OfflineNetworkingService. Reason: Steam API is not initialized.");
+                    fallbackReason = DefaultServiceSelectionReason.SteamApiNotReady;
+                    NetLog.Info(LogSource, "Falling back to OfflineNetworkingService. Reason: Steam API is not initialized.");
+                }
             }
             catch (Exception exception)
             {
@@ -79,7 +81,7 @@ namespace NetworkingLibrary.Services
                 return CreateOfflineService();
             }
 
-            reason = DefaultServiceSelectionReason.SteamApiNotReady;
+            reason = fallbackReason;
             return CreateOfflineService();
 #endif
         }
@@ -111,6 +113,7 @@ namespace NetworkingLibrary.Services
                 {
                     var steamManagerType = ResolveType(candidateTypeName);
                     if (steamManagerType == null) continue;
+                    if (!ShouldUseResolvedSteamManagerCandidate(candidateTypeName, steamManagerType)) continue;
                     if (TryReadInitializedSafely(steamManagerType, out isInitialized)) return true;
                 }
 
@@ -142,12 +145,15 @@ namespace NetworkingLibrary.Services
             }
         }
 
+        static bool ShouldUseResolvedSteamManagerCandidate(string candidateTypeName, Type steamManagerType)
+        {
+            return !string.Equals(candidateTypeName, "SteamManager", StringComparison.Ordinal) || IsPreferredSteamManagerType(steamManagerType);
+        }
+
         static Type? ResolveLoadedSteamManagerType()
         {
             const BindingFlags AnyStaticVisibility = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
             var assemblies = AppDomain.CurrentDomain.GetAssemblies();
-            Type? fallbackCandidate = null;
-            var hasAmbiguousFallbackCandidates = false;
             for (var index = 0; index < assemblies.Length; index++)
             {
                 var assembly = assemblies[index];
@@ -177,20 +183,10 @@ namespace NetworkingLibrary.Services
 
                     if (IsPreferredSteamManagerType(candidate))
                         return candidate;
-
-                    if (fallbackCandidate == null)
-                    {
-                        fallbackCandidate = candidate;
-                        continue;
-                    }
-
-                    if (!ReferenceEquals(fallbackCandidate, candidate))
-                        hasAmbiguousFallbackCandidates = true;
-
                 }
             }
 
-            return hasAmbiguousFallbackCandidates ? null : fallbackCandidate;
+            return null;
         }
 
         static Type[] GetLoadableTypes(ReflectionTypeLoadException exception)

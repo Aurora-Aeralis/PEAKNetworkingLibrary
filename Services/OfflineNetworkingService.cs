@@ -53,10 +53,16 @@ namespace NetworkingLibrary.Services
         static readonly object exceptionLogThrottleLock = new();
         static readonly Dictionary<string, DateTime> lastExceptionLogByKey = new();
         static readonly Dictionary<string, int> suppressedExceptionLogByKey = new();
+        internal static Func<DateTime> UtcNow = () => DateTime.UtcNow;
 
         static void LogError(string message)
         {
-            try { Net.Logger?.LogError(message); }
+            try
+            {
+                var logger = Net.Logger;
+                if (logger == null) throw new InvalidOperationException("Net logger is unavailable.");
+                logger.LogError(message);
+            }
             catch (Exception ex)
             {
                 LogFallbackWarningThrottled("error", message, ex);
@@ -65,7 +71,12 @@ namespace NetworkingLibrary.Services
 
         static void LogWarning(string message)
         {
-            try { Net.Logger?.LogWarning(message); }
+            try
+            {
+                var logger = Net.Logger;
+                if (logger == null) throw new InvalidOperationException("Net logger is unavailable.");
+                logger.LogWarning(message);
+            }
             catch (Exception ex)
             {
                 LogFallbackWarningThrottled("warning", message, ex);
@@ -74,10 +85,10 @@ namespace NetworkingLibrary.Services
 
         static void LogFallbackWarningThrottled(string level, string originalMessage, Exception ex)
         {
-            var now = DateTime.UtcNow;
+            var now = UtcNow();
             lock (logFallbackLock)
             {
-                if (lastLogFallbackUtc != DateTime.MinValue && now - lastLogFallbackUtc < LogFallbackCooldown)
+                if (IsInCooldown(now, lastLogFallbackUtc, LogFallbackCooldown))
                 {
                     suppressedLogFallbackCount++;
                     return;
@@ -87,7 +98,9 @@ namespace NetworkingLibrary.Services
                 suppressedLogFallbackCount = 0;
                 lastLogFallbackUtc = now;
                 var suffix = suppressed > 0 ? $" Suppressed {suppressed} similar logger failures." : string.Empty;
-                Debug.LogWarning($"[OfflineNetworkingService] Failed to write {level} log. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {originalMessage}.{suffix}");
+                var fallback = $"[OfflineNetworkingService] Failed to write {level} log. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {originalMessage}.{suffix}";
+                try { Debug.LogWarning(fallback); }
+                catch { System.Diagnostics.Trace.TraceWarning(fallback); }
             }
         }
 
@@ -95,10 +108,10 @@ namespace NetworkingLibrary.Services
 
         static void LogDeserializeFailureThrottled(Exception ex, string context)
         {
-            var now = DateTime.UtcNow;
+            var now = UtcNow();
             lock (deserializeFailureLock)
             {
-                if (lastDeserializeFailureUtc != DateTime.MinValue && now - lastDeserializeFailureUtc < DeserializeFailureCooldown)
+                if (IsInCooldown(now, lastDeserializeFailureUtc, DeserializeFailureCooldown))
                 {
                     suppressedDeserializeFailureCount++;
                     return;
@@ -114,10 +127,10 @@ namespace NetworkingLibrary.Services
 
         static void LogExceptionThrottled(string key, bool error, string messagePrefix, Exception ex)
         {
-            var now = DateTime.UtcNow;
+            var now = UtcNow();
             lock (exceptionLogThrottleLock)
             {
-                if (lastExceptionLogByKey.TryGetValue(key, out var previous) && now - previous < ExceptionLogCooldown)
+                if (lastExceptionLogByKey.TryGetValue(key, out var previous) && IsInCooldown(now, previous, ExceptionLogCooldown))
                 {
                     suppressedExceptionLogByKey[key] = suppressedExceptionLogByKey.TryGetValue(key, out var currentSuppressed) ? currentSuppressed + 1 : 1;
                     return;
@@ -133,6 +146,11 @@ namespace NetworkingLibrary.Services
             }
         }
 
+        static bool IsInCooldown(DateTime now, DateTime previous, TimeSpan cooldown)
+        {
+            return previous != DateTime.MinValue && now >= previous && now - previous < cooldown;
+        }
+
         public ulong GetLocalSteam64()
         {
             return LocalSteamId;
@@ -140,14 +158,16 @@ namespace NetworkingLibrary.Services
 
         public ulong[] GetLobbyMemberSteamIds()
         {
-            if (!InLobby) return Array.Empty<ulong>();
-            if (perPlayerData.Count == 0) return Array.Empty<ulong>();
+            lock (rpcLock)
+            {
+                if (!InLobby || perPlayerData.Count == 0) return Array.Empty<ulong>();
 
-            var memberIds = new ulong[perPlayerData.Count];
-            var index = 0;
-            foreach (var steamId in perPlayerData.Keys) memberIds[index++] = steamId;
-            Array.Sort(memberIds);
-            return memberIds;
+                var memberIds = new ulong[perPlayerData.Count];
+                var index = 0;
+                foreach (var steamId in perPlayerData.Keys) memberIds[index++] = steamId;
+                Array.Sort(memberIds);
+                return memberIds;
+            }
         }
 
         public void RegisterModSigner(uint modId, Func<byte[], byte[]> signerDelegate)
@@ -166,7 +186,7 @@ namespace NetworkingLibrary.Services
                 throw new ArgumentException("RSA public key exponent must not be empty.", nameof(pub));
             lock (cryptoStateLock)
             {
-                modPublicKeys[modId] = pub;
+                modPublicKeys[modId] = CloneRsaParameters(pub);
             }
         }
 
@@ -193,22 +213,44 @@ namespace NetworkingLibrary.Services
             {
                 signersSnapshot = modSigners.ToArray();
                 publicKeysSnapshot = modPublicKeys
-                    .Select(entry => new KeyValuePair<uint, RSAParameters>(entry.Key, entry.Value))
+                    .Select(entry => new KeyValuePair<uint, RSAParameters>(entry.Key, CloneRsaParameters(entry.Value)))
                     .ToArray();
             }
 
-            target.IncomingValidator = IncomingValidator;
-            foreach (var registration in rpcRegistrations)
+            var migratedHandles = new List<IDisposable>();
+            var originalIncomingValidator = target.IncomingValidator;
+            try
             {
-                var migratedHandle = registration.type != null
-                    ? target.RegisterNetworkType(registration.type, registration.modId, registration.mask)
-                    : target.RegisterNetworkObject(registration.instance!, registration.modId, registration.mask);
-                registration.token.SetDisposeAction(migratedHandle.Dispose);
+                target.IncomingValidator = IncomingValidator;
+                foreach (var registration in rpcRegistrations)
+                {
+                    migratedHandles.Add(registration.type != null
+                        ? target.RegisterNetworkType(registration.type, registration.modId, registration.mask)
+                        : target.RegisterNetworkObject(registration.instance!, registration.modId, registration.mask));
+                }
+                foreach (var key in lobbyKeysSnapshot) target.RegisterLobbyDataKey(key);
+                foreach (var key in playerKeysSnapshot) target.RegisterPlayerDataKey(key);
+                foreach (var signer in signersSnapshot) target.RegisterModSigner(signer.Key, signer.Value);
+                foreach (var publicKey in publicKeysSnapshot) target.RegisterModPublicKey(publicKey.Key, publicKey.Value);
             }
-            foreach (var key in lobbyKeysSnapshot) target.RegisterLobbyDataKey(key);
-            foreach (var key in playerKeysSnapshot) target.RegisterPlayerDataKey(key);
-            foreach (var signer in signersSnapshot) target.RegisterModSigner(signer.Key, signer.Value);
-            foreach (var publicKey in publicKeysSnapshot) target.RegisterModPublicKey(publicKey.Key, publicKey.Value);
+            catch
+            {
+                try { target.IncomingValidator = originalIncomingValidator; }
+                catch { }
+                for (var i = migratedHandles.Count - 1; i >= 0; i--) migratedHandles[i].Dispose();
+                throw;
+            }
+
+            for (var i = 0; i < rpcRegistrations.Length; i++) rpcRegistrations[i].token.SetDisposeAction(migratedHandles[i].Dispose);
+        }
+
+        static RSAParameters CloneRsaParameters(RSAParameters source)
+        {
+            return new RSAParameters
+            {
+                Modulus = source.Modulus == null ? null : (byte[])source.Modulus.Clone(),
+                Exponent = source.Exponent == null ? null : (byte[])source.Exponent.Clone()
+            };
         }
 
         long _nextMessageId = 0;
@@ -304,11 +346,11 @@ namespace NetworkingLibrary.Services
             {
                 rpcs.Clear();
                 runtimeRegistrations.Clear();
+                lobbyKeys.Clear();
+                playerKeys.Clear();
+                lobbyData.Clear();
+                perPlayerData.Clear();
             }
-            lobbyKeys.Clear();
-            playerKeys.Clear();
-            lobbyData.Clear();
-            perPlayerData.Clear();
             lock (cryptoStateLock)
             {
                 modSigners.Clear();
@@ -342,15 +384,18 @@ namespace NetworkingLibrary.Services
                 LogWarning($"Offline mode is single-peer only; requested lobby capacity {maxPlayers} is ignored.");
 
             EnsureLocalPeerKey();
-            InLobby = true;
-            HostSteamId64 = LocalSteamId;
-            lobbyData.Clear();
-            perPlayerData.Clear();
-            perPlayerData[LocalSteamId] = new Dictionary<string, string>();
+            lock (rpcLock)
+            {
+                InLobby = true;
+                HostSteamId64 = LocalSteamId;
+                lobbyData.Clear();
+                perPlayerData.Clear();
+                perPlayerData[LocalSteamId] = new Dictionary<string, string>();
+                offlineIsHost = true;
+            }
             LobbyCreated?.Invoke();
             LobbyEntered?.Invoke();
             PlayerEntered?.Invoke(LocalSteamId);
-            offlineIsHost = true;
         }
 
         public void JoinLobby(ulong lobbySteamId64)
@@ -372,29 +417,34 @@ namespace NetworkingLibrary.Services
             }
 
             EnsureLocalPeerKey();
-            InLobby = true;
             if (lobbySteamId64 != LocalSteamId)
                 LogWarning($"Offline mode is single-peer only; treating JoinLobby argument {lobbySteamId64} as lobby id and preserving local host identity {LocalSteamId}.");
-            HostSteamId64 = LocalSteamId;
-            lobbyData.Clear();
-            perPlayerData.Clear();
-            perPlayerData[LocalSteamId] = new Dictionary<string, string>();
+            lock (rpcLock)
+            {
+                InLobby = true;
+                HostSteamId64 = LocalSteamId;
+                lobbyData.Clear();
+                perPlayerData.Clear();
+                perPlayerData[LocalSteamId] = new Dictionary<string, string>();
+                offlineIsHost = true;
+            }
             LobbyEntered?.Invoke();
             PlayerEntered?.Invoke(LocalSteamId);
-            offlineIsHost = true;
         }
 
         public void LeaveLobby()
         {
-            if (!InLobby) return;
-            var shouldEmitLocalPlayerLeft = perPlayerData.ContainsKey(LocalSteamId);
-
-            InLobby = false;
-            HostSteamId64 = LocalSteamId;
-            lobbyData.Clear();
-            perPlayerData.Clear();
-            lobbyKeys.Clear();
-            playerKeys.Clear();
+            bool shouldEmitLocalPlayerLeft;
+            lock (rpcLock)
+            {
+                if (!InLobby) return;
+                shouldEmitLocalPlayerLeft = perPlayerData.ContainsKey(LocalSteamId);
+                InLobby = false;
+                HostSteamId64 = LocalSteamId;
+                lobbyData.Clear();
+                perPlayerData.Clear();
+                offlineIsHost = false;
+            }
             lock (cryptoStateLock)
             {
                 ClearPerPeerSymmetricKeysUnderLock();
@@ -403,7 +453,6 @@ namespace NetworkingLibrary.Services
                 globalHmac = null;
             }
             LobbyLeft?.Invoke();
-            offlineIsHost = false;
 
             if (shouldEmitLocalPlayerLeft) PlayerLeft?.Invoke(LocalSteamId);
         }
@@ -517,10 +566,14 @@ namespace NetworkingLibrary.Services
             var token = new RegistrationTransferToken();
             lock (rpcLock)
             {
+                var instanceRpc = type
+                    .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    .FirstOrDefault(method => method.IsDefined(typeof(CustomRPCAttribute), inherit: false));
+                if (instanceRpc != null) throw new InvalidOperationException($"Cannot register instance RPC method {type.FullName}.{instanceRpc.Name} without an instance.");
+
                 foreach (var method in type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
                 {
                     if (!method.IsDefined(typeof(CustomRPCAttribute), inherit: false)) continue;
-                    if (!method.IsStatic) throw new InvalidOperationException($"Cannot register instance RPC method {type.FullName}.{method.Name} without an instance.");
 
                     if (!rpcs.TryGetValue(modId, out var methods))
                     {
@@ -614,7 +667,7 @@ namespace NetworkingLibrary.Services
                 {
                     if (!methods.TryGetValue(methodName, out var handlers)) continue;
                     for (int i = handlers.Count - 1; i >= 0; i--)
-                        if (handlers[i].Method.DeclaringType == type && handlers[i].Mask == mask) handlers.RemoveAt(i);
+                        if (handlers[i].Target == null && handlers[i].Method.DeclaringType == type && handlers[i].Mask == mask) handlers.RemoveAt(i);
                     if (handlers.Count == 0) methods.Remove(methodName);
                 }
                 if (methods.Count == 0) rpcs.Remove(modId);
@@ -678,54 +731,100 @@ namespace NetworkingLibrary.Services
         public void RegisterLobbyDataKey(string key)
         {
             ValidateDataKey(key, nameof(key));
-            lobbyKeys.Add(key);
+            lock (rpcLock) lobbyKeys.Add(key);
         }
         public void SetLobbyData(string key, object value)
         {
             ValidateDataKey(key, nameof(key));
-            if (!InLobby) { LogError("Cannot set lobby data when not in lobby."); return; }
-            if (!lobbyKeys.Contains(key)) LogWarning($"Accessing unregistered lobby key {key}");
             var serialized = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
-            lobbyData[key] = serialized;
-            LobbyDataChanged?.Invoke(new[] { key });
+            bool unregistered = false, notInLobby = false;
+            bool changed = false;
+            lock (rpcLock)
+            {
+                if (InLobby)
+                {
+                    unregistered = !lobbyKeys.Contains(key);
+                    changed = !lobbyData.TryGetValue(key, out var previous) || previous != serialized;
+                    if (changed) lobbyData[key] = serialized;
+                }
+                else notInLobby = true;
+            }
+            if (notInLobby) { LogError("Cannot set lobby data when not in lobby."); return; }
+            if (unregistered) LogWarning($"Accessing unregistered lobby key {key}");
+            if (changed) LobbyDataChanged?.Invoke(new[] { key });
         }
         public T GetLobbyData<T>(string key)
         {
             ValidateDataKey(key, nameof(key));
-            if (!InLobby) { LogError("Cannot get lobby data when not in lobby."); return default!; }
-            if (!lobbyKeys.Contains(key)) LogWarning($"Accessing unregistered lobby key {key}");
-            if (!lobbyData.TryGetValue(key, out var v)) return default!;
-            try { return (T)Convert.ChangeType(v, typeof(T), System.Globalization.CultureInfo.InvariantCulture); }
+            string? v = null;
+            bool found = false, unregistered = false, notInLobby = false;
+            lock (rpcLock)
+            {
+                if (InLobby)
+                {
+                    unregistered = !lobbyKeys.Contains(key);
+                    found = lobbyData.TryGetValue(key, out v);
+                }
+                else notInLobby = true;
+            }
+            if (notInLobby) { LogError("Cannot get lobby data when not in lobby."); return default!; }
+            if (unregistered) LogWarning($"Accessing unregistered lobby key {key}");
+            if (!found) return default!;
+            try { return DataValueConverter.ConvertTo<T>(v!); }
             catch (Exception ex) { LogExceptionThrottled($"lobby_parse:{key}", error: true, $"Could not parse lobby data [{key},{v}].", ex); return default!; }
         }
 
         public void RegisterPlayerDataKey(string key)
         {
             ValidateDataKey(key, nameof(key));
-            playerKeys.Add(key);
+            lock (rpcLock) playerKeys.Add(key);
         }
         public void SetPlayerData(string key, object value)
         {
             ValidateDataKey(key, nameof(key));
-            if (!InLobby) { LogError("Cannot set player data when not in lobby."); return; }
-            if (!playerKeys.Contains(key)) LogWarning($"Accessing unregistered player key {key}");
             var serialized = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
-            if (!perPlayerData.ContainsKey(LocalSteamId))
+            bool unregistered = false, notInLobby = false;
+            bool recreatedLocalBucket = false;
+            bool changed = false;
+            lock (rpcLock)
             {
-                LogWarning($"Local player {LocalSteamId} was missing in per-player state while setting key '{key}'. Recreating local state bucket.");
-                perPlayerData[LocalSteamId] = new Dictionary<string, string>();
+                if (InLobby)
+                {
+                    unregistered = !playerKeys.Contains(key);
+                    if (!perPlayerData.TryGetValue(LocalSteamId, out var localData))
+                    {
+                        localData = new Dictionary<string, string>();
+                        perPlayerData[LocalSteamId] = localData;
+                        recreatedLocalBucket = true;
+                    }
+                    changed = !localData.TryGetValue(key, out var previous) || previous != serialized;
+                    if (changed) localData[key] = serialized;
+                }
+                else notInLobby = true;
             }
-            perPlayerData[LocalSteamId][key] = serialized;
-            PlayerDataChanged?.Invoke(LocalSteamId, new[] { key });
+            if (notInLobby) { LogError("Cannot set player data when not in lobby."); return; }
+            if (unregistered) LogWarning($"Accessing unregistered player key {key}");
+            if (recreatedLocalBucket) LogWarning($"Local player {LocalSteamId} was missing in per-player state while setting key '{key}'. Recreating local state bucket.");
+            if (changed) PlayerDataChanged?.Invoke(LocalSteamId, new[] { key });
         }
         public T GetPlayerData<T>(ulong steamId64, string key)
         {
             ValidateDataKey(key, nameof(key));
-            if (!InLobby) { LogError("Cannot get player data when not in lobby."); return default!; }
-            if (!playerKeys.Contains(key)) LogWarning($"Accessing unregistered player key {key}");
-            if (!perPlayerData.TryGetValue(steamId64, out var dict)) return default!;
-            if (!dict.TryGetValue(key, out var v)) return default!;
-            try { return (T)Convert.ChangeType(v, typeof(T), System.Globalization.CultureInfo.InvariantCulture); }
+            string? v = null;
+            bool found = false, unregistered = false, notInLobby = false;
+            lock (rpcLock)
+            {
+                if (InLobby)
+                {
+                    unregistered = !playerKeys.Contains(key);
+                    found = perPlayerData.TryGetValue(steamId64, out var dict) && dict.TryGetValue(key, out v);
+                }
+                else notInLobby = true;
+            }
+            if (notInLobby) { LogError("Cannot get player data when not in lobby."); return default!; }
+            if (unregistered) LogWarning($"Accessing unregistered player key {key}");
+            if (!found) return default!;
+            try { return DataValueConverter.ConvertTo<T>(v!); }
             catch (Exception ex) { LogExceptionThrottled($"player_parse:{key}", error: true, $"Could not parse player data [{key},{v}].", ex); return default!; }
         }
 
@@ -752,31 +851,19 @@ namespace NetworkingLibrary.Services
 
                 if (handlersSnapshot.Length > 0)
                 {
-                    MessageHandler chosen = null!;
-                    foreach (var h in handlersSnapshot)
-                    {
-                        if (h.Mask != mask) continue;
-                        var expected = h.Parameters;
-                        int expectedCount = h.ParameterCountWithoutRpcInfo;
-                        if (expectedCount != parameters.Length) continue;
+                    if (parameterTypes != null && parameterTypes.Length != parameters.Length)
+                        throw new ArgumentException($"Parameter type count mismatch: expected {parameterTypes.Length}, got {parameters.Length}", nameof(parameters));
 
-                        bool ok = true;
-                        for (int i = 0; i < expectedCount; i++)
-                        {
-                            var t = expected[i].ParameterType;
-                            var p = parameters[i];
-                            if (p == null)
-                            {
-                                if (t.IsValueType && Nullable.GetUnderlyingType(t) == null) { ok = false; break; }
-                                continue;
-                            }
-                            if (!t.IsAssignableFrom(p.GetType())) { ok = false; break; }
-                        }
-
-                        if (ok) { chosen = h; break; }
-                    }
+                    MessageHandler? chosen = null;
+                    if (parameterTypes != null)
+                        chosen = FindTypedHandler(exactMatch: true) ?? FindTypedHandler(exactMatch: false)!;
 
                     if (chosen == null)
+                    {
+                        chosen = FindUntypedHandler(allowNullableConversions: false) ?? FindUntypedHandler(allowNullableConversions: true);
+                    }
+
+                    if (chosen == null && parameterTypes == null)
                     {
                         chosen = handlersSnapshot.FirstOrDefault(h =>
                         {
@@ -806,7 +893,7 @@ namespace NetworkingLibrary.Services
                             msg.WriteObject(t, null!);
                             continue;
                         }
-                        if (!t.IsAssignableFrom(p.GetType()))
+                        if (!IsParameterValueCompatible(t, p))
                             throw new ArgumentException($"Parameter {i} type mismatch: expected {t}, got {p.GetType()}", nameof(parameters));
                         msg.WriteObject(t, p);
                     }
@@ -818,6 +905,61 @@ namespace NetworkingLibrary.Services
                     }
 
                     return msg;
+
+                    MessageHandler? FindTypedHandler(bool exactMatch)
+                    {
+                        foreach (var h in handlersSnapshot)
+                        {
+                            if (h.Mask != mask) continue;
+                            var expected = h.Parameters;
+                            int expectedCount = h.ParameterCountWithoutRpcInfo;
+                            if (expectedCount != parameterTypes!.Length) continue;
+
+                            bool ok = true;
+                            for (int i = 0; i < expectedCount; i++)
+                            {
+                                var t = expected[i].ParameterType;
+                                var typed = parameterTypes[i] ?? throw new ArgumentNullException(nameof(parameterTypes), $"Parameter type {i} for {methodName} cannot be null.");
+                                if (!IsParameterTypeCompatible(t, typed, exactMatch)) { ok = false; break; }
+                                var p = parameters[i];
+                                if (p == null)
+                                {
+                                    if (t.IsValueType && Nullable.GetUnderlyingType(t) == null) { ok = false; break; }
+                                    continue;
+                                }
+                                if (!IsParameterValueCompatible(t, p)) { ok = false; break; }
+                            }
+                            if (ok) return h;
+                        }
+                        return null;
+                    }
+
+                    MessageHandler? FindUntypedHandler(bool allowNullableConversions)
+                    {
+                        foreach (var h in handlersSnapshot)
+                        {
+                            if (h.Mask != mask) continue;
+                            var expected = h.Parameters;
+                            int expectedCount = h.ParameterCountWithoutRpcInfo;
+                            if (expectedCount != parameters.Length) continue;
+
+                            bool ok = true;
+                            for (int i = 0; i < expectedCount; i++)
+                            {
+                                var t = expected[i].ParameterType;
+                                var p = parameters[i];
+                                if (p == null)
+                                {
+                                    if (t.IsValueType && Nullable.GetUnderlyingType(t) == null) { ok = false; break; }
+                                    continue;
+                                }
+                                if (allowNullableConversions ? !IsParameterValueCompatible(t, p) : !IsParameterValueCompatibleWithoutNullableFallback(t, p)) { ok = false; break; }
+                            }
+
+                            if (ok) return h;
+                        }
+                        return null;
+                    }
                 }
                 else
                 {
@@ -839,7 +981,7 @@ namespace NetworkingLibrary.Services
                                 msg.WriteObject(t, null!);
                                 continue;
                             }
-                            if (!t.IsAssignableFrom(p.GetType()))
+                            if (!IsParameterValueCompatible(t, p))
                                 throw new ArgumentException($"Parameter {i} type mismatch: expected {t}, got {p.GetType()}", nameof(parameters));
                             msg.WriteObject(t, p);
                         }
@@ -1009,7 +1151,7 @@ namespace NetworkingLibrary.Services
                 var p = Activator.CreateInstance(infoType);
                 if (p == null) return null!;
 
-                AssignRpcIdentityMembers(p, infoType, from);
+                AssignRpcIdentityMembers(p, infoType, from, isLocalLoopback);
                 return p;
             }
             catch (Exception ex)
@@ -1019,13 +1161,14 @@ namespace NetworkingLibrary.Services
             }
         }
 
-        static void AssignRpcIdentityMembers(object instance, Type infoType, ulong steamId64)
+        static void AssignRpcIdentityMembers(object instance, Type infoType, ulong steamId64, bool isLocalLoopback)
         {
             var steamIdString = steamId64.ToString();
             AssignRpcIdentityMember(instance, infoType, "SenderSteamID", steamId64, steamIdString);
             AssignRpcIdentityMember(instance, infoType, "Sender", steamId64, steamIdString);
             AssignRpcIdentityMember(instance, infoType, "SteamId64", steamId64, steamIdString);
             AssignRpcIdentityMember(instance, infoType, "SteamIdString", steamId64, steamIdString);
+            AssignRpcLoopbackMember(instance, infoType, isLocalLoopback);
         }
 
         static void AssignRpcIdentityMember(object instance, Type infoType, string memberName, ulong steamId64, string steamIdString)
@@ -1040,6 +1183,26 @@ namespace NetworkingLibrary.Services
             var property = infoType.GetProperty(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             if (property == null || !property.CanWrite) return;
             TryAssignMemberValue(property.PropertyType, value => property.SetValue(instance, value), steamId64, steamIdString);
+        }
+
+        static void AssignRpcLoopbackMember(object instance, Type infoType, bool isLocalLoopback)
+        {
+            var field = infoType.GetField("IsLocalLoopback", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (field != null)
+            {
+                TryAssignLoopbackMemberValue(field.FieldType, value => field.SetValue(instance, value), isLocalLoopback);
+                return;
+            }
+
+            var property = infoType.GetProperty("IsLocalLoopback", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (property == null || !property.CanWrite) return;
+            TryAssignLoopbackMemberValue(property.PropertyType, value => property.SetValue(instance, value), isLocalLoopback);
+        }
+
+        static void TryAssignLoopbackMemberValue(Type memberType, Action<object> assign, bool isLocalLoopback)
+        {
+            if (memberType == typeof(bool)) { assign(isLocalLoopback); return; }
+            if (memberType == typeof(bool?)) assign((bool?)isLocalLoopback);
         }
 
         static void TryAssignMemberValue(Type memberType, Action<object> assign, ulong steamId64, string steamIdString)
@@ -1088,6 +1251,27 @@ namespace NetworkingLibrary.Services
             int parameterCount = handler.TakesInfo ? pi.Length - 1 : pi.Length;
             if (parameterCount <= 0) return string.Empty;
             return string.Join("|", pi.Take(parameterCount).Select(p => p.ParameterType.AssemblyQualifiedName ?? p.ParameterType.FullName ?? p.ParameterType.Name));
+        }
+
+        static bool IsParameterValueCompatible(Type parameterType, object value)
+        {
+            var nullableType = Nullable.GetUnderlyingType(parameterType);
+            return nullableType != null
+                ? nullableType.IsAssignableFrom(value.GetType())
+                : parameterType.IsAssignableFrom(value.GetType());
+        }
+
+        static bool IsParameterValueCompatibleWithoutNullableFallback(Type parameterType, object value)
+        {
+            if (Nullable.GetUnderlyingType(parameterType) != null) return false;
+            return parameterType.IsAssignableFrom(value.GetType());
+        }
+
+        static bool IsParameterTypeCompatible(Type parameterType, Type suppliedType, bool exactMatch)
+        {
+            if (exactMatch) return parameterType == suppliedType;
+            var nullableType = Nullable.GetUnderlyingType(parameterType);
+            return parameterType.IsAssignableFrom(suppliedType) || nullableType?.IsAssignableFrom(suppliedType) == true;
         }
 
         class SlidingWindowRateLimiter

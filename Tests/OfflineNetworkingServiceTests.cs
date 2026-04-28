@@ -1,6 +1,7 @@
 using NetworkingLibrary.Modules;
 using NetworkingLibrary.Services;
 using System;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -15,6 +16,8 @@ namespace NetworkingLibrary.Tests;
 public class OfflineNetworkingServiceTests
 {
     const uint TestModId = 777;
+
+    enum DataKind { Unknown = 0, Scout = 1, Runner = 2 }
 
     sealed class RpcReceiver
     {
@@ -69,6 +72,19 @@ public class OfflineNetworkingServiceTests
         }
     }
 
+    sealed class MixedRpcReceiver
+    {
+        public static int StaticCallCount { get; private set; }
+
+        [CustomRPC]
+        static void StaticPing(int value) => StaticCallCount += value;
+
+        [CustomRPC]
+        void InstancePing(int value) { }
+
+        public static void Reset() => StaticCallCount = 0;
+    }
+
     sealed class VisibilityRpcReceiver
     {
         public int PublicCallCount { get; private set; }
@@ -96,6 +112,62 @@ public class OfflineNetworkingServiceTests
         }
     }
 
+    sealed class ThrowingTransferTarget : INetworkingService
+    {
+        public int RegisterNetworkObjectCalls { get; private set; }
+        public int DisposedRegistrationCount { get; private set; }
+        public bool ThrowOnRegisterLobbyDataKey { get; set; }
+
+        public bool IsInitialized => true;
+        public bool InLobby => false;
+        public ulong HostSteamId64 => 0;
+        public string HostIdString => string.Empty;
+        public bool IsHost => false;
+        public Func<Message, ulong, bool>? IncomingValidator { get; set; }
+
+        public event Action? LobbyCreated;
+        public event Action? LobbyEntered;
+        public event Action? LobbyLeft;
+        public event Action<ulong>? PlayerEntered;
+        public event Action<ulong>? PlayerLeft;
+        public event Action<string[]>? LobbyDataChanged;
+        public event Action<ulong, string[]>? PlayerDataChanged;
+
+        public void Initialize() { }
+        public void Shutdown() { }
+        public void CreateLobby(int maxPlayers = 8) { }
+        public void JoinLobby(ulong lobbySteamId64) { }
+        public void LeaveLobby() { }
+        public void InviteToLobby(ulong steamId64) { }
+        public IDisposable RegisterNetworkObject(object instance, uint modId, int mask = 0)
+        {
+            RegisterNetworkObjectCalls++;
+            return new ScopeAction(() => DisposedRegistrationCount++);
+        }
+        public IDisposable RegisterNetworkType(Type type, uint modId, int mask = 0) => new ScopeAction(() => DisposedRegistrationCount++);
+        public void DeregisterNetworkObject(object instance, uint modId, int mask = 0) { }
+        public void DeregisterNetworkType(Type type, uint modId, int mask = 0) { }
+        public void RPC(uint modId, string methodName, ReliableType reliable, params object[] parameters) { }
+        public void RPC(uint modId, string methodName, ReliableType reliable, Type[] parameterTypes, params object?[] parameters) { }
+        public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, params object[] parameters) { }
+        public void RPCTarget(uint modId, string methodName, ulong targetSteamId64, ReliableType reliable, Type[] parameterTypes, params object?[] parameters) { }
+        public void RPCToHost(uint modId, string methodName, ReliableType reliable, params object[] parameters) { }
+        public void RegisterLobbyDataKey(string key)
+        {
+            if (ThrowOnRegisterLobbyDataKey) throw new InvalidOperationException("target lobby key failed");
+        }
+        public void SetLobbyData(string key, object value) { }
+        public T GetLobbyData<T>(string key) => default!;
+        public void RegisterPlayerDataKey(string key) { }
+        public void SetPlayerData(string key, object value) { }
+        public T GetPlayerData<T>(ulong steamId64, string key) => default!;
+        public void PollReceive() { }
+        public void RegisterModSigner(uint modId, Func<byte[], byte[]> signerDelegate) { }
+        public void RegisterModPublicKey(uint modId, RSAParameters pub) { }
+        public ulong GetLocalSteam64() => 0;
+        public ulong[] GetLobbyMemberSteamIds() => Array.Empty<ulong>();
+    }
+
     static IDisposable WithUnavailableNetLogger()
     {
         var loggerField = typeof(Net).GetField("<Logger>k__BackingField", BindingFlags.Static | BindingFlags.NonPublic);
@@ -103,6 +175,13 @@ public class OfflineNetworkingServiceTests
         var original = loggerField.GetValue(null);
         loggerField.SetValue(null, null);
         return new ScopeAction(() => loggerField.SetValue(null, original));
+    }
+
+    static IDisposable WithOfflineUtcNow(Func<DateTime> utcNow)
+    {
+        var original = OfflineNetworkingService.UtcNow;
+        OfflineNetworkingService.UtcNow = utcNow;
+        return new ScopeAction(() => OfflineNetworkingService.UtcNow = original);
     }
 
     [Fact]
@@ -324,6 +403,66 @@ public class OfflineNetworkingServiceTests
         Assert.Equal(0, receiver.CallCount);
     }
 
+    [Theory]
+    [InlineData("LogError")]
+    [InlineData("LogWarning")]
+    public void LoggerFallback_IsUsed_WhenNetLoggerIsUnavailable(string methodName)
+    {
+        ResetOfflineLogThrottleState();
+        using var _ = WithUnavailableNetLogger();
+        var now = new DateTime(2026, 1, 1, 0, 1, 40, DateTimeKind.Utc);
+        using var __ = WithOfflineUtcNow(() => now);
+
+        InvokeOfflineStatic(methodName, "first");
+        now = now.AddSeconds(1);
+        InvokeOfflineStatic(methodName, "second");
+
+        Assert.Equal(new DateTime(2026, 1, 1, 0, 1, 40, DateTimeKind.Utc), GetOfflineStaticField<DateTime>("lastLogFallbackUtc"));
+        Assert.Equal(1, GetOfflineStaticField<int>("suppressedLogFallbackCount"));
+    }
+
+    [Fact]
+    public void DeserializeFailureThrottle_AllowsEmission_WhenClockMovesBackward()
+    {
+        ResetOfflineLogThrottleState();
+        using var _ = WithUnavailableNetLogger();
+        var now = new DateTime(2026, 1, 1, 0, 1, 40, DateTimeKind.Utc);
+        using var __ = WithOfflineUtcNow(() => now);
+
+        InvokeOfflineStatic("LogDeserializeFailureThrottled", new InvalidOperationException("first"), "first");
+        now = now.AddSeconds(1);
+        InvokeOfflineStatic("LogDeserializeFailureThrottled", new InvalidOperationException("second"), "second");
+
+        Assert.Equal(1, GetOfflineStaticField<int>("suppressedDeserializeFailureCount"));
+
+        now = now.AddSeconds(-50);
+        InvokeOfflineStatic("LogDeserializeFailureThrottled", new InvalidOperationException("after reset"), "after reset");
+
+        Assert.Equal(0, GetOfflineStaticField<int>("suppressedDeserializeFailureCount"));
+        Assert.Equal(now, GetOfflineStaticField<DateTime>("lastDeserializeFailureUtc"));
+    }
+
+    [Fact]
+    public void ExceptionThrottle_AllowsEmission_WhenClockMovesBackward()
+    {
+        ResetOfflineLogThrottleState();
+        using var _ = WithUnavailableNetLogger();
+        var now = new DateTime(2026, 1, 1, 0, 1, 40, DateTimeKind.Utc);
+        using var __ = WithOfflineUtcNow(() => now);
+
+        InvokeOfflineStatic("LogExceptionThrottled", "clock-key", false, "first", new InvalidOperationException("first"));
+        now = now.AddSeconds(1);
+        InvokeOfflineStatic("LogExceptionThrottled", "clock-key", false, "second", new InvalidOperationException("second"));
+
+        Assert.Equal(1, GetOfflineStaticField<Dictionary<string, int>>("suppressedExceptionLogByKey")["clock-key"]);
+
+        now = now.AddSeconds(-50);
+        InvokeOfflineStatic("LogExceptionThrottled", "clock-key", false, "after reset", new InvalidOperationException("after reset"));
+
+        Assert.False(GetOfflineStaticField<Dictionary<string, int>>("suppressedExceptionLogByKey").ContainsKey("clock-key"));
+        Assert.Equal(now, GetOfflineStaticField<Dictionary<string, DateTime>>("lastExceptionLogByKey")["clock-key"]);
+    }
+
     [Fact]
     public void Shutdown_ResetsLobbyScopedState()
     {
@@ -345,7 +484,7 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
-    public void LeaveLobby_ClearsRegisteredLobbyAndPlayerKeys()
+    public void LeaveLobby_PreservesRegisteredLobbyAndPlayerKeys()
     {
         var service = new OfflineNetworkingService();
         service.Initialize();
@@ -356,8 +495,8 @@ public class OfflineNetworkingServiceTests
         service.LeaveLobby();
         service.CreateLobby();
 
-        Assert.False(IsLobbyDataKeyRegistered(service, "map"));
-        Assert.False(IsPlayerDataKeyRegistered(service, "rank"));
+        Assert.True(IsLobbyDataKeyRegistered(service, "map"));
+        Assert.True(IsPlayerDataKeyRegistered(service, "rank"));
     }
 
     [Fact]
@@ -396,7 +535,7 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
-    public void Shutdown_PreservesRpcRegistrationsAcrossReinitializeAndLobbyCreate()
+    public void Shutdown_ReinitializeRequiresRpcReregistration()
     {
         var service = new OfflineNetworkingService();
         var receiver = new RpcReceiver();
@@ -410,7 +549,8 @@ public class OfflineNetworkingServiceTests
         service.CreateLobby();
         service.RPC(TestModId, "OnPing", ReliableType.Reliable, 42);
 
-        Assert.Equal(42, receiver.LastValue);
+        Assert.Equal(-1, receiver.LastValue);
+        Assert.Equal(0, receiver.CallCount);
     }
 
     [Fact]
@@ -462,10 +602,92 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
+    public void LobbyAndPlayerData_ReadsBackEnumsAndNullableValues()
+    {
+        var service = new OfflineNetworkingService();
+
+        service.Initialize();
+        service.CreateLobby();
+        service.RegisterLobbyDataKey("kind");
+        service.RegisterPlayerDataKey("score");
+
+        service.SetLobbyData("kind", DataKind.Runner);
+        service.SetPlayerData("score", 42);
+
+        Assert.Equal(DataKind.Runner, service.GetLobbyData<DataKind>("kind"));
+        Assert.Equal(DataKind.Runner, service.GetLobbyData<DataKind?>("kind"));
+        Assert.Equal(42, service.GetPlayerData<int?>(service.LocalSteamId, "score"));
+    }
+
+    [Fact]
+    public void LobbyDataChanged_OnlyEmits_WhenValueChanges()
+    {
+        var service = new OfflineNetworkingService();
+        var events = new List<string[]>();
+
+        service.Initialize();
+        service.CreateLobby();
+        service.RegisterLobbyDataKey("map");
+        service.LobbyDataChanged += keys => events.Add(keys);
+
+        service.SetLobbyData("map", "forest");
+        service.SetLobbyData("map", "forest");
+        service.SetLobbyData("map", "shore");
+
+        Assert.Equal(2, events.Count);
+        Assert.Equal(new[] { "map" }, events[0]);
+        Assert.Equal(new[] { "map" }, events[1]);
+    }
+
+    [Fact]
+    public void PlayerDataChanged_OnlyEmits_WhenValueChanges()
+    {
+        var service = new OfflineNetworkingService();
+        var events = new List<(ulong playerId, string[] keys)>();
+
+        service.Initialize();
+        service.CreateLobby();
+        service.RegisterPlayerDataKey("rank");
+        service.PlayerDataChanged += (playerId, keys) => events.Add((playerId, keys));
+
+        service.SetPlayerData("rank", 12);
+        service.SetPlayerData("rank", 12);
+        service.SetPlayerData("rank", 13);
+
+        Assert.Equal(2, events.Count);
+        Assert.Equal(service.LocalSteamId, events[0].playerId);
+        Assert.Equal(new[] { "rank" }, events[0].keys);
+        Assert.Equal(service.LocalSteamId, events[1].playerId);
+        Assert.Equal(new[] { "rank" }, events[1].keys);
+    }
+
+    [Fact]
     public void RegisterModPublicKey_EmptyParameters_ThrowsArgumentException()
     {
         var service = new OfflineNetworkingService();
         Assert.Throws<ArgumentException>(() => service.RegisterModPublicKey(TestModId, new RSAParameters()));
+    }
+
+    [Fact]
+    public void RegisterModPublicKey_ClonesMutableParameters()
+    {
+        var service = new OfflineNetworkingService();
+        using var rsa = RSA.Create(2048);
+        var pub = rsa.ExportParameters(false);
+        var modulus = pub.Modulus!;
+        var exponent = pub.Exponent!;
+        var expectedModulusFirstByte = modulus[0];
+        var expectedExponentFirstByte = exponent[0];
+
+        service.RegisterModPublicKey(TestModId, pub);
+        modulus[0] = (byte)(modulus[0] ^ 0x7f);
+        exponent[0] = (byte)(exponent[0] ^ 0x7f);
+
+        var stored = GetModPublicKeys(service)[TestModId];
+        Assert.NotSame(modulus, stored.Modulus);
+        Assert.NotSame(exponent, stored.Exponent);
+        Assert.Equal(expectedModulusFirstByte, stored.Modulus![0]);
+        Assert.Equal(expectedExponentFirstByte, stored.Exponent![0]);
     }
 
     [Fact]
@@ -575,6 +797,23 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
+    public void RegisterNetworkType_WithInstanceRpc_ThrowsAndDoesNotCreateHandlers()
+    {
+        var service = new OfflineNetworkingService();
+        MixedRpcReceiver.Reset();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => service.RegisterNetworkType(typeof(MixedRpcReceiver), TestModId));
+        Assert.Contains("Cannot register instance RPC method", ex.Message);
+
+        service.Initialize();
+        service.CreateLobby();
+        service.RPC(TestModId, "StaticPing", ReliableType.Reliable, 3);
+
+        Assert.Equal(0, GetRegisteredHandlerCount(service, TestModId));
+        Assert.Equal(0, MixedRpcReceiver.StaticCallCount);
+    }
+
+    [Fact]
     public void RegisterNetworkObject_RegistersOnlyAttributedInstanceMethods_AndDispatchParityHolds()
     {
         var service = new OfflineNetworkingService();
@@ -582,7 +821,7 @@ public class OfflineNetworkingServiceTests
 
         service.Initialize();
         service.CreateLobby();
-        using var _ = service.RegisterNetworkObject(receiver, TestModId, mask: 7);
+        using var _ = service.RegisterNetworkObject(receiver, TestModId, mask: 0);
 
         Assert.Equal(2, GetRegisteredHandlerCount(service, TestModId));
 
@@ -592,6 +831,23 @@ public class OfflineNetworkingServiceTests
 
         Assert.Equal(2, receiver.PublicCallCount);
         Assert.Equal(3, receiver.PrivateCallCount);
+    }
+
+    [Fact]
+    public void DeregisterNetworkType_DoesNotRemoveObjectHandlersForSameDeclaringType()
+    {
+        var service = new OfflineNetworkingService();
+        var receiver = new VisibilityRpcReceiver();
+
+        service.Initialize();
+        service.CreateLobby();
+        using var _ = service.RegisterNetworkObject(receiver, TestModId, mask: 0);
+
+        service.DeregisterNetworkType(typeof(VisibilityRpcReceiver), TestModId, mask: 0);
+        service.RPC(TestModId, nameof(VisibilityRpcReceiver.PublicPing), ReliableType.Reliable, 5);
+
+        Assert.Equal(5, receiver.PublicCallCount);
+        Assert.Equal(2, GetRegisteredHandlerCount(service, TestModId));
     }
 
     [Fact]
@@ -694,6 +950,34 @@ public class OfflineNetworkingServiceTests
         registration.Dispose();
 
         target.RPC(TestModId, "OnPing", ReliableType.Reliable, 9);
+        Assert.Equal(1, receiver.CallCount);
+        Assert.Equal(5, receiver.LastValue);
+    }
+
+    [Fact]
+    public void CopyRuntimeStateTo_FailedTargetCopy_KeepsSourceRegistrationToken()
+    {
+        var source = new OfflineNetworkingService();
+        var target = new ThrowingTransferTarget { ThrowOnRegisterLobbyDataKey = true };
+        var receiver = new RpcReceiver();
+
+        source.Initialize();
+        source.CreateLobby();
+        var registration = source.RegisterNetworkObject(receiver, TestModId);
+        source.RegisterLobbyDataKey("round");
+
+        var exception = Assert.Throws<InvalidOperationException>(() => ((INetworkingServiceStateTransfer)source).CopyRuntimeStateTo(target));
+
+        Assert.Equal("target lobby key failed", exception.Message);
+        Assert.Equal(1, target.RegisterNetworkObjectCalls);
+        Assert.Equal(1, target.DisposedRegistrationCount);
+
+        source.RPC(TestModId, "OnPing", ReliableType.Reliable, 5);
+        Assert.Equal(1, receiver.CallCount);
+        Assert.Equal(5, receiver.LastValue);
+
+        registration.Dispose();
+        source.RPC(TestModId, "OnPing", ReliableType.Reliable, 9);
         Assert.Equal(1, receiver.CallCount);
         Assert.Equal(5, receiver.LastValue);
     }
@@ -825,7 +1109,7 @@ public class OfflineNetworkingServiceTests
     }
 
     [Fact]
-    public void Concurrent_RegisterDeregister_AndDispatch_DoesNotThrow()
+    public async Task Concurrent_RegisterDeregister_AndDispatch_DoesNotThrow()
     {
         var service = new OfflineNetworkingService();
         var receiver = new RpcReceiver();
@@ -857,7 +1141,7 @@ public class OfflineNetworkingServiceTests
                     iteration++;
                 }
             }
-        }, token);
+        });
 
         var dispatchTask = Task.Run(() =>
         {
@@ -872,16 +1156,16 @@ public class OfflineNetworkingServiceTests
                     exceptions.Enqueue(ex);
                 }
             }
-        }, token);
+        });
 
-        Task.WaitAll(registrationTask, dispatchTask);
+        await Task.WhenAll(registrationTask, dispatchTask);
 
         if (exceptions.TryPeek(out var ex))
             Assert.Fail($"Encountered exception during concurrent RPC churn: {ex}");
     }
 
     [Fact]
-    public void Concurrent_ModSecurityRegister_Send_AndShutdownChurn_DoesNotThrow()
+    public async Task Concurrent_ModSecurityRegister_Send_AndShutdownChurn_DoesNotThrow()
     {
         var service = new OfflineNetworkingService();
         var receiver = new RpcReceiver();
@@ -910,7 +1194,7 @@ public class OfflineNetworkingServiceTests
                     exceptions.Enqueue(ex);
                 }
             }
-        }, token);
+        });
 
         var sendTask = Task.Run(() =>
         {
@@ -925,7 +1209,7 @@ public class OfflineNetworkingServiceTests
                     exceptions.Enqueue(ex);
                 }
             }
-        }, token);
+        });
 
         var shutdownTask = Task.Run(() =>
         {
@@ -943,9 +1227,9 @@ public class OfflineNetworkingServiceTests
                     exceptions.Enqueue(ex);
                 }
             }
-        }, token);
+        });
 
-        Task.WaitAll(registerTask, sendTask, shutdownTask);
+        await Task.WhenAll(registerTask, sendTask, shutdownTask);
 
         if (exceptions.TryPeek(out var ex))
             Assert.Fail($"Encountered exception during concurrent crypto/register/shutdown churn: {ex}");
@@ -953,11 +1237,14 @@ public class OfflineNetworkingServiceTests
 
     static int GetRegisteredHandlerCount(OfflineNetworkingService service, uint modId)
     {
-        var rpcs = (Dictionary<uint, Dictionary<string, List<MessageHandler>>>)typeof(OfflineNetworkingService)
+        var rpcs = (IDictionary)typeof(OfflineNetworkingService)
             .GetField("rpcs", BindingFlags.Instance | BindingFlags.NonPublic)!
             .GetValue(service)!;
-        if (!rpcs.TryGetValue(modId, out var methods)) return 0;
-        return methods.Sum(entry => entry.Value.Count);
+        if (!rpcs.Contains(modId)) return 0;
+        var methods = (IDictionary)rpcs[modId]!;
+        var count = 0;
+        foreach (DictionaryEntry entry in methods) count += ((ICollection)entry.Value!).Count;
+        return count;
     }
 
     static bool IsLobbyDataKeyRegistered(OfflineNetworkingService service, string key)
@@ -974,5 +1261,38 @@ public class OfflineNetworkingServiceTests
             .GetField("playerKeys", BindingFlags.Instance | BindingFlags.NonPublic)!
             .GetValue(service)!;
         return playerKeys.Contains(key);
+    }
+
+    static Dictionary<uint, RSAParameters> GetModPublicKeys(OfflineNetworkingService service)
+    {
+        return (Dictionary<uint, RSAParameters>)typeof(OfflineNetworkingService)
+            .GetField("modPublicKeys", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(service)!;
+    }
+
+    static void ResetOfflineLogThrottleState()
+    {
+        SetOfflineStaticField("lastLogFallbackUtc", DateTime.MinValue);
+        SetOfflineStaticField("suppressedLogFallbackCount", 0);
+        SetOfflineStaticField("lastDeserializeFailureUtc", DateTime.MinValue);
+        SetOfflineStaticField("suppressedDeserializeFailureCount", 0);
+        GetOfflineStaticField<Dictionary<string, DateTime>>("lastExceptionLogByKey").Clear();
+        GetOfflineStaticField<Dictionary<string, int>>("suppressedExceptionLogByKey").Clear();
+        OfflineNetworkingService.UtcNow = () => DateTime.UtcNow;
+    }
+
+    static void InvokeOfflineStatic(string name, params object[] args)
+    {
+        typeof(OfflineNetworkingService).GetMethod(name, BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, args);
+    }
+
+    static T GetOfflineStaticField<T>(string name)
+    {
+        return (T)typeof(OfflineNetworkingService).GetField(name, BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
+    }
+
+    static void SetOfflineStaticField<T>(string name, T value)
+    {
+        typeof(OfflineNetworkingService).GetField(name, BindingFlags.Static | BindingFlags.NonPublic)!.SetValue(null, value);
     }
 }

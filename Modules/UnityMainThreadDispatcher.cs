@@ -1,9 +1,9 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Threading;
 using UnityEngine;
+using Stopwatch = System.Diagnostics.Stopwatch;
 
 namespace NetworkingLibrary.Modules
 {
@@ -58,7 +58,7 @@ namespace NetworkingLibrary.Modules
 
         public static UnityMainThreadDispatcher Instance()
         {
-            if (instance != null) return instance;
+            if (!ReferenceEquals(instance, null)) return instance;
 
             if (IsMainThread() || CanCaptureMainThreadFromCurrentContext())
             {
@@ -67,8 +67,8 @@ namespace NetworkingLibrary.Modules
             }
 
             QueueCreateRequest();
-            if (WaitForInstanceFromBackgroundThread() && instance != null) return instance;
-            if (instance != null) return instance;
+            if (WaitForInstanceFromBackgroundThread() && !ReferenceEquals(instance, null)) return instance;
+            if (!ReferenceEquals(instance, null)) return instance;
 
             throw new InvalidOperationException("UnityMainThreadDispatcher.Instance() was called from a non-main thread before the main thread could create the dispatcher.");
         }
@@ -121,7 +121,7 @@ namespace NetworkingLibrary.Modules
 
             lock (instanceLock)
             {
-                if (instance != null) return instance;
+                if (!ReferenceEquals(instance, null)) return instance;
 
                 instance = CreateInstanceOnMainThreadFactory();
                 instanceReady.Set();
@@ -153,8 +153,15 @@ namespace NetworkingLibrary.Modules
                 if (!IsMainThread()) return;
             }
 
-            if (Interlocked.Exchange(ref createRequestQueued, 0) == 1 && instance == null)
-                EnsureInstanceOnMainThread();
+            if (Interlocked.Exchange(ref createRequestQueued, 0) == 1 && ReferenceEquals(instance, null))
+            {
+                try { EnsureInstanceOnMainThread(); }
+                catch
+                {
+                    if (ReferenceEquals(instance, null)) QueueCreateRequest();
+                    throw;
+                }
+            }
         }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
@@ -166,7 +173,7 @@ namespace NetworkingLibrary.Modules
 
             lock (instanceLock)
             {
-                if (instance == null)
+                if (ReferenceEquals(instance, null))
                 {
                     instance = this;
                     instanceReady.Set();
@@ -174,7 +181,32 @@ namespace NetworkingLibrary.Modules
                     return;
                 }
 
-                if (instance != this) Destroy(gameObject);
+                if (instance != this)
+                {
+                    var canDestroyWholeObject = true;
+                    var components = gameObject.GetComponents<Component>();
+                    for (var i = 0; i < components.Length; i++)
+                    {
+                        var component = components[i];
+                        if (component == null || component is Transform || component == this) continue;
+                        canDestroyWholeObject = false;
+                        break;
+                    }
+
+                    var target = canDestroyWholeObject ? (UnityEngine.Object)gameObject : this;
+                    if (Application.isPlaying) Destroy(target);
+                    else DestroyImmediate(target);
+                }
+            }
+        }
+
+        void OnDestroy()
+        {
+            lock (instanceLock)
+            {
+                if (!ReferenceEquals(instance, this)) return;
+                instance = null;
+                instanceReady.Reset();
             }
         }
 
@@ -266,7 +298,7 @@ namespace NetworkingLibrary.Modules
 
         static EnqueueRejectionInfo CreateDelayedDispatchUnavailableRejection(string reason)
         {
-            var behavior = QueueOverflowBehaviorProvider?.Invoke() ?? QueueOverflowBehavior.DropOldest;
+            var behavior = ResolveQueueOverflowBehavior();
             var maxDepth = ResolveMaxQueueDepth();
             lock (queue)
                 return EnqueueRejectionInfo.Create(delayed: true, behavior, queue.Count, maxDepth, reason);
@@ -275,7 +307,7 @@ namespace NetworkingLibrary.Modules
         static bool TryEnqueueBounded(Action action, bool delayed, out EnqueueRejectionInfo? rejection)
         {
             var maxDepth = ResolveMaxQueueDepth();
-            var behavior = QueueOverflowBehaviorProvider?.Invoke() ?? QueueOverflowBehavior.DropOldest;
+            var behavior = ResolveQueueOverflowBehavior();
             rejection = null;
             lock (queue)
             {
@@ -371,7 +403,7 @@ namespace NetworkingLibrary.Modules
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[UnityMainThreadDispatcher] Delayed enqueue rejection observer failed. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
+                LogWarningOrTrace($"[UnityMainThreadDispatcher] Delayed enqueue rejection observer failed. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
             }
         }
 
@@ -388,9 +420,42 @@ namespace NetworkingLibrary.Modules
 
         static int ResolveMaxQueueDepth()
         {
-            var configured = MaxQueueDepthProvider?.Invoke();
+            var configured = TryResolveProvider(MaxQueueDepthProvider, nameof(MaxQueueDepthProvider));
             if (configured.HasValue && configured.Value > 0) return configured.Value;
             return defaultMaxQueueDepth;
+        }
+
+        static QueueOverflowBehavior ResolveQueueOverflowBehavior()
+        {
+            if (QueueOverflowBehaviorProvider == null) return QueueOverflowBehavior.DropOldest;
+            try { return QueueOverflowBehaviorProvider(); }
+            catch (Exception ex)
+            {
+                LogWarningOrTrace($"[UnityMainThreadDispatcher] {nameof(QueueOverflowBehaviorProvider)} failed. Exception: {ex.GetType().Name}: {ex.Message}.");
+                return QueueOverflowBehavior.DropOldest;
+            }
+        }
+
+        static int? TryResolveProvider(Func<int?>? provider, string name)
+        {
+            if (provider == null) return null;
+            try { return provider(); }
+            catch (Exception ex)
+            {
+                LogWarningOrTrace($"[UnityMainThreadDispatcher] {name} failed. Exception: {ex.GetType().Name}: {ex.Message}.");
+                return null;
+            }
+        }
+
+        static double? TryResolveProvider(Func<double?>? provider, string name)
+        {
+            if (provider == null) return null;
+            try { return provider(); }
+            catch (Exception ex)
+            {
+                LogWarningOrTrace($"[UnityMainThreadDispatcher] {name} failed. Exception: {ex.GetType().Name}: {ex.Message}.");
+                return null;
+            }
         }
 
         static void EmitOverflowWarning(string message)
@@ -400,7 +465,7 @@ namespace NetworkingLibrary.Modules
             {
                 nowTicks = DateTime.UtcNow.Ticks;
                 var previousTicks = Interlocked.Read(ref lastOverflowWarningTicks);
-                if (previousTicks != 0 && new TimeSpan(nowTicks - previousTicks) < overflowWarningCooldown)
+                if (IsWarningCooldownActive(nowTicks, previousTicks))
                 {
                     Interlocked.Increment(ref suppressedOverflowWarnings);
                     return;
@@ -428,7 +493,7 @@ namespace NetworkingLibrary.Modules
             while (true)
             {
                 var previousTicks = Interlocked.Read(ref lastOverflowLoggerFailureTicks);
-                if (previousTicks != 0 && new TimeSpan(nowTicks - previousTicks) < overflowWarningCooldown)
+                if (IsWarningCooldownActive(nowTicks, previousTicks))
                 {
                     Interlocked.Increment(ref suppressedOverflowLoggerFailures);
                     return;
@@ -438,7 +503,7 @@ namespace NetworkingLibrary.Modules
             }
             var suppressed = Interlocked.Exchange(ref suppressedOverflowLoggerFailures, 0);
             var suppressedSuffix = suppressed > 0 ? $" Suppressed {suppressed} similar logger failures." : string.Empty;
-            Debug.LogWarning($"[UnityMainThreadDispatcher] Failed to write overflow warning. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {originalMessage}.{suppressedSuffix}");
+            LogWarningOrTrace($"[UnityMainThreadDispatcher] Failed to write overflow warning. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {originalMessage}.{suppressedSuffix}");
         }
 
         void Update()
@@ -466,21 +531,21 @@ namespace NetworkingLibrary.Modules
 
         static int ResolveMaxActionsPerFrame()
         {
-            var configured = MaxActionsPerFrameProvider?.Invoke();
+            var configured = TryResolveProvider(MaxActionsPerFrameProvider, nameof(MaxActionsPerFrameProvider));
             if (configured.HasValue && configured.Value > 0) return configured.Value;
             return defaultMaxActionsPerFrame;
         }
 
         static double ResolveMaxFrameWorkMilliseconds()
         {
-            var configured = MaxFrameWorkMillisecondsProvider?.Invoke();
+            var configured = TryResolveProvider(MaxFrameWorkMillisecondsProvider, nameof(MaxFrameWorkMillisecondsProvider));
             if (configured.HasValue && configured.Value > 0d) return configured.Value;
             return defaultMaxFrameWorkMilliseconds;
         }
 
         static int ResolveBacklogWarningFrameThreshold()
         {
-            var configured = BacklogWarningFrameThresholdProvider?.Invoke();
+            var configured = TryResolveProvider(BacklogWarningFrameThresholdProvider, nameof(BacklogWarningFrameThresholdProvider));
             if (configured.HasValue && configured.Value > 0) return configured.Value;
             return defaultBacklogWarningFrameThreshold;
         }
@@ -507,7 +572,7 @@ namespace NetworkingLibrary.Modules
             {
                 var nowTicks = DateTime.UtcNow.Ticks;
                 var previousTicks = Interlocked.Read(ref lastBacklogWarningTicks);
-                if (previousTicks != 0 && new TimeSpan(nowTicks - previousTicks) < overflowWarningCooldown)
+                if (IsWarningCooldownActive(nowTicks, previousTicks))
                 {
                     Interlocked.Increment(ref suppressedBacklogWarnings);
                     return;
@@ -525,7 +590,7 @@ namespace NetworkingLibrary.Modules
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[UnityMainThreadDispatcher] Failed to write backlog warning. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
+                LogWarningOrTrace($"[UnityMainThreadDispatcher] Failed to write backlog warning. Exception: {ex.GetType().Name}: {ex.Message}. Original message: {message}");
             }
         }
 
@@ -535,7 +600,7 @@ namespace NetworkingLibrary.Modules
             {
                 var nowTicks = DateTime.UtcNow.Ticks;
                 var previousTicks = Interlocked.Read(ref lastActionErrorLogTicks);
-                if (previousTicks != 0 && new TimeSpan(nowTicks - previousTicks) < overflowWarningCooldown)
+                if (IsWarningCooldownActive(nowTicks, previousTicks))
                 {
                     Interlocked.Increment(ref suppressedActionErrorLogs);
                     return;
@@ -548,10 +613,27 @@ namespace NetworkingLibrary.Modules
                     if (suppressed > 0) message = $"{message} Suppressed {suppressed} similar action exceptions.";
                     Interlocked.Increment(ref emittedActionErrorLogCountForTests);
                     Volatile.Write(ref lastActionErrorMessageForTests, message);
-                    Debug.LogError(message);
+                    LogErrorOrTrace(message);
                     return;
                 }
             }
+        }
+
+        static void LogWarningOrTrace(string message)
+        {
+            try { Debug.LogWarning(message); }
+            catch { System.Diagnostics.Trace.TraceWarning(message); }
+        }
+
+        static bool IsWarningCooldownActive(long nowTicks, long previousTicks)
+        {
+            return previousTicks != 0 && nowTicks >= previousTicks && new TimeSpan(nowTicks - previousTicks) < overflowWarningCooldown;
+        }
+
+        static void LogErrorOrTrace(string message)
+        {
+            try { Debug.LogError(message); }
+            catch { System.Diagnostics.Trace.TraceError(message); }
         }
 
         internal static class TestHooks

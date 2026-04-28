@@ -1,3 +1,4 @@
+using System;
 using NetworkingLibrary.Modules;
 using Xunit;
 
@@ -11,6 +12,19 @@ public class ModIdTests
         var modId = ModId.FromGuid("123e4567-e89b-12d3-a456-426614174000");
 
         Assert.Equal(3702665787u, modId);
+    }
+
+    [Fact]
+    public void FromGuid_Legacy_AcceptsBepInExPluginIds()
+    {
+        Assert.Equal(2304901171u, ModId.FromGuid("off_grid.PEAKChoice"));
+        Assert.Equal(ModId.FromGuid("off_grid.PEAKChoice"), ModId.FromGuid("OFF_GRID.PEAKCHOICE"));
+    }
+
+    [Fact]
+    public void FromGuid_Legacy_TrimsWhitespace_BeforeHashing()
+    {
+        Assert.Equal(ModId.FromGuid("off_grid.PEAKChoice"), ModId.FromGuid("  off_grid.PEAKChoice  "));
     }
 
     [Fact]

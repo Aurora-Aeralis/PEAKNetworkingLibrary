@@ -18,13 +18,13 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '9.0.x'
+          dotnet-version: '8.0.x'
 
       - name: Restore
         run: dotnet restore NetworkingLibrary.sln
 
       - name: Pack
-        run: dotnet pack NetworkingLibrary.csproj -c Release --no-restore -p:IsPackable=true
+        run: dotnet pack NetworkingLibrary.csproj -c Release --no-restore -p:IsPackable=true -p:ThunderstorePackable=false
 
       - name: Validate NuGet metadata
         shell: bash
@@ -42,3 +42,4 @@ jobs:
           echo "$NUSPEC_CONTENT" | grep -q '<authors>DAaCollective</authors>'
           echo "$NUSPEC_CONTENT" | grep -q '<license type="expression">LGPL-3.0-or-later</license>'
           echo "$NUSPEC_CONTENT" | grep -q '<description>Networking library for mods using Steam instead of PUN.</description>'
+          echo "$NUSPEC_CONTENT" | grep -q '<tags>.*PEAK.*</tags>'
